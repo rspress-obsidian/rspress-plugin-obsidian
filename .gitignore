@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+doc_build/
+.rspress/
+.tsup/
+
+# Test / tooling artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Obsidian sync scratch
+.obsidian-rspress-sync-tmp-*
+
+# Editor / OS
+.DS_Store
+*.log
+
+# Local env
+.env
+.env.local

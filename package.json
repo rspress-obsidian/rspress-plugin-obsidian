@@ -1,0 +1,146 @@
+{
+	"name": "rspress-plugin-obsidian",
+	"version": "1.0.0",
+	"description": "Publish an Obsidian vault with Rspress: wikilinks, backlinks, callouts, transclusion, Dataview, daily notes (markdown); canvas; graph view.",
+	"type": "module",
+	"license": "MIT",
+	"author": "Jacob Valor <jacob-programmer@tuta.io> (https://github.com/Jacob-Valor)",
+	"packageManager": "bun@1.3.14",
+	"sideEffects": [
+		"*.css"
+	],
+	"files": [
+		"dist",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"engines": {
+		"node": ">=22.14.0",
+		"bun": ">=1.3.0"
+	},
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		},
+		"./markdown": {
+			"types": "./dist/markdown.d.ts",
+			"import": "./dist/markdown.js",
+			"require": "./dist/markdown.cjs"
+		},
+		"./canvas": {
+			"types": "./dist/canvas.d.ts",
+			"import": "./dist/canvas.js",
+			"require": "./dist/canvas.cjs"
+		},
+		"./graph": {
+			"types": "./dist/graph.d.ts",
+			"import": "./dist/graph.js",
+			"require": "./dist/graph.cjs"
+		},
+		"./graph/runtime/GraphPanel": {
+			"types": "./dist/graph/runtime/GraphPanel.d.ts",
+			"import": "./dist/graph/runtime/GraphPanel.js"
+		},
+		"./graph/runtime/GraphSidebar": {
+			"types": "./dist/graph/runtime/GraphSidebar.d.ts",
+			"import": "./dist/graph/runtime/GraphSidebar.js"
+		},
+		"./styles.css": "./dist/styles.css",
+		"./markdown/styles.css": "./dist/markdown.css",
+		"./canvas/styles.css": "./dist/canvas.css",
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsup --tsconfig tsconfig.build.json",
+		"dev": "tsup --watch --tsconfig tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check src/ scripts/ test/",
+		"lint:fix": "biome check --write src/ scripts/ test/",
+		"format": "biome format --write src/ scripts/ test/",
+		"format:check": "biome format src/ scripts/ test/",
+		"test": "bun test",
+		"test:coverage": "bun test --coverage",
+		"test:e2e": "playwright test --config test/e2e/playwright.config.ts",
+		"docs:dev": "rspress dev",
+		"docs:build": "rspress build",
+		"obsidian:sync": "bun scripts/obsidian-sync.ts",
+		"bench:graph": "bun scripts/bench-graph-build.ts",
+		"generate-icons": "bun scripts/generate-icons.ts",
+		"prepublishOnly": "bun run lint && bun run typecheck && bun run test && bun run build",
+		"release": "semantic-release --no-ci",
+		"release:dry": "semantic-release --no-ci --dry-run",
+		"postrelease": "git fetch origin main:refs/remotes/origin/main --no-tags || true"
+	},
+	"dependencies": {
+		"fast-glob": "^3.3.3",
+		"github-slugger": "^2.0.0",
+		"gray-matter": "^4.0.3",
+		"katex": "^0.18.4",
+		"marked": "^18.0.9",
+		"mdast-util-from-markdown": "^2.0.3",
+		"mermaid": "^11.16.1",
+		"rehype-stringify": "^10.0.1",
+		"remark-gfm": "^4.0.1",
+		"remark-parse": "^11.0.0",
+		"remark-rehype": "^11.1.2",
+		"unified": "^11.0.5",
+		"unist-util-visit": "^5.1.0"
+	},
+	"peerDependencies": {
+		"@rspress/core": "^2.0.12",
+		"react": "^18.0.0 || ^19.0.0",
+		"react-dom": "^18.0.0 || ^19.0.0",
+		"react-force-graph-2d": "^1.29.1"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		},
+		"react-dom": {
+			"optional": true
+		},
+		"react-force-graph-2d": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.8",
+		"@happy-dom/global-registrator": "^20.11.2",
+		"@playwright/test": "^1.60.0",
+		"@semantic-release/changelog": "^6.0.3",
+		"@semantic-release/commit-analyzer": "^13.0.1",
+		"@semantic-release/exec": "^7.1.0",
+		"@semantic-release/git": "^10.0.1",
+		"@semantic-release/github": "^12.0.9",
+		"@semantic-release/npm": "^13.1.5",
+		"@semantic-release/release-notes-generator": "^14.1.1",
+		"@testing-library/dom": "^10.4.1",
+		"@testing-library/react": "^16.3.2",
+		"@types/bun": "latest",
+		"@types/react": "^19.2.18",
+		"@types/react-dom": "^19.2.4",
+		"fast-check": "^4.9.0",
+		"happy-dom": "^20.11.2",
+		"isomorphic-dompurify": "^3.14.0",
+		"lightningcss": "^1.33.0",
+		"remark-stringify": "^11.0.0",
+		"rspress-plugin-devkit": "^1.0.0",
+		"semantic-release": "^25.0.9",
+		"serve": "^14.2.6",
+		"tsup": "^8.5.1",
+		"typescript": "^6.0.3",
+		"react-force-graph-2d": "^1.29.1"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/",
+		"provenance": true
+	},
+	"tsconfig": "tsconfig.build.json"
+}

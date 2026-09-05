@@ -1,0 +1,28 @@
+# -------------------------------------------------------------------
+# bunfig.toml — rspress-plugin-obsidian
+# -------------------------------------------------------------------
+
+[install]
+# Cache downloaded packages locally (faster reinstallation after
+# node_modules is cleared, and faster `bun install` in CI)
+cache = true
+# Install peer dependencies automatically (@rspress/core, react, react-dom,
+# react-force-graph-2d are needed for local dev and test to work)
+peer = true
+# Don't error on missing lockfile updates during active development
+frozenLockfile = false
+
+[test]
+# Per-test timeout: 30 seconds — parser/resolver tests involve async FS I/O
+timeout = 30000
+# Stop on first failure — faster feedback when iterating
+bail = true
+# Suppress noisy Bun prelude output from test runner
+quiet = true
+# happy-dom for component tests (graph runtime, canvas embed)
+preload = ["./test/test-setup.ts"]
+
+[debug]
+# Enable frontend debugging — attaches to React DevTools and provides
+# richer error traces for component rendering
+frontend = true

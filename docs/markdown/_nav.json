@@ -1,0 +1,14 @@
+[
+	{
+		"text": "Guide",
+		"link": "/guide/getting-started"
+	},
+	{
+		"text": "Examples",
+		"link": "/guide/examples"
+	},
+	{
+		"text": "API",
+		"link": "/guide/api"
+	}
+]

@@ -1,0 +1,15 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"declaration": true,
+		"emitDeclarationOnly": true,
+		"outDir": "dist",
+		"isolatedModules": true,
+		"allowImportingTsExtensions": true,
+		"ignoreDeprecations": "6.0",
+		"baseUrl": "."
+	},
+	"include": ["src/**/*.ts", "src/**/*.tsx"],
+	"exclude": ["dist", "node_modules", "test", "scripts", "doc_build"]
+}

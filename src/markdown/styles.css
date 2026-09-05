@@ -1,0 +1,652 @@
+/* rspress-plugin-obsidian-wikilink — default stylesheet
+   Import via: enableDefaultStyles: true in pluginObsidianWikiLink()
+   or manually: import 'rspress-plugin-obsidian-wikilink/styles.css'        */
+
+/* ─── Callouts ─────────────────────────────────────────────────────────── */
+
+.callout,
+.rp-callout {
+	--callout-surface: var(--rp-c-bg-soft, #f7f8fa);
+	--callout-border: color-mix(
+		in srgb,
+		var(--callout-color, #77809a) 30%,
+		var(--rp-c-divider-light, #d9deea)
+	);
+	position: relative;
+	width: 100%;
+	margin: 1rem 0;
+	border: 1px solid var(--callout-border);
+	border-left: 4px solid var(--callout-color, #77809a);
+	border-radius: 8px;
+	box-shadow: none;
+	overflow: hidden;
+}
+
+.callout-title,
+.rp-callout__title {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 0.55rem;
+	min-height: 2.35rem;
+	padding: 0.55rem 0.8rem;
+	color: var(--rp-c-text-1, #1f2937);
+	font-size: 0.92rem;
+	font-weight: 700;
+	line-height: 1.4;
+	letter-spacing: 0.01em;
+	text-align: start;
+	background: var(
+		--callout-title-bg,
+		color-mix(
+			in srgb,
+			var(--callout-color, #77809a) 12%,
+			var(--callout-surface)
+		)
+	);
+	border-bottom: 1px solid
+		color-mix(in srgb, var(--callout-color, #77809a) 22%, transparent);
+}
+
+.callout-title::before {
+	width: 1.1rem;
+	height: 1.1rem;
+	flex: 0 0 auto;
+	background-color: var(--callout-color, #77809a);
+	mask-image: var(--callout-icon, none);
+	mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
+	-webkit-mask-image: var(--callout-icon, none);
+	-webkit-mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	content: "";
+}
+
+/* <details> foldable callouts — summary doubles as the title bar */
+details.callout > summary.callout-title {
+	cursor: pointer;
+	list-style: none;
+	user-select: none;
+}
+
+details.callout > summary.callout-title::-webkit-details-marker {
+	display: none;
+}
+
+details.callout > summary.callout-title::after {
+	width: 0.45rem;
+	height: 0.45rem;
+	margin-left: auto;
+	border-right: 1.5px solid currentColor;
+	border-bottom: 1.5px solid currentColor;
+	content: "";
+	transform: rotate(45deg) translateY(-2px);
+	transition: transform 160ms ease;
+}
+
+details.callout[open] > summary.callout-title::after {
+	transform: rotate(225deg) translate(-1px, -2px);
+}
+.callout-content,
+.rp-callout__content {
+	padding: 0.7rem 0.8rem 0.8rem;
+	color: var(--rp-c-text-2, #4b5563);
+	font-size: 0.95rem;
+	line-height: 1.6;
+	text-align: start;
+}
+
+.callout-content > *:first-child,
+.rp-callout__content > *:first-child {
+	margin-top: 0;
+}
+.callout-content > *:last-child,
+.rp-callout__content > *:last-child {
+	margin-bottom: 0;
+}
+
+/* Per-type colour tokens */
+.callout-note {
+	--callout-color: #448aff;
+	--callout-bg: rgba(68, 138, 255, 0.07);
+	--callout-title-bg: rgba(68, 138, 255, 0.12);
+}
+.callout-tip {
+	--callout-color: #00bfa5;
+	--callout-bg: rgba(0, 191, 165, 0.07);
+	--callout-title-bg: rgba(0, 191, 165, 0.12);
+}
+.callout-info {
+	--callout-color: #00b0ff;
+	--callout-bg: rgba(0, 176, 255, 0.07);
+	--callout-title-bg: rgba(0, 176, 255, 0.12);
+}
+.callout-success {
+	--callout-color: #00c853;
+	--callout-bg: rgba(0, 200, 83, 0.07);
+	--callout-title-bg: rgba(0, 200, 83, 0.12);
+}
+.callout-question {
+	--callout-color: #64dd17;
+	--callout-bg: rgba(100, 221, 23, 0.07);
+	--callout-title-bg: rgba(100, 221, 23, 0.12);
+}
+.callout-warning {
+	--callout-color: #ff9100;
+	--callout-bg: rgba(255, 145, 0, 0.07);
+	--callout-title-bg: rgba(255, 145, 0, 0.12);
+}
+.callout-caution {
+	--callout-color: #ff9100;
+	--callout-bg: rgba(255, 145, 0, 0.07);
+	--callout-title-bg: rgba(255, 145, 0, 0.12);
+}
+.callout-danger {
+	--callout-color: #ff1744;
+	--callout-bg: rgba(255, 23, 68, 0.07);
+	--callout-title-bg: rgba(255, 23, 68, 0.12);
+}
+.callout-failure {
+	--callout-color: #ff1744;
+	--callout-bg: rgba(255, 23, 68, 0.07);
+	--callout-title-bg: rgba(255, 23, 68, 0.12);
+}
+.callout-bug {
+	--callout-color: #f50057;
+	--callout-bg: rgba(245, 0, 87, 0.07);
+	--callout-title-bg: rgba(245, 0, 87, 0.12);
+}
+.callout-example {
+	--callout-color: #7c4dff;
+	--callout-bg: rgba(124, 77, 255, 0.07);
+	--callout-title-bg: rgba(124, 77, 255, 0.12);
+}
+.callout-abstract {
+	--callout-color: #00b0ff;
+	--callout-bg: rgba(0, 176, 255, 0.07);
+	--callout-title-bg: rgba(0, 176, 255, 0.12);
+}
+.callout-quote {
+	--callout-color: #9e9e9e;
+	--callout-bg: rgba(158, 158, 158, 0.07);
+	--callout-title-bg: rgba(158, 158, 158, 0.12);
+}
+
+.rp-callout--note {
+	--callout-color: #448aff;
+	--callout-bg: rgba(68, 138, 255, 0.07);
+	--callout-title-bg: rgba(68, 138, 255, 0.12);
+}
+.rp-callout--tip {
+	--callout-color: #00bfa5;
+	--callout-bg: rgba(0, 191, 165, 0.07);
+	--callout-title-bg: rgba(0, 191, 165, 0.12);
+}
+.rp-callout--info {
+	--callout-color: #00b0ff;
+	--callout-bg: rgba(0, 176, 255, 0.07);
+	--callout-title-bg: rgba(0, 176, 255, 0.12);
+}
+.rp-callout--success {
+	--callout-color: #00c853;
+	--callout-bg: rgba(0, 200, 83, 0.07);
+	--callout-title-bg: rgba(0, 200, 83, 0.12);
+}
+.rp-callout--question {
+	--callout-color: #64dd17;
+	--callout-bg: rgba(100, 221, 23, 0.07);
+	--callout-title-bg: rgba(100, 221, 23, 0.12);
+}
+.rp-callout--warning,
+.rp-callout--caution {
+	--callout-color: #ff9100;
+	--callout-bg: rgba(255, 145, 0, 0.07);
+	--callout-title-bg: rgba(255, 145, 0, 0.12);
+}
+.rp-callout--danger,
+.rp-callout--failure {
+	--callout-color: #ff1744;
+	--callout-bg: rgba(255, 23, 68, 0.07);
+	--callout-title-bg: rgba(255, 23, 68, 0.12);
+}
+.rp-callout--bug {
+	--callout-color: #f50057;
+	--callout-bg: rgba(245, 0, 87, 0.07);
+	--callout-title-bg: rgba(245, 0, 87, 0.12);
+}
+.rp-callout--example {
+	--callout-color: #7c4dff;
+	--callout-bg: rgba(124, 77, 255, 0.07);
+	--callout-title-bg: rgba(124, 77, 255, 0.12);
+}
+.rp-callout--abstract {
+	--callout-color: #00b0ff;
+	--callout-bg: rgba(0, 176, 255, 0.07);
+	--callout-title-bg: rgba(0, 176, 255, 0.12);
+}
+.rp-callout__title::before {
+	width: 1.1rem;
+	height: 1.1rem;
+	flex: 0 0 auto;
+	background-color: var(--callout-color, #77809a);
+	mask-image: var(--callout-icon, none);
+	mask-size: contain;
+	mask-repeat: no-repeat;
+	mask-position: center;
+	-webkit-mask-image: var(--callout-icon, none);
+	-webkit-mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	content: "";
+}
+
+/* Rspress ships its own callout component. Match it to the plugin cards. */
+.rp-callout.rp-callout {
+	margin: 1rem 0;
+	padding: 0;
+	border: 1px solid var(--callout-border);
+	border-left: 4px solid var(--callout-color, #77809a);
+	border-radius: 8px;
+	box-shadow: none;
+	overflow: hidden;
+}
+
+.rp-callout.rp-callout .rp-callout__title {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 0.55rem;
+	min-height: 2.35rem;
+	padding: 0.55rem 0.8rem;
+	font-size: 0.92rem;
+	font-weight: 700;
+	line-height: 1.4;
+	letter-spacing: 0.01em;
+	text-align: start;
+	background: var(--callout-title-bg, var(--callout-surface));
+	border-bottom: 1px solid
+		color-mix(in srgb, var(--callout-color, #77809a) 22%, transparent);
+}
+
+.rp-callout.rp-callout .rp-callout__content {
+	padding: 0.7rem 0.8rem 0.8rem;
+	color: var(--rp-c-text-2, #4b5563);
+	font-size: 0.95rem;
+	line-height: 1.6;
+	text-align: start;
+}
+
+/* ─── Dark mode ─────────────────────────────────────────────────────────── */
+
+html.dark .callout,
+html.dark .rp-callout {
+	--callout-surface: var(--rp-c-bg-soft, #171a21);
+	--callout-bg: color-mix(
+		in srgb,
+		var(--callout-color, #9aa4b2) 12%,
+		var(--callout-surface)
+	);
+	--callout-title-bg: color-mix(
+		in srgb,
+		var(--callout-color, #9aa4b2) 20%,
+		var(--callout-surface)
+	);
+	--callout-border: color-mix(
+		in srgb,
+		var(--callout-color, #9aa4b2) 38%,
+		var(--rp-c-divider, #303642)
+	);
+}
+/* ─── Backlinks panel ───────────────────────────────────────────────────── */
+
+.obsidian-backlinks {
+	margin-top: 3rem;
+	/* Keep the panel clear of the page footer and any footnote sections
+	   that render after it. */
+	margin-bottom: 2.5rem;
+	padding-top: 1.5rem;
+	border-top: 1px solid var(--rp-c-divider, #e2e2e2);
+}
+
+.obsidian-backlinks h2 {
+	font-size: 0.9rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--rp-c-text-2, #888);
+	margin-bottom: 0.75rem;
+}
+
+.obsidian-backlinks ul {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.obsidian-backlinks li {
+	margin: 0;
+}
+
+.obsidian-backlinks li:not(:first-child) {
+	margin-top: 0;
+}
+
+.obsidian-backlinks a {
+	display: inline-block;
+	padding: 0.25rem 0.75rem;
+	border-radius: 999px;
+	font-size: 0.85rem;
+	line-height: 1.5;
+	background: var(--rp-c-bg-soft, #f5f5f5);
+	color: var(--rp-c-brand, #448aff);
+	text-decoration: none;
+	transition: background 0.15s;
+}
+
+.obsidian-backlinks a:hover {
+	background: var(--rp-c-bg-mute, #ebebeb);
+}
+
+/* ─── Transclusion wrapper ──────────────────────────────────────────────── */
+
+.obsidian-transclusion {
+	margin: 1.25rem 0;
+	border: 1px solid
+		color-mix(
+			in srgb,
+			var(--rp-c-brand, #448aff) 28%,
+			var(--rp-c-divider, #d9deea)
+		);
+	border-left: 3px solid var(--rp-c-brand, #448aff);
+	border-radius: 12px;
+	background: color-mix(
+		in srgb,
+		var(--rp-c-brand, #448aff) 4%,
+		var(--rp-c-bg-soft, #f9f9f9)
+	);
+	box-shadow:
+		0 1px 2px rgb(15 23 42 / 5%),
+		0 8px 24px rgb(15 23 42 / 5%);
+	overflow: hidden;
+	font-size: 1rem;
+	line-height: 1.75;
+}
+
+.obsidian-transclusion > h1,
+.obsidian-transclusion > h2,
+.obsidian-transclusion > h3 {
+	margin: 0;
+	padding: 1rem 1.1rem 0.75rem;
+	border-bottom: 1px solid
+		color-mix(in srgb, var(--rp-c-brand, #448aff) 18%, transparent);
+	font-size: 1.25rem;
+	line-height: 1.35;
+}
+
+.obsidian-transclusion > p {
+	margin: 0.8rem 1.1rem;
+}
+
+.obsidian-transclusion > .rp-table-scroll-container {
+	margin: 0.75rem;
+	border-radius: 8px;
+}
+
+.obsidian-transclusion > *:first-child {
+	margin-top: 0;
+}
+
+.obsidian-transclusion > *:last-child {
+	margin-bottom: 0.75rem;
+}
+
+/* ─── Embed anchor (non-media ![[Page]]) ────────────────────────────────── */
+
+a.obsidian-embed {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25em;
+	padding: 0.15rem 0.5rem;
+	border-radius: 4px;
+	font-size: 0.9em;
+	background: var(--rp-c-bg-soft, #f5f5f5);
+	color: var(--rp-c-brand, #448aff);
+	text-decoration: none;
+	border: 1px solid var(--rp-c-divider, #e2e2e2);
+}
+
+a.obsidian-embed::before {
+	content: "↗";
+	font-size: 0.8em;
+	opacity: 0.6;
+}
+
+a.obsidian-embed:hover {
+	background: var(--rp-c-bg-mute, #ebebeb);
+}
+
+/* ── CALL OUT ICONS (generated) ── */
+.callout-note .callout-title::before,
+.rp-callout--note .rp-callout__title::before {
+	content: "✎";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-tip .callout-title::before,
+.rp-callout--tip .rp-callout__title::before {
+	content: "✦";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-info .callout-title::before,
+.rp-callout--info .rp-callout__title::before {
+	content: "i";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-success .callout-title::before,
+.rp-callout--success .rp-callout__title::before {
+	content: "✓";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-question .callout-title::before,
+.rp-callout--question .rp-callout__title::before {
+	content: "?";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-warning .callout-title::before,
+.rp-callout--warning .rp-callout__title::before {
+	content: "!";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-caution .callout-title::before,
+.rp-callout--caution .rp-callout__title::before {
+	content: "!";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-danger .callout-title::before,
+.rp-callout--danger .rp-callout__title::before {
+	content: "!";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-failure .callout-title::before,
+.rp-callout--failure .rp-callout__title::before {
+	content: "×";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-bug .callout-title::before,
+.rp-callout--bug .rp-callout__title::before {
+	content: "⌁";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-example .callout-title::before,
+.rp-callout--example .rp-callout__title::before {
+	content: "◇";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-abstract .callout-title::before,
+.rp-callout--abstract .rp-callout__title::before {
+	content: "≡";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+.callout-quote .callout-title::before,
+.rp-callout--quote .rp-callout__title::before {
+	content: "❝";
+	background: none;
+	color: var(--callout-color, currentColor);
+	font-size: 1rem;
+	font-weight: 800;
+	line-height: 1.1rem;
+	text-align: center;
+	mask: none;
+	-webkit-mask: none;
+}
+/* ── END CALL OUT ICONS ── */
+
+/* ─── Static Dataview ───────────────────────────────────────────────────── */
+
+.dataview {
+	margin: 1rem 0;
+}
+
+.dataview-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.dataview-table th,
+.dataview-table td {
+	padding: 0.45rem 0.65rem;
+	border: 1px solid var(--rp-c-divider-light, #d9deea);
+	text-align: left;
+	vertical-align: top;
+}
+
+.dataview-table th {
+	background: var(--rp-c-bg-soft, #f7f8fa);
+	font-weight: 600;
+}
+
+.dataview-list,
+.dataview-task-list,
+.dataview-calendar ul {
+	padding-left: 1.5rem;
+}
+
+.dataview-task-list input[type="checkbox"] {
+	margin-right: 0.4rem;
+}
+
+.dataview-inline {
+	display: inline;
+}
+
+/* ─── Daily Notes ───────────────────────────────────────────────────────── */
+
+.obsidian-daily-navigation {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin: 1rem 0;
+	padding: 0.6rem 0.8rem;
+	border: 1px solid var(--rp-c-divider-light, #d9deea);
+	border-radius: 6px;
+	background: var(--rp-c-bg-soft, #f7f8fa);
+}
+
+.daily-notes-current {
+	font-weight: 600;
+}
+
+.daily-notes-placeholder {
+	display: inline-block;
+	min-width: 4rem;
+}
