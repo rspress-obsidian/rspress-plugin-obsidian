@@ -1,11 +1,6 @@
 import type { DailyNoteConfig } from "./daily-notes.ts";
 import { parseDailyNoteDate } from "./daily-notes.ts";
-import type {
-	ContentIndex,
-	ContentPage,
-	DataviewListItem,
-	DataviewTask,
-} from "./types.ts";
+import type { ContentIndex, ContentPage, DataviewListItem, DataviewTask } from "./types.ts";
 import { encodeRoutePath, normalizeFilePathKey } from "./utils.ts";
 
 interface DataviewLink {
@@ -44,8 +39,7 @@ interface QueryResult {
 }
 
 const INLINE_FIELD_PATTERN = /[[(]([^\]():]+?)::\s*([^\])\n]+?)[\])]/g;
-const STANDALONE_FIELD_PATTERN =
-	/^\s*(?:[-*+]\s+|\d+[.)]\s+)?([^:\n]+?)::\s*(.*?)\s*$/;
+const STANDALONE_FIELD_PATTERN = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?([^:\n]+?)::\s*(.*?)\s*$/;
 const TASK_PATTERN = /^(\s*)([-*+]|\d+[.)])\s+\[([ xX])\]\s+(.*)$/;
 const LIST_PATTERN = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 
@@ -169,9 +163,7 @@ function parseQuery(source: string): QueryPlan {
 	const kind = headerMatch[1]?.toUpperCase() as QueryPlan["kind"];
 	const headerBody = headerMatch[2]?.trim() ?? "";
 	const withoutId = /^WITHOUT\s+ID\b/i.test(headerBody);
-	const fieldBody = withoutId
-		? headerBody.replace(/^WITHOUT\s+ID\b/i, "").trim()
-		: headerBody;
+	const fieldBody = withoutId ? headerBody.replace(/^WITHOUT\s+ID\b/i, "").trim() : headerBody;
 	const fields =
 		kind === "TABLE" || kind === "CALENDAR"
 			? parseFields(fieldBody)
@@ -190,8 +182,7 @@ function parseQuery(source: string): QueryPlan {
 	for (const line of lines) {
 		const from = /^FROM\s+(.+)$/i.exec(line);
 		if (from) {
-			if (plan.source)
-				throw new Error("A Dataview query can contain only one FROM clause.");
+			if (plan.source) throw new Error("A Dataview query can contain only one FROM clause.");
 			plan.source = from[1]?.trim();
 			continue;
 		}
@@ -256,15 +247,11 @@ function executeQuery(
 	dailyConfig?: DailyNoteConfig,
 ): QueryRow[] {
 	let rows =
-		plan.kind === "TASK"
-			? createTaskRows(index, dailyConfig)
-			: createPageRows(index, dailyConfig);
-	if (plan.source)
-		rows = rows.filter((row) => matchesSource(plan.source ?? "", row));
+		plan.kind === "TASK" ? createTaskRows(index, dailyConfig) : createPageRows(index, dailyConfig);
+	if (plan.source) rows = rows.filter((row) => matchesSource(plan.source ?? "", row));
 	for (const flatten of plan.flatten) {
 		const next: QueryRow[] = [];
-		const defaultAlias =
-			flatten.expression.split(".").at(-1) ?? flatten.expression;
+		const defaultAlias = flatten.expression.split(".").at(-1) ?? flatten.expression;
 		const alias = flatten.alias ?? defaultAlias;
 		for (const row of rows) {
 			const value = evaluateExpression(flatten.expression, row, index);
@@ -282,9 +269,7 @@ function executeQuery(
 		rows = next;
 	}
 	for (const expression of plan.where) {
-		rows = rows.filter((row) =>
-			Boolean(evaluateExpression(expression, row, index)),
-		);
+		rows = rows.filter((row) => Boolean(evaluateExpression(expression, row, index)));
 	}
 	if (plan.groupBy) {
 		const grouped = new Map<string, QueryRow[]>();
@@ -326,17 +311,11 @@ function executeQuery(
 	return typeof plan.limit === "number" ? rows.slice(0, plan.limit) : rows;
 }
 
-function createPageRows(
-	index: ContentIndex,
-	dailyConfig?: DailyNoteConfig,
-): QueryRow[] {
+function createPageRows(index: ContentIndex, dailyConfig?: DailyNoteConfig): QueryRow[] {
 	return index.pages.map((page) => createPageRow(page, index, dailyConfig));
 }
 
-function createTaskRows(
-	index: ContentIndex,
-	dailyConfig?: DailyNoteConfig,
-): QueryRow[] {
+function createTaskRows(index: ContentIndex, dailyConfig?: DailyNoteConfig): QueryRow[] {
 	const rows: QueryRow[] = [];
 	for (const page of index.pages) {
 		for (const task of page.dataviewTasks) {
@@ -371,9 +350,7 @@ function createPageValues(
 ): Record<string, unknown> {
 	const ctime = new Date(page.fileCtimeMs);
 	const mtime = new Date(page.fileMtimeMs);
-	const dailyDate = dailyConfig
-		? parseDailyNoteDate(page.relativePath, dailyConfig)
-		: undefined;
+	const dailyDate = dailyConfig ? parseDailyNoteDate(page.relativePath, dailyConfig) : undefined;
 	const file = {
 		path: page.relativePath,
 		name: page.baseName,
@@ -385,9 +362,7 @@ function createPageValues(
 		link: pageLink(page),
 		tags: page.tags.map((tag) => `#${tag}`),
 		etags: [...page.tags],
-		outlinks: page.wikilinkTargets.map((target) =>
-			linkForTarget(target, index),
-		),
+		outlinks: page.wikilinkTargets.map((target) => linkForTarget(target, index)),
 		inlinks: (index.backlinks.get(page.routePath) ?? []).map((backlink) => ({
 			kind: "link" as const,
 			label: backlink.title,
@@ -412,9 +387,7 @@ function createPageValues(
 
 function matchesSource(source: string, row: QueryRow): boolean {
 	const tokens =
-		source.match(
-			/\(|\)|\bAND\b|\bOR\b|-?#[^\s()]+|-?\[\[[^\]]+\]\]|-?"[^"]+"/gi,
-		) ?? [];
+		source.match(/\(|\)|\bAND\b|\bOR\b|-?#[^\s()]+|-?\[\[[^\]]+\]\]|-?"[^"]+"/gi) ?? [];
 	if (tokens.length === 0) return false;
 	let cursor = 0;
 	const parseOr = (): boolean => {
@@ -443,8 +416,7 @@ function matchesSource(source: string, row: QueryRow): boolean {
 			if (tokens[cursor] === ")") cursor += 1;
 			return value;
 		}
-		if (token.startsWith("-"))
-			return !matchesSourceAtom(token.slice(1), row.page);
+		if (token.startsWith("-")) return !matchesSourceAtom(token.slice(1), row.page);
 		return matchesSourceAtom(token, row.page);
 	};
 	return parseOr();
@@ -456,13 +428,9 @@ function matchesSourceAtom(source: string, page: ContentPage): boolean {
 			(tag) => tag === source.slice(1) || tag.startsWith(`${source.slice(1)}/`),
 		);
 	if (source.startsWith("[[") && source.endsWith("]]"))
-		return page.wikilinkTargets.includes(
-			normalizeFilePathKey(source.slice(2, -2)).toLowerCase(),
-		);
+		return page.wikilinkTargets.includes(normalizeFilePathKey(source.slice(2, -2)).toLowerCase());
 	const folder = stripQuotes(source).replace(/\/$/, "");
-	return (
-		page.filePathKey === folder || page.filePathKey.startsWith(`${folder}/`)
-	);
+	return page.filePathKey === folder || page.filePathKey.startsWith(`${folder}/`);
 }
 
 function renderRows(plan: QueryPlan, rows: QueryRow[]): string {
@@ -484,15 +452,9 @@ function renderRows(plan: QueryPlan, rows: QueryRow[]): string {
 		return `<div class="dataview dataview-calendar"><ul>${rows.map((row) => `<li>${renderValue(plan.fields[0] ? evaluateExpression(plan.fields[0].expression, row, undefined) : null)} — ${renderValue(pageLink(row.page))}</li>`).join("")}</ul></div>`;
 	}
 	const fields =
-		plan.fields.length > 0
-			? plan.fields
-			: [{ expression: "file.link", label: "File" }];
-	const headers = plan.withoutId
-		? fields
-		: [{ expression: "file.link", label: "File" }, ...fields];
-	const head = headers
-		.map((field) => `<th>${escapeHtml(field.label)}</th>`)
-		.join("");
+		plan.fields.length > 0 ? plan.fields : [{ expression: "file.link", label: "File" }];
+	const headers = plan.withoutId ? fields : [{ expression: "file.link", label: "File" }, ...fields];
+	const head = headers.map((field) => `<th>${escapeHtml(field.label)}</th>`).join("");
 	const body = rows
 		.map(
 			(row) =>
@@ -508,11 +470,7 @@ function renderTaskItem(row: QueryRow): string {
 	return `<li><input type="checkbox" disabled${checked} /> ${escapeHtml(task.text)}</li>`;
 }
 
-function evaluateExpression(
-	source: string,
-	row: QueryRow,
-	_index?: ContentIndex,
-): unknown {
+function evaluateExpression(source: string, row: QueryRow, _index?: ContentIndex): unknown {
 	const tokens = tokenizeExpression(source);
 	let cursor = 0;
 	const parseOr = (): unknown => {
@@ -605,8 +563,7 @@ function evaluateExpression(
 		if (token.startsWith('"') || token.startsWith("'"))
 			return token.slice(1, -1).replace(/\\([\\"'])/g, "$1");
 		if (/^\d+(?:\.\d+)?$/.test(token)) return Number(token);
-		if (token.toLowerCase() === "today")
-			return new Date().toISOString().slice(0, 10);
+		if (token.toLowerCase() === "today") return new Date().toISOString().slice(0, 10);
 		if (token.toLowerCase() === "true") return true;
 		if (token.toLowerCase() === "false") return false;
 		if (token.toLowerCase() === "null") return null;
@@ -641,17 +598,13 @@ function evaluateFunction(name: string, args: unknown[]): unknown {
 	if (normalized === "date") return parseDateValue(args[0]);
 	if (normalized === "today") return new Date().toISOString().slice(0, 10);
 	if (normalized === "length")
-		return Array.isArray(args[0]) || typeof args[0] === "string"
-			? args[0].length
-			: 0;
+		return Array.isArray(args[0]) || typeof args[0] === "string" ? args[0].length : 0;
 	if (normalized === "contains")
 		return Array.isArray(args[0])
 			? args[0].some((value) => compareValues(value, args[1]) === 0)
 			: String(args[0] ?? "").includes(String(args[1] ?? ""));
-	if (normalized === "startswith")
-		return String(args[0] ?? "").startsWith(String(args[1] ?? ""));
-	if (normalized === "endswith")
-		return String(args[0] ?? "").endsWith(String(args[1] ?? ""));
+	if (normalized === "startswith") return String(args[0] ?? "").startsWith(String(args[1] ?? ""));
+	if (normalized === "endswith") return String(args[0] ?? "").endsWith(String(args[1] ?? ""));
 	if (normalized === "lower") return String(args[0] ?? "").toLowerCase();
 	if (normalized === "upper") return String(args[0] ?? "").toUpperCase();
 	if (normalized === "round") {
@@ -669,32 +622,22 @@ function evaluateFunction(name: string, args: unknown[]): unknown {
 			new RegExp(String(args[1] ?? ""), "g"),
 			String(args[2] ?? ""),
 		);
-	if (normalized === "split")
-		return String(args[0] ?? "").split(String(args[1] ?? ","));
+	if (normalized === "split") return String(args[0] ?? "").split(String(args[1] ?? ","));
 	if (normalized === "join")
 		return Array.isArray(args[0])
 			? args[0].map(String).join(String(args[1] ?? ", "))
 			: String(args[0] ?? "");
 	if (normalized === "typeof") {
 		if (args[0] instanceof Date) return "date";
-		return Array.isArray(args[0])
-			? "array"
-			: args[0] === null
-				? "null"
-				: typeof args[0];
+		return Array.isArray(args[0]) ? "array" : args[0] === null ? "null" : typeof args[0];
 	}
 	if (normalized === "default") return args[0] == null ? args[1] : args[0];
 	if (normalized === "choice") return args[0] ? args[1] : args[2];
 	if (["sum", "average", "min", "max"].includes(normalized)) {
-		const values = (Array.isArray(args[0]) ? args[0] : args)
-			.map(Number)
-			.filter(Number.isFinite);
-		if (normalized === "sum")
-			return values.reduce((sum, value) => sum + value, 0);
+		const values = (Array.isArray(args[0]) ? args[0] : args).map(Number).filter(Number.isFinite);
+		if (normalized === "sum") return values.reduce((sum, value) => sum + value, 0);
 		if (normalized === "average")
-			return values.length
-				? values.reduce((sum, value) => sum + value, 0) / values.length
-				: null;
+			return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 		if (normalized === "min") return values.length ? Math.min(...values) : null;
 		return values.length ? Math.max(...values) : null;
 	}
@@ -739,8 +682,7 @@ function renderValue(value: unknown): string {
 	if (value == null) return "";
 	if (isDataviewLink(value))
 		return `<a href="${escapeAttribute(value.href)}">${escapeHtml(value.label)}</a>`;
-	if (value instanceof Date)
-		return escapeHtml(value.toISOString().slice(0, 10));
+	if (value instanceof Date) return escapeHtml(value.toISOString().slice(0, 10));
 	if (Array.isArray(value)) return value.map(renderValue).join(", ");
 	if (typeof value === "object") return escapeHtml(JSON.stringify(value));
 	return escapeHtml(String(value));
@@ -761,16 +703,11 @@ function pageLink(page: ContentPage): DataviewLink {
 function linkForTarget(target: string, index: ContentIndex): DataviewLink {
 	const key = normalizeFilePathKey(target).toLowerCase();
 	const page =
-		index.byFilePathKeyCI.get(key)?.[0] ??
-		index.byBaseNameCI.get(key.split("/").pop() ?? key)?.[0];
-	return page
-		? createLink(page)
-		: { kind: "link", label: target, href: `/${target}` };
+		index.byFilePathKeyCI.get(key)?.[0] ?? index.byBaseNameCI.get(key.split("/").pop() ?? key)?.[0];
+	return page ? createLink(page) : { kind: "link", label: target, href: `/${target}` };
 }
 
-function extractInlineFields(
-	line: string,
-): Array<{ key: string; value: unknown }> {
+function extractInlineFields(line: string): Array<{ key: string; value: unknown }> {
 	const fields: Array<{ key: string; value: unknown }> = [];
 	for (const match of line.matchAll(INLINE_FIELD_PATTERN)) {
 		const key = stripMarkdownMarkup(match[1] ?? "").trim();
@@ -799,8 +736,7 @@ function parseValue(value: string): unknown {
 	if (!trimmed) return "";
 	if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === "true";
 	if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
-	if (/^\d{4}-\d{2}-\d{2}(?:T[^\s]+)?$/.test(trimmed))
-		return parseDateValue(trimmed);
+	if (/^\d{4}-\d{2}-\d{2}(?:T[^\s]+)?$/.test(trimmed)) return parseDateValue(trimmed);
 	if (
 		(trimmed.startsWith("[") && trimmed.endsWith("]")) ||
 		(trimmed.startsWith("(") && trimmed.endsWith(")"))
@@ -883,10 +819,8 @@ function compareValues(left: unknown, right: unknown): number {
 	if (isDataviewLink(right)) return String(left).localeCompare(right.label);
 	const leftDate = left instanceof Date ? left.getTime() : undefined;
 	const rightDate = right instanceof Date ? right.getTime() : undefined;
-	if (leftDate !== undefined && rightDate !== undefined)
-		return leftDate - rightDate;
-	if (typeof left === "number" && typeof right === "number")
-		return left - right;
+	if (leftDate !== undefined && rightDate !== undefined) return leftDate - rightDate;
+	if (typeof left === "number" && typeof right === "number") return left - right;
 	return String(left).localeCompare(String(right), undefined, {
 		numeric: true,
 		sensitivity: "base",
@@ -900,18 +834,11 @@ function stableValue(value: unknown): string {
 }
 
 function isDataviewLink(value: unknown): value is DataviewLink {
-	return Boolean(
-		value &&
-			typeof value === "object" &&
-			(value as DataviewLink).kind === "link",
-	);
+	return Boolean(value && typeof value === "object" && (value as DataviewLink).kind === "link");
 }
 
 function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeAttribute(value: string): string {

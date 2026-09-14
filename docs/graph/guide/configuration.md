@@ -75,7 +75,7 @@ export default function CustomLayout(props) {
 }
 ```
 
-Available color keys: `currentNode`, `currentLabel`, `node`, `nodeHover`, `label`, `labelHover`, `labelShadow`, `link`, `linkHighlight`, `fallbackLinkDim`, `loaderBorder`, `loaderTop`.
+Available color keys: `currentNode`, `currentLabel`, `node`, `nodeHover`, `nodeDimmed`, `label`, `labelHover`, `labelShadow`, `link`, `linkHighlight`, `fallbackLinkDim`, `loaderBorder`, `loaderTop`.
 
 Any unspecified key falls back to the default light or dark palette.
 

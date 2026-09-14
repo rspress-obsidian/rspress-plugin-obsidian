@@ -20,6 +20,23 @@ export interface DailyNotesOptions {
 }
 
 export interface RspressPluginObsidianWikiLinkOptions {
+	/**
+	 * Absolute path to an external Obsidian vault to publish alongside the
+	 * Rspress docs directory. When set, every routable `.md`/`.mdx` file in
+	 * the vault is published as a page under `vaultRoutePrefix`, with the
+	 * full Obsidian pipeline (wikilinks, embeds, callouts, Dataview, daily
+	 * notes, backlinks, tags) applied as if the vault were the docs root.
+	 *
+	 * The vault is indexed separately from the docs root: wikilinks inside
+	 * vault pages resolve against vault files, and wikilinks inside normal
+	 * docs pages are unaffected. Default: unset (docs directory only).
+	 */
+	vaultRoot?: string;
+	/**
+	 * Route prefix for published vault pages. Default: `"/vault"`. Vault
+	 * `Notes/Setup.md` publishes at `{vaultRoutePrefix}/notes/setup`.
+	 */
+	vaultRoutePrefix?: string;
 	/** How to report unresolvable wikilinks. Default: `"error"`. */
 	onBrokenLink?: DiagnosticMode;
 	/** How to report wikilinks that match multiple pages. Default: `"error"`. */
@@ -94,6 +111,10 @@ export interface RspressPluginObsidianWikiLinkOptions {
 	enableDefaultStyles?: boolean;
 }
 export interface NormalizedPluginOptions {
+	/** Resolved vault directory, or `undefined` when vault publishing is off. */
+	vaultRoot?: string;
+	/** Route prefix vault pages publish under. Default: `"/vault"`. */
+	vaultRoutePrefix: string;
 	onBrokenLink: DiagnosticMode;
 	onAmbiguousLink: DiagnosticMode;
 	enableFuzzyMatching: boolean;
@@ -274,11 +295,7 @@ export interface BacklinkRef {
 }
 
 /** Outcome of attempting to resolve a wikilink. */
-export type ResolveStatus =
-	| "ok"
-	| "broken-page"
-	| "broken-anchor"
-	| "ambiguous-page";
+export type ResolveStatus = "ok" | "broken-page" | "broken-anchor" | "ambiguous-page";
 
 /**
  * The resolved form of a wikilink. On success, `href` and `label` are set
@@ -300,10 +317,7 @@ export interface ResolveContext {
 	currentPage: ContentPage;
 	index: ContentIndex;
 	options?: Partial<
-		Pick<
-			NormalizedPluginOptions,
-			"enableFuzzyMatching" | "enableCaseInsensitiveLookup"
-		>
+		Pick<NormalizedPluginOptions, "enableFuzzyMatching" | "enableCaseInsensitiveLookup">
 	>;
 }
 
@@ -313,6 +327,7 @@ export interface ResolveContext {
  * unified pipeline.
  */
 export interface RemarkWikiLinkPluginOptions {
-	getDocsRoot: () => string;
+	getDocsRoot: (filePath?: string) => string;
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>;
 	options: NormalizedPluginOptions;
 }

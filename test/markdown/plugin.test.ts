@@ -14,37 +14,19 @@ import type { NormalizedPluginOptions } from "../../src/markdown/types";
 const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
 const assetsFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/assets");
 const strictFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/strict");
-const headingFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/headings",
-);
+const headingFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/headings");
 const aliasFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/aliases");
 const aliasAmbiguousFixtureRoot = path.resolve(
 	process.cwd(),
 	"test/markdown/fixtures/alias-ambiguous",
 );
-const inlineBlocksFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/inline-blocks",
-);
+const inlineBlocksFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/inline-blocks");
 const tagsFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/tags");
 const setextFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/setext");
-const cssclassesFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/cssclasses",
-);
-const nestedTagsFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/nested-tags",
-);
-const publishFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/publish",
-);
-const complexYamlFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/complex-yaml",
-);
+const cssclassesFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/cssclasses");
+const nestedTagsFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/nested-tags");
+const publishFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/publish");
+const complexYamlFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/complex-yaml");
 const recursiveTransclusionFixtureRoot = path.resolve(
 	process.cwd(),
 	"test/markdown/fixtures/recursive-transclusion",
@@ -75,16 +57,12 @@ const pathCollisionFixtureRoot = path.resolve(
 	process.cwd(),
 	"test/markdown/fixtures/path-collisions",
 );
-const dataviewFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/dataview",
-);
-const dailyNotesFixtureRoot = path.resolve(
-	process.cwd(),
-	"test/markdown/fixtures/daily-notes",
-);
+const dataviewFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/dataview");
+const dailyNotesFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/daily-notes");
 
 const DEFAULT_OPTIONS: NormalizedPluginOptions = {
+	vaultRoot: undefined,
+	vaultRoutePrefix: "/vault",
 	onBrokenLink: "error",
 	onAmbiguousLink: "error",
 	enableFuzzyMatching: false,
@@ -103,10 +81,7 @@ const DEFAULT_OPTIONS: NormalizedPluginOptions = {
 	enableDefaultStyles: false,
 };
 
-function makeProcessor(
-	docsRoot: string,
-	optionOverrides: Partial<NormalizedPluginOptions> = {},
-) {
+function makeProcessor(docsRoot: string, optionOverrides: Partial<NormalizedPluginOptions> = {}) {
 	return unified()
 		.use(remarkParse)
 		.use(remarkWikilink, {
@@ -137,14 +112,12 @@ describe("parseWikiLink", () => {
 	});
 
 	test("parses note-relative page links", () => {
-		expect(parseWikiLink("../shared/Concept", "[[../shared/Concept]]")).toEqual(
-			{
-				raw: "[[../shared/Concept]]",
-				target: "../shared/Concept",
-				isEmbed: false,
-				isCurrentPageReference: false,
-			},
-		);
+		expect(parseWikiLink("../shared/Concept", "[[../shared/Concept]]")).toEqual({
+			raw: "[[../shared/Concept]]",
+			target: "../shared/Concept",
+			isEmbed: false,
+			isCurrentPageReference: false,
+		});
 	});
 
 	test("parses embeds and block references", () => {
@@ -167,9 +140,7 @@ describe("parseWikiLink", () => {
 	});
 
 	test("preserves nested heading fragments", () => {
-		expect(
-			parseWikiLink("Page#Parent#Child|Child", "[[Page#Parent#Child|Child]]"),
-		).toEqual({
+		expect(parseWikiLink("Page#Parent#Child|Child", "[[Page#Parent#Child|Child]]")).toEqual({
 			raw: "[[Page#Parent#Child|Child]]",
 			target: "Page",
 			alias: "Child",
@@ -185,9 +156,7 @@ describe("parseWikiLink", () => {
 			search: "heading",
 			subpath: { kind: "heading", value: "Install" },
 		});
-		expect(
-			parseWikiLink("^^install-block", "[[^^install-block]]"),
-		).toMatchObject({
+		expect(parseWikiLink("^^install-block", "[[^^install-block]]")).toMatchObject({
 			target: "",
 			search: "block",
 			subpath: { kind: "block", value: "install-block" },
@@ -210,9 +179,7 @@ describe("parseWikiLink", () => {
 			"[[Note with \\[brackets\\]]]",
 			"![[Image \\] copy.png]]",
 		]);
-		expect(
-			matches.map((match) => parseWikiLink(match.inner, match.fullMatch)),
-		).toMatchObject([
+		expect(matches.map((match) => parseWikiLink(match.inner, match.fullMatch))).toMatchObject([
 			{ target: "Note with [brackets]" },
 			{ target: "Image ] copy.png", isEmbed: true },
 		]);
@@ -260,22 +227,20 @@ describe("buildContentIndex", () => {
 		const index = await buildContentIndex(compatibilityFixtureRoot);
 		const page = index.byPathKey.get("shared/Concept");
 
-		expect(page?.headings.map(({ preview: _, ...heading }) => heading)).toEqual(
-			[
-				{ rawText: "Concept", slug: "concept" },
-				{ rawText: "Café Déjà Vu", slug: "café-déjà-vu" },
-				{ rawText: "Punctuation: A/B & C", slug: "punctuation-ab--c" },
-				{ rawText: "😀 Emoji Heading", slug: "-emoji-heading" },
-				{ rawText: "重复 标题", slug: "重复-标题" },
-				{ rawText: "Duplicate", slug: "duplicate" },
-				{ rawText: "Duplicate", slug: "duplicate-1" },
-				{
-					rawText: "Explicit Anchor",
-					slug: "explicit-anchor",
-					explicitId: "explicit-anchor",
-				},
-			],
-		);
+		expect(page?.headings.map(({ preview: _, ...heading }) => heading)).toEqual([
+			{ rawText: "Concept", slug: "concept" },
+			{ rawText: "Café Déjà Vu", slug: "café-déjà-vu" },
+			{ rawText: "Punctuation: A/B & C", slug: "punctuation-ab--c" },
+			{ rawText: "😀 Emoji Heading", slug: "-emoji-heading" },
+			{ rawText: "重复 标题", slug: "重复-标题" },
+			{ rawText: "Duplicate", slug: "duplicate" },
+			{ rawText: "Duplicate", slug: "duplicate-1" },
+			{
+				rawText: "Explicit Anchor",
+				slug: "explicit-anchor",
+				explicitId: "explicit-anchor",
+			},
+		]);
 	});
 
 	test("extracts frontmatter titles and aliases", async () => {
@@ -284,12 +249,8 @@ describe("buildContentIndex", () => {
 
 		expect(page?.title).toBe("Onboarding Guide");
 		expect(page?.aliases).toEqual(["Start Here", "Kickoff"]);
-		expect(index.byTitle.get("onboarding guide")?.[0]?.pathKey).toBe(
-			"guide/getting-started",
-		);
-		expect(index.byAlias.get("start here")?.[0]?.pathKey).toBe(
-			"guide/getting-started",
-		);
+		expect(index.byTitle.get("onboarding guide")?.[0]?.pathKey).toBe("guide/getting-started");
+		expect(index.byAlias.get("start here")?.[0]?.pathKey).toBe("guide/getting-started");
 	});
 	test("indexes attachment files and inline tags", async () => {
 		const index = await buildContentIndex(assetsFixtureRoot);
@@ -297,9 +258,7 @@ describe("buildContentIndex", () => {
 		expect(index.assets.map((asset) => asset.pathKey)).toContain("image.png");
 		expect(index.byTag.get("asset-test")?.[0]?.pathKey).toBe("");
 		expect(index.byAssetPath.get("image.png")?.urlPath).toBe("/image.png");
-		expect(index.byAssetBaseNameCI.get("image.png")?.[0]?.pathKey).toBe(
-			"image.png",
-		);
+		expect(index.byAssetBaseNameCI.get("image.png")?.[0]?.pathKey).toBe("image.png");
 	});
 	test("indexes spaced paths and duplicate heading slugs", async () => {
 		const index = await buildContentIndex(wikilinkCompatibilityFixtureRoot);
@@ -316,12 +275,8 @@ describe("buildContentIndex", () => {
 		const index = await buildContentIndex(pathCollisionFixtureRoot);
 
 		expect(index.byFilePathKey.get("foo")?.relativePath).toBe("foo.md");
-		expect(index.byFilePathKey.get("foo/index")?.relativePath).toBe(
-			"foo/index.md",
-		);
-		expect(index.byFilePathKeyCI.get("foo/index")?.[0]?.relativePath).toBe(
-			"foo/index.md",
-		);
+		expect(index.byFilePathKey.get("foo/index")?.relativePath).toBe("foo/index.md");
+		expect(index.byFilePathKeyCI.get("foo/index")?.[0]?.relativePath).toBe("foo/index.md");
 	});
 });
 
@@ -460,9 +415,7 @@ describe("static Daily Notes", () => {
 		const date = parseDailyNoteDate("2026-08-20.md", config);
 
 		expect(date?.toISOString()).toBe("2026-08-20T00:00:00.000Z");
-		expect(formatDailyNoteDate(date!, "dddd, MMMM D, YYYY")).toBe(
-			"Thursday, August 20, 2026",
-		);
+		expect(formatDailyNoteDate(date!, "dddd, MMMM D, YYYY")).toBe("Thursday, August 20, 2026");
 	});
 
 	test("expands templates and renders previous/current/next navigation", async () => {
@@ -476,9 +429,7 @@ describe("static Daily Notes", () => {
 			},
 		});
 		const file = await processor.process({
-			value: await Bun.file(
-				path.join(dailyNotesFixtureRoot, "2026-08-20.md"),
-			).text(),
+			value: await Bun.file(path.join(dailyNotesFixtureRoot, "2026-08-20.md")).text(),
 			path: path.join(dailyNotesFixtureRoot, "2026-08-20.md"),
 		});
 
@@ -518,10 +469,10 @@ describe("resolveWikiLink", () => {
 			currentPage,
 			index,
 		});
-		const folder = resolveWikiLink(
-			parseWikiLink("foo/index", "[[foo/index]]"),
-			{ currentPage, index },
-		);
+		const folder = resolveWikiLink(parseWikiLink("foo/index", "[[foo/index]]"), {
+			currentPage,
+			index,
+		});
 
 		expect(flat.targetPage?.relativePath).toBe("foo.md");
 		expect(folder.targetPage?.relativePath).toBe("foo/index.md");
@@ -532,10 +483,7 @@ describe("resolveWikiLink", () => {
 		const currentPage = index.byPathKey.get("")!;
 
 		const result = resolveWikiLink(
-			parseWikiLink(
-				"Folder/Space Note#duplicate-1",
-				"[[Folder/Space Note#duplicate-1]]",
-			),
+			parseWikiLink("Folder/Space Note#duplicate-1", "[[Folder/Space Note#duplicate-1]]"),
 			{ currentPage, index },
 		);
 
@@ -549,10 +497,7 @@ describe("resolveWikiLink", () => {
 		const currentPage = index.byFilePathKey.get("index")!;
 
 		const result = resolveWikiLink(
-			parseWikiLink(
-				"Folder/Space Note#Duplicate",
-				"[[Folder/Space Note#Duplicate]]",
-			),
+			parseWikiLink("Folder/Space Note#Duplicate", "[[Folder/Space Note#Duplicate]]"),
 			{ currentPage, index },
 		);
 
@@ -573,17 +518,11 @@ describe("resolveWikiLink", () => {
 			{ currentPage: currentPage!, index },
 		);
 		const headingResult = resolveWikiLink(
-			parseWikiLink(
-				"../shared/Concept#Café Déjà Vu",
-				"[[../shared/Concept#Café Déjà Vu]]",
-			),
+			parseWikiLink("../shared/Concept#Café Déjà Vu", "[[../shared/Concept#Café Déjà Vu]]"),
 			{ currentPage: currentPage!, index },
 		);
 		const explicitIdResult = resolveWikiLink(
-			parseWikiLink(
-				"../shared/Concept#EXPLICIT-ANCHOR",
-				"[[../shared/Concept#EXPLICIT-ANCHOR]]",
-			),
+			parseWikiLink("../shared/Concept#EXPLICIT-ANCHOR", "[[../shared/Concept#EXPLICIT-ANCHOR]]"),
 			{ currentPage: currentPage!, index },
 		);
 
@@ -625,22 +564,16 @@ describe("resolveWikiLink", () => {
 
 		const assetIndex = await buildContentIndex(assetsFixtureRoot);
 		const assetCurrent = assetIndex.byFilePathKey.get("index")!;
-		const assetResult = resolveWikiLink(
-			parseWikiLink("./IMAGE.PNG", "[[./IMAGE.PNG]]"),
-			{
-				currentPage: assetCurrent,
-				index: assetIndex,
-				options: { enableCaseInsensitiveLookup: true },
-			},
-		);
-		const strictAssetResult = resolveWikiLink(
-			parseWikiLink("./IMAGE.PNG", "[[./IMAGE.PNG]]"),
-			{
-				currentPage: assetCurrent,
-				index: assetIndex,
-				options: { enableCaseInsensitiveLookup: false },
-			},
-		);
+		const assetResult = resolveWikiLink(parseWikiLink("./IMAGE.PNG", "[[./IMAGE.PNG]]"), {
+			currentPage: assetCurrent,
+			index: assetIndex,
+			options: { enableCaseInsensitiveLookup: true },
+		});
+		const strictAssetResult = resolveWikiLink(parseWikiLink("./IMAGE.PNG", "[[./IMAGE.PNG]]"), {
+			currentPage: assetCurrent,
+			index: assetIndex,
+			options: { enableCaseInsensitiveLookup: false },
+		});
 
 		expect(pageResult).toMatchObject({
 			status: "ok",
@@ -658,10 +591,10 @@ describe("resolveWikiLink", () => {
 		const index = await buildContentIndex(compatibilityFixtureRoot);
 		const currentPage = index.byPathKey.get("notes/current")!;
 
-		const result = resolveWikiLink(
-			parseWikiLink("../missing/Concept", "[[../missing/Concept]]"),
-			{ currentPage, index },
-		);
+		const result = resolveWikiLink(parseWikiLink("../missing/Concept", "[[../missing/Concept]]"), {
+			currentPage,
+			index,
+		});
 
 		expect(result.status).toBe("broken-page");
 	});
@@ -692,10 +625,10 @@ describe("resolveWikiLink", () => {
 			parseWikiLink("## Advanced Usage", "[[## Advanced Usage]]"),
 			{ currentPage, index },
 		);
-		const blockResult = resolveWikiLink(
-			parseWikiLink("^^install-block", "[[^^install-block]]"),
-			{ currentPage, index },
-		);
+		const blockResult = resolveWikiLink(parseWikiLink("^^install-block", "[[^^install-block]]"), {
+			currentPage,
+			index,
+		});
 
 		expect(headingResult).toMatchObject({
 			status: "ok",
@@ -711,20 +644,14 @@ describe("resolveWikiLink", () => {
 		const index = await buildContentIndex(aliasFixtureRoot);
 		const currentPage = index.byPathKey.get("")!;
 
-		const aliasResult = resolveWikiLink(
-			parseWikiLink("Start Here", "[[Start Here]]"),
-			{
-				currentPage,
-				index,
-			},
-		);
-		const titleResult = resolveWikiLink(
-			parseWikiLink("Onboarding Guide", "[[Onboarding Guide]]"),
-			{
-				currentPage,
-				index,
-			},
-		);
+		const aliasResult = resolveWikiLink(parseWikiLink("Start Here", "[[Start Here]]"), {
+			currentPage,
+			index,
+		});
+		const titleResult = resolveWikiLink(parseWikiLink("Onboarding Guide", "[[Onboarding Guide]]"), {
+			currentPage,
+			index,
+		});
 
 		expect(aliasResult).toMatchObject({
 			status: "ok",
@@ -742,13 +669,10 @@ describe("resolveWikiLink", () => {
 		);
 		const currentPage = index.byPathKey.get("")!;
 
-		const result = resolveWikiLink(
-			parseWikiLink("getting-started", "[[getting-started]]"),
-			{
-				currentPage,
-				index,
-			},
-		);
+		const result = resolveWikiLink(parseWikiLink("getting-started", "[[getting-started]]"), {
+			currentPage,
+			index,
+		});
 
 		expect(result.status).toBe("ambiguous-page");
 	});
@@ -757,13 +681,10 @@ describe("resolveWikiLink", () => {
 		const index = await buildContentIndex(aliasAmbiguousFixtureRoot);
 		const currentPage = index.byPathKey.get("")!;
 
-		const result = resolveWikiLink(
-			parseWikiLink("Shared Alias", "[[Shared Alias]]"),
-			{
-				currentPage,
-				index,
-			},
-		);
+		const result = resolveWikiLink(parseWikiLink("Shared Alias", "[[Shared Alias]]"), {
+			currentPage,
+			index,
+		});
 
 		expect(result.status).toBe("ambiguous-page");
 	});
@@ -773,10 +694,7 @@ describe("resolveWikiLink", () => {
 		const currentPage = index.byPathKey.get("")!;
 
 		const result = resolveWikiLink(
-			parseWikiLink(
-				"guide/getting-started#Missing",
-				"[[guide/getting-started#Missing]]",
-			),
+			parseWikiLink("guide/getting-started#Missing", "[[guide/getting-started#Missing]]"),
 			{
 				currentPage,
 				index,
@@ -861,30 +779,21 @@ describe("resolveWikiLink", () => {
 		const currentPage = index.byPathKey.get("")!;
 
 		const setextResult = resolveWikiLink(
-			parseWikiLink(
-				"guide/variants#Named Setext",
-				"[[guide/variants#Named Setext]]",
-			),
+			parseWikiLink("guide/variants#Named Setext", "[[guide/variants#Named Setext]]"),
 			{
 				currentPage,
 				index,
 			},
 		);
 		const spacedAtxResult = resolveWikiLink(
-			parseWikiLink(
-				"guide/variants#Spaced ATX Heading",
-				"[[guide/variants#Spaced ATX Heading]]",
-			),
+			parseWikiLink("guide/variants#Spaced ATX Heading", "[[guide/variants#Spaced ATX Heading]]"),
 			{
 				currentPage,
 				index,
 			},
 		);
 		const explicitIdResult = resolveWikiLink(
-			parseWikiLink(
-				"guide/variants#custom-anchor",
-				"[[guide/variants#custom-anchor]]",
-			),
+			parseWikiLink("guide/variants#custom-anchor", "[[guide/variants#custom-anchor]]"),
 			{
 				currentPage,
 				index,
@@ -916,9 +825,7 @@ describe("remarkWikilink", () => {
 		});
 
 		const output1 = String(file);
-		expect(output1).toContain(
-			'[Install guide](/guide/getting-started#install "Install steps.',
-		);
+		expect(output1).toContain('[Install guide](/guide/getting-started#install "Install steps.');
 		expect(output1).toEndWith("\n");
 	});
 
@@ -926,14 +833,11 @@ describe("remarkWikilink", () => {
 		const processor = makeProcessor(compatibilityFixtureRoot);
 
 		const file = await processor.process({
-			value:
-				"See [[../shared/Concept#Café Déjà Vu]] and [[../shared/Concept]].",
+			value: "See [[../shared/Concept#Café Déjà Vu]] and [[../shared/Concept]].",
 			path: path.resolve(compatibilityFixtureRoot, "notes/current.md"),
 		});
 
-		expect(String(file)).toContain(
-			"[Café Déjà Vu](/shared/Concept#café-déjà-vu)",
-		);
+		expect(String(file)).toContain("[Café Déjà Vu](/shared/Concept#café-déjà-vu)");
 		expect(String(file)).toContain("[Concept](/shared/Concept)");
 	});
 
@@ -945,12 +849,8 @@ describe("remarkWikilink", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toContain(
-			"[Advanced Usage](/guide/advanced#advanced-usage",
-		);
-		expect(String(file)).toContain(
-			"[install-block](/guide/getting-started#^install-block)",
-		);
+		expect(String(file)).toContain("[Advanced Usage](/guide/advanced#advanced-usage");
+		expect(String(file)).toContain("[install-block](/guide/getting-started#^install-block)");
 	});
 
 	test("rewrites frontmatter title and alias links end to end", async () => {
@@ -961,9 +861,7 @@ describe("remarkWikilink", () => {
 			path: path.resolve(aliasFixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toContain(
-			"[Onboarding Guide](/guide/getting-started)",
-		);
+		expect(String(file)).toContain("[Onboarding Guide](/guide/getting-started)");
 		expect(String(file)).toContain("[Start Here](/guide/getting-started)");
 	});
 
@@ -1002,9 +900,7 @@ describe("remarkWikilink", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toBe(
-			"Jump to [install-block](/guide/getting-started#^install-block).\n",
-		);
+		expect(String(file)).toBe("Jump to [install-block](/guide/getting-started#^install-block).\n");
 	});
 
 	test("emits anchors for block IDs on the page", async () => {
@@ -1110,9 +1006,7 @@ describe("transclusion", () => {
 		});
 		const output = String(file);
 		expect(output).toContain('class="obsidian-transclusion"');
-		expect(output).toContain(
-			"A paragraph with an inline block ID containing an underscore.",
-		);
+		expect(output).toContain("A paragraph with an inline block ID containing an underscore.");
 	});
 
 	test("transcludes full block content including nested list items", async () => {
@@ -1155,9 +1049,7 @@ describe("transclusion", () => {
 		const output = String(file);
 		expect(output).toContain("Content A");
 		expect(output).toContain("Content B");
-		expect(
-			file.messages.some((m) => String(m).includes("Circular transclusion")),
-		).toBe(true);
+		expect(file.messages.some((m) => String(m).includes("Circular transclusion"))).toBe(true);
 	});
 
 	test("respects max transclusion depth", async () => {
@@ -1172,9 +1064,7 @@ describe("transclusion", () => {
 		expect(output).toContain("Level 1");
 		expect(output).toContain("Level 5");
 		expect(output).not.toContain("Level 6");
-		expect(
-			file.messages.some((m) => String(m).includes("Max transclusion depth")),
-		).toBe(true);
+		expect(file.messages.some((m) => String(m).includes("Max transclusion depth"))).toBe(true);
 	});
 	test("applies Obsidian transforms inside transcluded content", async () => {
 		const processor = makeProcessor(transclusionFeaturesFixtureRoot, {
@@ -1205,9 +1095,7 @@ describe("tag linking", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toBe(
-			"See [#tag](/tags/tag) and [#other\\_tag](/tags/other_tag).\n",
-		);
+		expect(String(file)).toBe("See [#tag](/tags/tag) and [#other\\_tag](/tags/other_tag).\n");
 	});
 });
 
@@ -1223,9 +1111,7 @@ describe("callouts", () => {
 		});
 
 		const output = String(file);
-		expect(output).toContain(
-			'<div class="callout callout-tip" data-callout="tip">',
-		);
+		expect(output).toContain('<div class="callout callout-tip" data-callout="tip">');
 		expect(output).toContain('<div class="callout-title">Pro Tip</div>');
 		expect(output).toContain('<div class="callout-content">');
 		expect(output).toContain("Body text");
@@ -1268,9 +1154,7 @@ describe("inline block ID indexing", () => {
 		const page = index.byPathKey.get("guide/inline-target");
 		const ids = page?.blocks.map((block) => block.id) ?? [];
 
-		expect(ids).toEqual(
-			expect.arrayContaining(["standalone_block", "inline_block"]),
-		);
+		expect(ids).toEqual(expect.arrayContaining(["standalone_block", "inline_block"]));
 	});
 
 	test("resolves a wikilink to an underscore block ID", async () => {
@@ -1278,10 +1162,7 @@ describe("inline block ID indexing", () => {
 		const currentPage = index.byPathKey.get("")!;
 
 		const result = resolveWikiLink(
-			parseWikiLink(
-				"guide/inline-target#^inline_block",
-				"[[guide/inline-target#^inline_block]]",
-			),
+			parseWikiLink("guide/inline-target#^inline_block", "[[guide/inline-target#^inline_block]]"),
 			{ currentPage, index },
 		);
 
@@ -1296,10 +1177,7 @@ describe("inline block ID indexing", () => {
 		const currentPage = index.byPathKey.get("")!;
 
 		const result = resolveWikiLink(
-			parseWikiLink(
-				"guide/inline-target#^inline-block",
-				"[[guide/inline-target#^inline-block]]",
-			),
+			parseWikiLink("guide/inline-target#^inline-block", "[[guide/inline-target#^inline-block]]"),
 			{ currentPage, index },
 		);
 
@@ -1402,9 +1280,7 @@ describe("callout foldable state", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 		const output = String(file);
-		expect(output).toContain(
-			'<div class="callout callout-note" data-callout="note">',
-		);
+		expect(output).toContain('<div class="callout callout-note" data-callout="note">');
 		expect(output).not.toContain("<details");
 	});
 
@@ -1415,9 +1291,7 @@ describe("callout foldable state", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 		const output = String(file);
-		expect(output).toContain(
-			'<details class="callout callout-note" data-callout="note">',
-		);
+		expect(output).toContain('<details class="callout callout-note" data-callout="note">');
 		expect(output).toContain("<summary");
 		expect(output).not.toContain("open");
 	});
@@ -1429,9 +1303,7 @@ describe("callout foldable state", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 		const output = String(file);
-		expect(output).toContain(
-			'<details class="callout callout-tip" data-callout="tip" open>',
-		);
+		expect(output).toContain('<details class="callout callout-tip" data-callout="tip" open>');
 		expect(output).toContain("<summary");
 	});
 });
@@ -1585,9 +1457,7 @@ describe("tag page generation", () => {
 			page.tags = ['evil"<script>\nalert(1)</script>'];
 		}
 		const pages = generateTagPages(index);
-		const hostile = pages.find((p) =>
-			p.routePath.includes("evil%22%3Cscript%3E"),
-		);
+		const hostile = pages.find((p) => p.routePath.includes("evil%22%3Cscript%3E"));
 
 		// The heading must be entity-escaped, never raw HTML. The quote is
 		// harmless in text-node context and correctly left literal.
@@ -1645,8 +1515,7 @@ describe("footnote fixes", () => {
 		// limitation, not a plugin bug; real Obsidian notes always use prose.
 		const processor = makeProcessor(fixtureRoot);
 		const file = await processor.process({
-			value:
-				"A[^a] and B[^b].\n\n[^a]: Alpha definition text.\n\n[^b]: Beta definition text.",
+			value: "A[^a] and B[^b].\n\n[^a]: Alpha definition text.\n\n[^b]: Beta definition text.",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 		const output = String(file);
@@ -1675,8 +1544,7 @@ describe("footnote fixes", () => {
 	test("inline and label footnotes coexist in same document", async () => {
 		const processor = makeProcessor(fixtureRoot);
 		const file = await processor.process({
-			value:
-				"Label[^lbl] and inline^[Inline text] together.\n\n[^lbl]: Label def.",
+			value: "Label[^lbl] and inline^[Inline text] together.\n\n[^lbl]: Label def.",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 		const output = String(file);
@@ -1831,8 +1699,7 @@ describe("nested callouts", () => {
 	test("processes triple-nested callouts", async () => {
 		const processor = makeProcessor(fixtureRoot, { enableCallouts: true });
 		const file = await processor.process({
-			value:
-				"> [!note] Level 1\n> > [!tip] Level 2\n> > > [!warning] Level 3\n> > > Deep",
+			value: "> [!note] Level 1\n> > [!tip] Level 2\n> > > [!warning] Level 3\n> > > Deep",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 		const output = String(file);
@@ -1855,9 +1722,7 @@ describe("nested callouts", () => {
 		});
 		const output = String(file);
 		expect(output).toContain('<details class="callout callout-note"');
-		expect(output).toContain(
-			'<details class="callout callout-tip" data-callout="tip" open',
-		);
+		expect(output).toContain('<details class="callout callout-tip" data-callout="tip" open');
 		expect(output).toContain("Collapsed outer");
 		expect(output).toContain("Expanded inner");
 	});
@@ -2093,12 +1958,8 @@ describe("media embeds", () => {
 		});
 
 		const output = String(file);
-		expect(output).toContain(
-			'<iframe src="/Document.pdf#page=3" width="100%" height="600px"',
-		);
-		expect(output).toContain(
-			'<iframe src="/Document.pdf#height=400" width="100%" height="400px"',
-		);
+		expect(output).toContain('<iframe src="/Document.pdf#page=3" width="100%" height="600px"');
+		expect(output).toContain('<iframe src="/Document.pdf#height=400" width="100%" height="400px"');
 	});
 	test("preserves order and sibling nodes for multiple inline media embeds", async () => {
 		const processor = makeProcessor(assetsFixtureRoot, {
@@ -2132,9 +1993,7 @@ describe("media embeds", () => {
 			path: path.resolve(assetsFixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toContain(
-			'<img src="/image.png#outline" alt="image.png" width="100"',
-		);
+		expect(String(file)).toContain('<img src="/image.png#outline" alt="image.png" width="100"');
 	});
 
 	test("does not emit path traversal in media embed URLs", async () => {
@@ -2191,9 +2050,7 @@ describe("backlinks HTML", () => {
 		const index = await buildContentIndex(fixtureRoot);
 		const backlinks = await buildBacklinksIndex(index);
 
-		expect(backlinks.get("/guide/getting-started")).toEqual([
-			{ routePath: "/", title: "Home" },
-		]);
+		expect(backlinks.get("/guide/getting-started")).toEqual([{ routePath: "/", title: "Home" }]);
 	});
 	test("builds backlinks for note-relative wikilinks", async () => {
 		const { buildBacklinksIndex } = await import("../../src/markdown/backlinks");
@@ -2228,9 +2085,7 @@ describe("error boundary", () => {
 
 		expect(String(file)).toContain('data-obsidian-embed="true"');
 		expect(file.messages).toHaveLength(1);
-		expect(String(file.messages[0])).toContain(
-			"Circular transclusion detected",
-		);
+		expect(String(file.messages[0])).toContain("Circular transclusion detected");
 	});
 });
 
@@ -2277,9 +2132,7 @@ describe("content index resilience", () => {
 	});
 
 	test("reuses unchanged page objects across incremental rebuilds", async () => {
-		const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import(
-			"node:fs"
-		);
+		const { mkdtempSync, writeFileSync, mkdirSync, rmSync } = await import("node:fs");
 		const tmp = await import("node:os");
 		const pathMod = await import("node:path");
 		const root = mkdtempSync(pathMod.join(tmp.tmpdir(), "vault-"));
@@ -2416,20 +2269,30 @@ describe("pluginObsidianWikiLink API", () => {
 	});
 });
 
+describe("external vault publishing", () => {
+	test("publishes vault pages under the configured route prefix", async () => {
+		const { pluginObsidianWikiLink } = await import("../../src/markdown/index");
+		const plugin = pluginObsidianWikiLink({
+			vaultRoot: path.resolve(process.cwd(), "test/markdown/fixtures/vault-publish"),
+			vaultRoutePrefix: "/vault",
+		});
+		const pages = await plugin.addPages?.({ root: path.resolve(process.cwd(), "docs") }, false);
+		expect(pages?.map((page) => page.routePath)).toContain("/vault/Home");
+		expect(pages?.map((page) => page.routePath)).toContain("/vault/guide/Setup Guide");
+	});
+});
+
 describe("duplicate footnote labels", () => {
 	test("records a warning when the same footnote label is defined twice", async () => {
 		const processor = makeProcessor(fixtureRoot);
 		const file = await processor.process({
-			value:
-				"Text[^1]\n\n[^1]: First definition text.\n[^1]: Second definition text.",
+			value: "Text[^1]\n\n[^1]: First definition text.\n[^1]: Second definition text.",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
 		expect(file.messages.length).toBeGreaterThan(0);
 		expect(
-			file.messages.some((message) =>
-				String(message).includes("Duplicate footnote label"),
-			),
+			file.messages.some((message) => String(message).includes("Duplicate footnote label")),
 		).toBe(true);
 	});
 });
@@ -2478,10 +2341,7 @@ describe("bundled stylesheet", () => {
 			path.resolve(process.cwd(), "src/markdown/styles.css"),
 			"utf8",
 		);
-		const distStyles = await fs.readFile(
-			path.resolve(process.cwd(), "dist/markdown.css"),
-			"utf8",
-		);
+		const distStyles = await fs.readFile(path.resolve(process.cwd(), "dist/markdown.css"), "utf8");
 
 		expect(sourceStyles.length).toBeGreaterThan(0);
 		expect(sourceStyles).toContain(".callout");
@@ -2500,9 +2360,7 @@ describe("bundled stylesheet", () => {
 		expect(sourceStyles).toContain("callout-quote");
 		expect(distStyles.length).toBeGreaterThan(0);
 		expect(distStyles).toContain(".obsidian-backlinks li{margin:0}");
-		expect(distStyles).toContain(
-			".obsidian-backlinks li:not(:first-child){margin-top:0}",
-		);
+		expect(distStyles).toContain(".obsidian-backlinks li:not(:first-child){margin-top:0}");
 		expect(distStyles).toContain(".callout");
 		expect(distStyles).toContain("html.dark");
 	});
@@ -2617,10 +2475,7 @@ describe("media URL encoding", () => {
 });
 
 describe("backlink exclusions", () => {
-	const backlinksCodeRoot = path.resolve(
-		process.cwd(),
-		"test/markdown/fixtures/backlinks-code",
-	);
+	const backlinksCodeRoot = path.resolve(process.cwd(), "test/markdown/fixtures/backlinks-code");
 
 	test("indexes backlinks from real wikilinks and Markdown links", async () => {
 		const index = await buildContentIndex(backlinksCodeRoot);
@@ -2668,8 +2523,7 @@ describe("callout title markdown", () => {
 		});
 
 		const file = await processor.process({
-			value:
-				"> [!example] See [[guide/getting-started|Getting Started]] now\n> Body",
+			value: "> [!example] See [[guide/getting-started|Getting Started]] now\n> Body",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
@@ -2704,9 +2558,7 @@ describe("callout title markdown", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toContain(
-			'<div class="callout-title">See [[missing-page]] here</div>',
-		);
+		expect(String(file)).toContain('<div class="callout-title">See [[missing-page]] here</div>');
 	});
 });
 
@@ -2799,9 +2651,7 @@ describe("markdown link resolution", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toBe(
-			"See [the guide](/guide/getting-started) for details.\n",
-		);
+		expect(String(file)).toBe("See [the guide](/guide/getting-started) for details.\n");
 	});
 
 	test("resolves .md links by basename across folders", async () => {
@@ -2888,9 +2738,7 @@ describe("markdown link resolution", () => {
 		});
 
 		expect(String(file)).toBe("See [missing](no-such-page.md).\n");
-		expect(
-			file.messages.some((m) => String(m).includes("no-such-page.md")),
-		).toBe(true);
+		expect(file.messages.some((m) => String(m).includes("no-such-page.md"))).toBe(true);
 	});
 
 	test("fails the build for unresolvable .md links in error mode", async () => {
@@ -2993,9 +2841,7 @@ describe("missing section embeds", () => {
 		expect(output).toContain("guide/getting-started#Missing");
 		expect(output).not.toContain('class="obsidian-transclusion"');
 		expect(output).not.toContain("Install steps");
-		expect(file.messages.some((m) => String(m).includes("broken-anchor"))).toBe(
-			true,
-		);
+		expect(file.messages.some((m) => String(m).includes("broken-anchor"))).toBe(true);
 	});
 });
 
@@ -3011,9 +2857,7 @@ describe("callout title highlights", () => {
 		});
 
 		const output = String(file);
-		expect(output).toContain(
-			'<div class="callout-title">A <mark>critical</mark> warning</div>',
-		);
+		expect(output).toContain('<div class="callout-title">A <mark>critical</mark> warning</div>');
 	});
 
 	test("renders highlights combined with markdown and wikilinks", async () => {
@@ -3022,8 +2866,7 @@ describe("callout title highlights", () => {
 		});
 
 		const file = await processor.process({
-			value:
-				"> [!example] **See** [[guide/getting-started|the guide]] ==now==\n> Body",
+			value: "> [!example] **See** [[guide/getting-started|the guide]] ==now==\n> Body",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
@@ -3044,10 +2887,9 @@ describe("markdown link config hook", () => {
 
 		const config = configFn({ root: "docs" });
 
-		expect(
-			(config.markdown as { link?: { checkDeadLinks?: boolean } })?.link
-				?.checkDeadLinks,
-		).toBe(false);
+		expect((config.markdown as { link?: { checkDeadLinks?: boolean } })?.link?.checkDeadLinks).toBe(
+			false,
+		);
 	});
 
 	test("does not override an explicit checkDeadLinks setting", async () => {
@@ -3060,10 +2902,9 @@ describe("markdown link config hook", () => {
 			markdown: { link: { checkDeadLinks: true } },
 		});
 
-		expect(
-			(config.markdown as { link?: { checkDeadLinks?: boolean } })?.link
-				?.checkDeadLinks,
-		).toBe(true);
+		expect((config.markdown as { link?: { checkDeadLinks?: boolean } })?.link?.checkDeadLinks).toBe(
+			true,
+		);
 	});
 
 	test("leaves the dead-link gate alone when markdown links are disabled", async () => {
@@ -3078,10 +2919,7 @@ describe("markdown link config hook", () => {
 });
 
 describe("backlink labels", () => {
-	const backlinkLabelsRoot = path.resolve(
-		process.cwd(),
-		"test/markdown/fixtures/backlink-labels",
-	);
+	const backlinkLabelsRoot = path.resolve(process.cwd(), "test/markdown/fixtures/backlink-labels");
 
 	test("prefers frontmatter title, then first heading, then humanized basename", async () => {
 		const index = await buildContentIndex(backlinkLabelsRoot);
@@ -3107,15 +2945,7 @@ describe("rspress callout restoration", () => {
 		children?: TestNode[];
 	}
 
-	const RSPRESS_TYPES = new Set([
-		"tip",
-		"note",
-		"warning",
-		"caution",
-		"danger",
-		"info",
-		"details",
-	]);
+	const RSPRESS_TYPES = new Set(["tip", "note", "warning", "caution", "danger", "info", "details"]);
 	const REGEX_GH_BEGIN = /^\s*\s*\[!(\w+)\]\s*(.*)/;
 
 	function hijackAlertsLikeRspress(parent: { children: TestNode[] }): void {
@@ -3151,12 +2981,8 @@ describe("rspress callout restoration", () => {
 
 	type WikilinkTransformer = (tree: unknown, file: unknown) => Promise<void>;
 
-	function makeTransformer(
-		options: Partial<NormalizedPluginOptions>,
-	): WikilinkTransformer {
-		const factory = remarkWikilink as unknown as (
-			pluginOptions: unknown,
-		) => WikilinkTransformer;
+	function makeTransformer(options: Partial<NormalizedPluginOptions>): WikilinkTransformer {
+		const factory = remarkWikilink as unknown as (pluginOptions: unknown) => WikilinkTransformer;
 		return factory({
 			getDocsRoot: () => fixtureRoot,
 			options: { ...DEFAULT_OPTIONS, ...options },
@@ -3202,9 +3028,7 @@ describe("rspress callout restoration", () => {
 
 		expect(output).toContain('class="callout callout-warning"');
 		expect(output).toContain('<div class="callout-title">Watch Out</div>');
-		expect(output).toContain(
-			"This paragraph is dropped by Rspress's transform.",
-		);
+		expect(output).toContain("This paragraph is dropped by Rspress's transform.");
 		expect(output).toContain("Second paragraph.");
 	});
 

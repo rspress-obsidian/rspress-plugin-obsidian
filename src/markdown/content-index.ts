@@ -13,6 +13,7 @@ import type {
 	ContentPage,
 	HeadingEntry,
 } from "./types.ts";
+export type { ContentIndex } from "./types.ts";
 import {
 	backlinkLabel,
 	normalizeFilePathKey,
@@ -58,16 +59,25 @@ interface MarkdownFileEntry {
  *  order — on access we delete-then-set to move the entry to the end, and
  *  evict the first entry when over capacity. */
 const contentIndexCache = new Map<string, CacheEntry>();
-/**
- * Scan `rootDir` for Markdown pages and attachment files, then build a fresh
- * {@link ContentIndex} with pre-computed lookup tables.
- */
+/** Options controlling route and asset URLs for an indexed root. */
+export interface ContentIndexOptions {
+	routePrefix?: string;
+}
+
 export async function buildContentIndex(
 	rootDir: string,
+	options: ContentIndexOptions = {},
 ): Promise<ContentIndex> {
 	const absoluteRoot = path.resolve(rootDir);
+	const routePrefix = normalizeRoutePrefix(options.routePrefix);
 	const files = await scanVaultFiles(absoluteRoot);
-	return buildContentIndexFromFiles(absoluteRoot, files);
+	return buildContentIndexFromFiles(absoluteRoot, files, undefined, routePrefix);
+}
+
+function normalizeRoutePrefix(value: string | undefined): string {
+	if (!value) return "";
+	const normalized = `/${value}`.replace(/\/+/g, "/").replace(/\/+$/, "");
+	return normalized === "/" ? "" : normalized;
 }
 
 /**
@@ -76,32 +86,26 @@ export async function buildContentIndex(
  */
 export async function getCachedContentIndex(
 	rootDir: string,
+	options: ContentIndexOptions = {},
 ): Promise<ContentIndex> {
 	const absoluteRoot = path.resolve(rootDir);
+	const routePrefix = normalizeRoutePrefix(options.routePrefix);
+	const cacheKey = `${absoluteRoot}|${routePrefix}`;
 	const files = await scanVaultFiles(absoluteRoot);
 	const signature = files
 		.map((file) => `${file.relativePath}:${file.mtimeMs}:${file.size}`)
 		.join("|");
 
-	// Bump existing entry to the end (most-recently-used position).
-	const cached = contentIndexCache.get(absoluteRoot);
+	const cached = contentIndexCache.get(cacheKey);
 	if (cached?.signature === signature) {
-		contentIndexCache.delete(absoluteRoot);
-		contentIndexCache.set(absoluteRoot, cached);
+		contentIndexCache.delete(cacheKey);
+		contentIndexCache.set(cacheKey, cached);
 		return cached.index;
 	}
 
 	const priorFiles = cached?.files ?? new Map<string, ParsedFileEntry>();
-	const index = await buildContentIndexFromFiles(
-		absoluteRoot,
-		files,
-		priorFiles,
-	);
-	contentIndexCache.set(absoluteRoot, {
-		signature,
-		index,
-		files: priorFiles,
-	});
+	const index = await buildContentIndexFromFiles(absoluteRoot, files, priorFiles, routePrefix);
+	contentIndexCache.set(cacheKey, { signature, index, files: priorFiles });
 
 	// Evict least-recently-used entry (first in insertion order) when over cap.
 	if (contentIndexCache.size > MAX_CACHED_INDEXES) {
@@ -118,12 +122,13 @@ async function buildContentIndexFromFiles(
 	rootDir: string,
 	files: MarkdownFileEntry[],
 	priorFiles?: Map<string, ParsedFileEntry>,
+	routePrefix = "",
 ): Promise<ContentIndex> {
 	const markdownFiles = files.filter((file) =>
 		MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()),
 	);
 	const settled = await Promise.allSettled(
-		markdownFiles.map((file) => buildContentPage(file, priorFiles)),
+		markdownFiles.map((file) => buildContentPage(file, priorFiles, routePrefix)),
 	);
 	const pages: ContentPage[] = [];
 	const rawContentByPath = new Map<string, string>();
@@ -131,10 +136,7 @@ async function buildContentIndexFromFiles(
 		if (result.status === "fulfilled") {
 			if (result.value.page.publish) {
 				pages.push(result.value.page);
-				rawContentByPath.set(
-					result.value.page.absolutePath,
-					result.value.rawMarkdown,
-				);
+				rawContentByPath.set(result.value.page.absolutePath, result.value.rawMarkdown);
 			}
 		} else {
 			console.warn(
@@ -143,16 +145,13 @@ async function buildContentIndexFromFiles(
 		}
 	}
 	const assets: ContentAsset[] = files
-		.filter(
-			(file) =>
-				!MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()),
-		)
+		.filter((file) => !MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()))
 		.map((file) => ({
 			absolutePath: file.absolutePath,
 			relativePath: file.relativePath,
 			pathKey: normalizePathKey(file.relativePath),
 			baseName: path.basename(file.relativePath),
-			urlPath: `/${file.relativePath
+			urlPath: `${routePrefix}/${file.relativePath
 				.split("/")
 				.map((segment) => encodeURIComponent(segment))
 				.join("/")}`,
@@ -277,10 +276,7 @@ function resolveBacklinkTarget(
 		}
 	};
 
-	const relativePathKey = resolveRelativePathKey(
-		sourcePage.relativePath,
-		normalizedTarget,
-	);
+	const relativePathKey = resolveRelativePathKey(sourcePage.relativePath, normalizedTarget);
 	if (relativePathKey !== undefined) {
 		const relativePages = byFilePathKeyCI.get(relativePathKey.toLowerCase());
 		if (relativePages) {
@@ -297,9 +293,7 @@ function resolveBacklinkTarget(
 		return results;
 	}
 
-	const exactCaseInsensitivePage = byFilePathKeyCI.get(
-		normalizedTarget.toLowerCase(),
-	);
+	const exactCaseInsensitivePage = byFilePathKeyCI.get(normalizedTarget.toLowerCase());
 	if (exactCaseInsensitivePage) {
 		for (const page of exactCaseInsensitivePage) {
 			addPage(page);
@@ -378,11 +372,7 @@ async function scanVaultFiles(rootDir: string): Promise<MarkdownFileEntry[]> {
 			const absolutePath = path.join(currentDir, entry.name);
 
 			if (entry.isDirectory()) {
-				if (
-					entry.name === ".git" ||
-					entry.name === "node_modules" ||
-					entry.name.startsWith(".")
-				) {
+				if (entry.name === ".git" || entry.name === "node_modules" || entry.name.startsWith(".")) {
 					continue;
 				}
 				subdirs.push(absolutePath);
@@ -393,9 +383,7 @@ async function scanVaultFiles(rootDir: string): Promise<MarkdownFileEntry[]> {
 				continue;
 			}
 
-			const relativePath = normalizeFsPath(
-				path.relative(rootDir, absolutePath),
-			);
+			const relativePath = normalizeFsPath(path.relative(rootDir, absolutePath));
 			if (!isRoutableRelativePath(relativePath)) {
 				continue;
 			}
@@ -416,17 +404,13 @@ async function scanVaultFiles(rootDir: string): Promise<MarkdownFileEntry[]> {
 
 		const settled = await Promise.all(fileStats);
 		for (const entry of settled) {
-			if (entry !== undefined) {
-				results.push(entry);
-			}
+			if (entry !== undefined) results.push(entry);
 		}
 
 		queue.push(...subdirs);
 	}
 
-	results.sort((left, right) =>
-		left.relativePath.localeCompare(right.relativePath),
-	);
+	results.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 	return results;
 }
 
@@ -437,6 +421,7 @@ function isRoutableRelativePath(relativePath: string): boolean {
 async function buildContentPage(
 	file: MarkdownFileEntry,
 	priorFiles?: Map<string, ParsedFileEntry>,
+	routePrefix = "",
 ): Promise<{
 	page: ContentPage;
 	rawMarkdown: string;
@@ -446,23 +431,17 @@ async function buildContentPage(
 		return { page: cached.page, rawMarkdown: cached.rawMarkdown };
 	}
 	const markdown = await fs.promises.readFile(file.absolutePath, "utf-8");
-	const routePath = deriveRoutePath(file.relativePath);
+	const routePath = deriveRoutePath(file.relativePath, routePrefix);
 	const pathKey = normalizePathKey(file.relativePath);
 	const filePathKey = normalizeFilePathKey(file.relativePath);
 	const baseName = path.basename(filePathKey);
 	const metadata = extractFrontmatterMetadata(markdown);
 	const { title, aliases, tags, cssclasses, excerpt, publish } = metadata;
-	const dataview = extractDataviewMetadata(
-		markdown,
-		metadata.frontmatter,
-		file.relativePath,
-	);
+	const dataview = extractDataviewMetadata(markdown, metadata.frontmatter, file.relativePath);
 
 	const lines = markdown.split(/\r?\n/);
 	const isContent = getContentLineFlags(lines);
-	const allTags = [
-		...new Set([...tags, ...extractInlineTags(lines, isContent)]),
-	];
+	const allTags = [...new Set([...tags, ...extractInlineTags(lines, isContent)])];
 	const headings = extractHeadings(lines, isContent);
 
 	// Pre-extract referenced page targets while we have the raw content in
@@ -521,10 +500,11 @@ async function buildContentPage(
 	return { page, rawMarkdown: markdown };
 }
 
-function deriveRoutePath(relativePath: string): string {
+function deriveRoutePath(relativePath: string, routePrefix = ""): string {
 	const withoutExtension = relativePath.replace(/\.(md|mdx)$/i, "");
 	const routeKey = normalizePathKey(withoutExtension);
-	return routeKey.length === 0 ? "/" : `/${routeKey}`;
+	const pagePath = routeKey.length === 0 ? "/" : `/${routeKey}`;
+	return routePrefix ? `${routePrefix}${pagePath === "/" ? "" : pagePath}` || "/" : pagePath;
 }
 
 export { normalizePathKey } from "./utils.ts";
@@ -559,10 +539,7 @@ function getContentLineFlags(lines: string[]): boolean[] {
 	return flags;
 }
 
-function extractHeadings(
-	lines: string[],
-	isContent: boolean[],
-): HeadingEntry[] {
+function extractHeadings(lines: string[], isContent: boolean[]): HeadingEntry[] {
 	const slugger = new GithubSlugger();
 	const headings: HeadingEntry[] = [];
 	const headingLineIndexes: number[] = [];
@@ -606,24 +583,16 @@ function extractHeadings(
 		if (idx === undefined) continue;
 		const startLine = idx + 1;
 		const endLine =
-			h + 1 < headings.length
-				? (headingLineIndexes[h + 1] ?? lines.length)
-				: lines.length;
+			h + 1 < headings.length ? (headingLineIndexes[h + 1] ?? lines.length) : lines.length;
 		const previewLines: string[] = [];
 		let charCount = 0;
 
-		for (
-			let i = startLine;
-			i < endLine && charCount < MAX_PREVIEW_LENGTH;
-			i++
-		) {
+		for (let i = startLine; i < endLine && charCount < MAX_PREVIEW_LENGTH; i++) {
 			if (!isContent[i]) continue;
 			const text = stripMarkdownFormatting(lines[i] ?? "").trim();
 			if (!text) continue;
 			const remaining = MAX_PREVIEW_LENGTH - charCount;
-			previewLines.push(
-				text.length <= remaining ? text : text.slice(0, remaining),
-			);
+			previewLines.push(text.length <= remaining ? text : text.slice(0, remaining));
 			charCount += text.length;
 		}
 
@@ -674,10 +643,7 @@ function extractBlocks(lines: string[], isContent: boolean[]): BlockEntry[] {
  * exactly what the backlinks resolver needs, so it can skip regex scanning
  * entirely.
  */
-function extractWikilinkTargets(
-	lines: string[],
-	isContent: boolean[],
-): string[] {
+function extractWikilinkTargets(lines: string[], isContent: boolean[]): string[] {
 	const seen = new Set<string>();
 	const targets: string[] = [];
 
@@ -699,8 +665,7 @@ function extractWikilinkTargets(
 		}
 	}
 
-	const markdownLinkPattern =
-		/!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^)]*)?\)/g;
+	const markdownLinkPattern = /!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^)]*)?\)/g;
 	for (const match of content.matchAll(markdownLinkPattern)) {
 		let target = match[1]?.trim() ?? "";
 		if (target.startsWith("<") && target.endsWith(">")) {
@@ -762,20 +727,12 @@ function pushBlock(blocks: BlockEntry[], seen: Set<string>, id: string): void {
 	blocks.push({ id: normalizedId });
 }
 
-function pushHeading(
-	headings: HeadingEntry[],
-	slugger: GithubSlugger,
-	rawHeading: string,
-): void {
+function pushHeading(headings: HeadingEntry[], slugger: GithubSlugger, rawHeading: string): void {
 	const trimmedHeading = rawHeading.trim();
-	const explicitIdMatch = trimmedHeading.match(
-		/\s*\{#([A-Za-z0-9_:.-]+)\}\s*$/,
-	);
+	const explicitIdMatch = trimmedHeading.match(/\s*\{#([A-Za-z0-9_:.-]+)\}\s*$/);
 	const explicitId = explicitIdMatch?.[1];
 	const headingText = explicitIdMatch
-		? trimmedHeading
-				.slice(0, trimmedHeading.length - explicitIdMatch[0].length)
-				.trim()
+		? trimmedHeading.slice(0, trimmedHeading.length - explicitIdMatch[0].length).trim()
 		: trimmedHeading;
 	const normalizedText = stripMarkdownFormatting(headingText);
 
@@ -868,11 +825,7 @@ function extractFrontmatterMetadata(markdown: string): {
 	}
 }
 
-function pushNamedPage(
-	map: Map<string, ContentPage[]>,
-	rawValue: string,
-	page: ContentPage,
-): void {
+function pushNamedPage(map: Map<string, ContentPage[]>, rawValue: string, page: ContentPage): void {
 	const key = normalizeLookupValue(rawValue);
 	if (!key) {
 		return;

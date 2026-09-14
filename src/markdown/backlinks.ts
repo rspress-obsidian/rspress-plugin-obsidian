@@ -1,11 +1,7 @@
 import path from "node:path";
 import { normalizeLookupValue } from "./slug.ts";
 import type { BacklinkRef, ContentIndex, ContentPage } from "./types.ts";
-import {
-	backlinkLabel,
-	normalizeFilePathKey,
-	resolveRelativePathKey,
-} from "./utils.ts";
+import { backlinkLabel, normalizeFilePathKey, resolveRelativePathKey } from "./utils.ts";
 
 export type { BacklinkRef };
 
@@ -17,10 +13,7 @@ export type { BacklinkRef };
  * The WeakMap cache here allows code that constructs a ContentIndex manually
  * (without going through `buildContentIndex`) to still get cached results.
  */
-const manualBacklinksCache = new WeakMap<
-	ContentIndex,
-	Map<string, BacklinkRef[]>
->();
+const manualBacklinksCache = new WeakMap<ContentIndex, Map<string, BacklinkRef[]>>();
 
 export async function getCachedBacklinksIndex(
 	index: ContentIndex,
@@ -89,14 +82,9 @@ function resolveBacklinkTarget(
 	// Explicitly relative targets are resolved from the source page, just as
 	// normal wikilink navigation does. A missing relative target must not fall
 	// through to a global basename/title/alias match.
-	const relativePathKey = resolveRelativePathKey(
-		sourcePage.relativePath,
-		normalizedTarget,
-	);
+	const relativePathKey = resolveRelativePathKey(sourcePage.relativePath, normalizedTarget);
 	if (relativePathKey !== undefined) {
-		const relativeCandidates = index.byFilePathKeyCI.get(
-			relativePathKey.toLowerCase(),
-		);
+		const relativeCandidates = index.byFilePathKeyCI.get(relativePathKey.toLowerCase());
 		for (const page of relativeCandidates ?? []) {
 			addPage(page);
 		}
@@ -179,10 +167,7 @@ export function renderBacklinksHtml(refs: BacklinkRef[]): string {
 }
 
 function escapeHtmlText(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeHtmlAttribute(value: string): string {

@@ -1,0 +1,22 @@
+[
+  {
+    "text": "Getting Started",
+    "link": "/graph/guide/getting-started",
+    "activeMatch": "/graph/guide/"
+  },
+  {
+    "text": "Graph View",
+    "link": "/graph/guide/graph-view",
+    "activeMatch": "/graph/guide/graph-view"
+  },
+  {
+    "text": "Configuration",
+    "link": "/graph/guide/configuration",
+    "activeMatch": "/graph/guide/configuration"
+  },
+  {
+    "text": "API",
+    "link": "/graph/api",
+    "activeMatch": "/graph/api"
+  }
+]

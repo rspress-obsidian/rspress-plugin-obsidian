@@ -38,9 +38,9 @@ Static callouts with different types:
 > This is a check callout (alias of `success`; also: `done`).
 
 Callout titles are inline markdown — **bold**, *italics*, `code`, and
-[[advanced|wikilinks]] all render inside the title:
+[[markdown/guide/advanced|wikilinks]] all render inside the title:
 
-> [!example] A **bold** title linking to [[advanced|Advanced Configuration]]
+> [!example] A **bold** title linking to [[markdown/guide/advanced|Advanced Configuration]]
 > The title above renders markdown and resolved wikilinks, matching Obsidian.
 
 Foldable callouts:
@@ -130,14 +130,14 @@ You can ==highlight important text== using double equals signs. This is great fo
 
 Link to other pages in your documentation:
 
-- [[getting-started|Getting Started Guide]] — the main installation and setup guide
-- [[advanced|Advanced Configuration]] — detailed options and behavior
-- [[api|API Reference]] — programmatic usage and types
+- [[markdown/guide/getting-started|Getting Started Guide]] — the main installation and setup guide
+- [[markdown/guide/advanced|Advanced Configuration]] — detailed options and behavior
+- [[markdown/guide/api|API Reference]] — programmatic usage and types
 
 Standard markdown links to vault pages resolve through the same rules — Obsidian accepts both syntaxes:
 
 - [Markdown link to the guide](getting-started.md) — the `.md` destination is resolved like a wikilink
-- [Markdown link to the vault root](index.md) — resolves the vault root page, not a relative path
+- [Markdown link to the vault root](/markdown) — resolves the section root page, not a relative path
 - [Markdown link with an anchor](getting-started.md#Install) — `#anchor` destinations resolve to heading slugs
 
 Current page anchor links:
@@ -171,7 +171,7 @@ and will not be published.
 
 The section below is transcluded from the Getting Started page. It demonstrates how `![[Page#Heading]]` embeds content from another file.
 
-![[getting-started#Embed & Transclusion Syntax]]
+![[markdown/guide/getting-started#Embed & Transclusion Syntax]]
 
 ## Backlinks
 

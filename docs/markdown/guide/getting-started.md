@@ -209,6 +209,6 @@ pluginObsidianWikiLink({
 
 ## Next Steps
 
-- Explore [[advanced|Advanced Usage]] for all configuration options in detail
-- See [[examples|Live Examples]] to watch the plugin features in action
-- See the [[api|API Reference]] for programmatic usage
+- Explore [[markdown/guide/advanced|Advanced Usage]] for all configuration options in detail
+- See [[markdown/guide/examples|Live Examples]] to watch the plugin features in action
+- See the [[markdown/guide/api|API Reference]] for programmatic usage

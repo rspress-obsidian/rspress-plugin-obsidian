@@ -55,10 +55,7 @@ const end = styles.indexOf(END_MARKER);
 
 let next: string;
 if (start !== -1 && end !== -1) {
-	next =
-		styles.slice(0, start) +
-		buildBlock() +
-		styles.slice(end + END_MARKER.length);
+	next = styles.slice(0, start) + buildBlock() + styles.slice(end + END_MARKER.length);
 } else {
 	next = `${styles}\n\n${buildBlock()}\n`;
 }

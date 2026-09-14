@@ -32,9 +32,7 @@ describe("parse-wikilink benchmarks", () => {
 			findWikilinkMatches(SAMPLE_CONTENT);
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  findWikilinkMatches: ${duration.toFixed(2)}ms for 1000 iterations`,
-		);
+		console.log(`  findWikilinkMatches: ${duration.toFixed(2)}ms for 1000 iterations`);
 		expect(duration).toBeLessThan(500);
 	});
 
@@ -47,9 +45,7 @@ describe("parse-wikilink benchmarks", () => {
 			);
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  parseWikiLink: ${duration.toFixed(2)}ms for 10000 iterations`,
-		);
+		console.log(`  parseWikiLink: ${duration.toFixed(2)}ms for 10000 iterations`);
 		expect(duration).toBeLessThan(100);
 	});
 
@@ -62,9 +58,7 @@ describe("parse-wikilink benchmarks", () => {
 			}
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  parseWikiLink 100 links: ${duration.toFixed(2)}ms for 1000 iterations`,
-		);
+		console.log(`  parseWikiLink 100 links: ${duration.toFixed(2)}ms for 1000 iterations`);
 		expect(duration).toBeLessThan(500);
 	});
 });
@@ -85,9 +79,7 @@ describe("content-index benchmarks", () => {
 			await getCachedContentIndex(fixtureRoot);
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  getCachedContentIndex (cached): ${duration.toFixed(2)}ms for 1000 iterations`,
-		);
+		console.log(`  getCachedContentIndex (cached): ${duration.toFixed(2)}ms for 1000 iterations`);
 		expect(duration).toBeLessThan(500);
 	});
 
@@ -96,15 +88,13 @@ describe("content-index benchmarks", () => {
 		const page = index.byPathKey.get("")!;
 		const start = performance.now();
 		for (let i = 0; i < 10000; i++) {
-			resolveWikiLink(
-				parseWikiLink("guide/getting-started", "[[guide/getting-started]]"),
-				{ currentPage: page, index },
-			);
+			resolveWikiLink(parseWikiLink("guide/getting-started", "[[guide/getting-started]]"), {
+				currentPage: page,
+				index,
+			});
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  resolveWikiLink exact path: ${duration.toFixed(2)}ms for 10000 iterations`,
-		);
+		console.log(`  resolveWikiLink exact path: ${duration.toFixed(2)}ms for 10000 iterations`);
 		expect(duration).toBeLessThan(100);
 	});
 
@@ -119,9 +109,7 @@ describe("content-index benchmarks", () => {
 			});
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  resolveWikiLink basename: ${duration.toFixed(2)}ms for 10000 iterations`,
-		);
+		console.log(`  resolveWikiLink basename: ${duration.toFixed(2)}ms for 10000 iterations`);
 		expect(duration).toBeLessThan(100);
 	});
 
@@ -131,17 +119,12 @@ describe("content-index benchmarks", () => {
 		const start = performance.now();
 		for (let i = 0; i < 10000; i++) {
 			resolveWikiLink(
-				parseWikiLink(
-					"guide/getting-started#Install",
-					"[[guide/getting-started#Install]]",
-				),
+				parseWikiLink("guide/getting-started#Install", "[[guide/getting-started#Install]]"),
 				{ currentPage: page, index },
 			);
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  resolveWikiLink with heading: ${duration.toFixed(2)}ms for 10000 iterations`,
-		);
+		console.log(`  resolveWikiLink with heading: ${duration.toFixed(2)}ms for 10000 iterations`);
 		expect(duration).toBeLessThan(200);
 	});
 });
@@ -163,9 +146,7 @@ describe("full pipeline benchmarks", () => {
 			}
 		}
 		const duration = performance.now() - start;
-		console.log(
-			`  full pipeline 100 wikilinks: ${duration.toFixed(2)}ms for 1000 iterations`,
-		);
+		console.log(`  full pipeline 100 wikilinks: ${duration.toFixed(2)}ms for 1000 iterations`);
 		expect(duration).toBeLessThan(1000);
 	});
 });

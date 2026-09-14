@@ -96,9 +96,7 @@ export function parseWikiLink(inner: string, raw: string): ParsedWikiLink {
 	const pipeIndex = findUnescaped(inner, "|");
 	const targetAndAnchor = pipeIndex >= 0 ? inner.slice(0, pipeIndex) : inner;
 	const alias =
-		pipeIndex >= 0
-			? unescapeWikilink(inner.slice(pipeIndex + 1)).trim() || undefined
-			: undefined;
+		pipeIndex >= 0 ? unescapeWikilink(inner.slice(pipeIndex + 1)).trim() || undefined : undefined;
 
 	const searchInput = targetAndAnchor.trim();
 	const search = searchInput.startsWith("##")
@@ -127,8 +125,7 @@ export function parseWikiLink(inner: string, raw: string): ParsedWikiLink {
 	).trim();
 	const anchor =
 		hashIndex >= 0
-			? unescapeWikilink(targetAndAnchor.slice(hashIndex + 1)).trim() ||
-				undefined
+			? unescapeWikilink(targetAndAnchor.slice(hashIndex + 1)).trim() || undefined
 			: undefined;
 	const subpath = anchor
 		? anchor.startsWith("^")
@@ -142,7 +139,6 @@ export function parseWikiLink(inner: string, raw: string): ParsedWikiLink {
 		alias,
 		isEmbed,
 		subpath,
-		isCurrentPageReference:
-			target.length === 0 && typeof subpath !== "undefined",
+		isCurrentPageReference: target.length === 0 && typeof subpath !== "undefined",
 	};
 }

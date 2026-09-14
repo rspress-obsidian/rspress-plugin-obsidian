@@ -467,7 +467,3 @@ Open an issue at [github.com/Jacob-Valor/rspress-plugin-obsidian-wikilink/issues
 ## Changelog
 
 See the [CHANGELOG](https://github.com/Jacob-Valor/rspress-plugin-obsidian-wikilink/blob/main/CHANGELOG.md) for version history and release notes.
-
-## Next Steps
-
-- See the [[api|API Reference]] for programmatic usage

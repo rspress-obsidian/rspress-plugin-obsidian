@@ -91,8 +91,29 @@ Place a `.canvas` file in your vault directory:
 
 Run `rspress dev` and visit `/canvas/<filename>` to see it rendered.
 
+## Canvas, vault notes, and Graph View together
+
+Use the same `vaultRoot` for Markdown notes and Canvas files:
+
+```ts
+const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
+
+plugins: [
+  pluginObsidianWikiLink({
+    vaultRoot,
+    vaultRoutePrefix: "/vault",
+    enableTransclusion: true,
+    enableMediaEmbeds: true,
+  }),
+  pluginObsidianCanvas({ vaultRoot, routePrefix: "/canvas" }),
+  pluginGraphview({ defaultOpen: true }),
+]
+```
+
+A Canvas file node such as `{ "file": "Welcome.md" }` links to `/vault/Welcome`. Wikilinks and Markdown links inside text nodes also contribute edges to the Graph View.
+
 ## Next Steps
 
-- [Configure plugin options](/guide/configuration) for vault paths and route prefixes
-- [Learn about the canvas format](/guide/canvas-format) and supported features
-- [Customize the appearance](/guide/styling) with CSS overrides
+- [Configure plugin options](/canvas/guide/configuration) for vault paths and route prefixes
+- [Learn about the canvas format](/canvas/guide/canvas-format) and supported features
+- [Customize the appearance](/canvas/guide/styling) with CSS overrides

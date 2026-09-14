@@ -9,3 +9,4 @@
  */
 @import "../src/markdown/styles.css";
 @import "../src/canvas/styles/canvas.css";
+@import "../src/graph/runtime/graph-panels.css";

@@ -1,15 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { rehypeHeaderAnchor } from "@rspress/core/dist/node/mdx/rehypePlugins/headerAnchor.js";
-import type {
-	Blockquote,
-	HTML,
-	Image,
-	Link,
-	PhrasingContent,
-	Root,
-	Text,
-} from "mdast";
+import type { Blockquote, HTML, Image, Link, PhrasingContent, Root, Text } from "mdast";
 import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -48,8 +40,7 @@ import {
 
 // Obsidian tags accept letters, numbers, symbols, emojis, hyphens, and
 // nested-slash segments, but must contain at least one non-numeric character.
-const TAG_PATTERN =
-	/(?<![/\p{L}\p{N}_-])#([\p{L}\p{M}\p{N}\p{Extended_Pictographic}_/-]+)/gu;
+const TAG_PATTERN = /(?<![/\p{L}\p{N}_-])#([\p{L}\p{M}\p{N}\p{Extended_Pictographic}_/-]+)/gu;
 // Capture optional fold operator: '+' = expanded, '-' = collapsed, absent = static
 const CALLOUT_HEADER_PATTERN = /^\[!(\w+)\]([-+])?\s*(.*)$/;
 // Obsidian inline and block comments: %% ... %%
@@ -68,15 +59,7 @@ const MAX_TRANSCLUSION_DEPTH = 5;
 // not abort resolution of the remaining wikilinks in the document.
 const pendingFailures = new WeakSet<VFile>();
 
-const IMAGE_EXTS = new Set([
-	"png",
-	"jpg",
-	"jpeg",
-	"gif",
-	"svg",
-	"webp",
-	"avif",
-]);
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "avif"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "flac"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv"]);
 const PDF_EXT = "pdf";
@@ -154,9 +137,7 @@ function resolveWikilinksInAst(
 
 		for (const match of matches) {
 			if (match.start > cursor) {
-				replacementNodes.push(
-					createTextNode(node.value.slice(cursor, match.start)),
-				);
+				replacementNodes.push(createTextNode(node.value.slice(cursor, match.start)));
 			}
 
 			const parsed = parseWikiLink(match.inner, match.fullMatch);
@@ -216,12 +197,7 @@ function processDataviewNodes(
 	unistVisit(tree, "code", (node) => {
 		const language = node.lang?.toLowerCase();
 		if (language === "dataviewjs") {
-			const result = renderDataviewJs(
-				node.value,
-				currentPage,
-				index,
-				options.dailyNotes,
-			);
+			const result = renderDataviewJs(node.value, currentPage, index, options.dailyNotes);
 			if (result.error) {
 				reportDataviewDiagnostic(file, options, result.error);
 				return;
@@ -234,12 +210,7 @@ function processDataviewNodes(
 		}
 		if (language !== "dataview") return;
 
-		const result = renderDataviewQuery(
-			node.value,
-			currentPage,
-			index,
-			options.dailyNotes,
-		);
+		const result = renderDataviewQuery(node.value, currentPage, index, options.dailyNotes);
 		if (result.error) {
 			reportDataviewDiagnostic(file, options, result.error);
 			return;
@@ -261,9 +232,7 @@ function processDataviewNodes(
 		if (visibleFields !== node.value) node.value = visibleFields;
 		if (!node.value.includes("=")) return;
 		const matches = [
-			...node.value.matchAll(
-				/(^|[\s(])=\s*([A-Za-z_][A-Za-z0-9_.]*(?:\([^()\n]*\))?)/g,
-			),
+			...node.value.matchAll(/(^|[\s(])=\s*([A-Za-z_][A-Za-z0-9_.]*(?:\([^()\n]*\))?)/g),
 		].filter((match) => !isInsideWikilink(node.value, match.index ?? 0));
 		if (matches.length === 0) return;
 
@@ -274,16 +243,9 @@ function processDataviewNodes(
 			const expression = match[2] ?? "";
 			const fullStart = match.index ?? 0;
 			if (fullStart > cursor) {
-				replacementNodes.push(
-					createTextNode(node.value.slice(cursor, expressionStart)),
-				);
+				replacementNodes.push(createTextNode(node.value.slice(cursor, expressionStart)));
 			}
-			const result = renderDataviewInline(
-				expression,
-				currentPage,
-				index,
-				options.dailyNotes,
-			);
+			const result = renderDataviewInline(expression, currentPage, index, options.dailyNotes);
 			if (result.error || !result.html) {
 				reportDataviewDiagnostic(
 					file,
@@ -291,9 +253,7 @@ function processDataviewNodes(
 					result.error ?? "Inline expression returned no value.",
 				);
 				replacementNodes.push(
-					createTextNode(
-						node.value.slice(fullStart, expressionStart + expression.length),
-					),
+					createTextNode(node.value.slice(fullStart, expressionStart + expression.length)),
 				);
 			} else {
 				replacementNodes.push({ type: "html", value: result.html });
@@ -328,11 +288,7 @@ function processDailyNoteNodes(
 	});
 
 	if (includePageDecorations && options.dailyNotes.navigation) {
-		const navigation = renderDailyNavigation(
-			currentPage,
-			index.pages,
-			options.dailyNotes,
-		);
+		const navigation = renderDailyNavigation(currentPage, index.pages, options.dailyNotes);
 		if (navigation) {
 			tree.children.unshift({ type: "html", value: navigation });
 		}
@@ -352,10 +308,21 @@ function reportDataviewDiagnostic(
 	file.message(fullMessage);
 }
 export const remarkWikilink: RemarkPluginFactory<RemarkWikiLinkPluginOptions> =
-	({ getDocsRoot, options }) =>
+	({ getDocsRoot, getContentIndex, options }) =>
 	async (tree: Root, file: VFile): Promise<void> => {
 		try {
-			await remarkWikilinkInner(tree, file, getDocsRoot, options);
+			await remarkWikilinkInner(
+				tree,
+				file,
+				getDocsRoot,
+				options,
+				undefined,
+				true,
+				undefined,
+				0,
+				undefined,
+				getContentIndex,
+			);
 		} catch (error) {
 			// A fatal VFileMessage (raised by file.fail for error-mode broken or
 			// ambiguous links) must propagate so the build actually fails.
@@ -377,17 +344,20 @@ export const remarkWikilink: RemarkPluginFactory<RemarkWikiLinkPluginOptions> =
 async function remarkWikilinkInner(
 	tree: Root,
 	file: VFile,
-	getDocsRoot: () => string,
+	getDocsRoot: (filePath?: string) => string,
 	options: NormalizedPluginOptions,
 	currentFilePathOverride?: string,
 	includePageDecorations = true,
 	visitedOverride?: Set<string>,
 	depth = 0,
 	sourceContent?: string,
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
 ): Promise<void> {
-	const docsRoot = getDocsRoot();
-	const index = await getCachedContentIndex(docsRoot);
 	const currentFilePath = currentFilePathOverride ?? getCurrentFilePath(file);
+	const docsRoot = getDocsRoot(currentFilePath);
+	const index = getContentIndex && currentFilePath
+		? await getContentIndex(currentFilePath)
+		: await getCachedContentIndex(docsRoot);
 
 	if (!currentFilePath) {
 		return;
@@ -401,21 +371,13 @@ async function remarkWikilinkInner(
 		return;
 	}
 	if (options.enableDailyNotes) {
-		processDailyNoteNodes(
-			tree,
-			currentPage,
-			index,
-			options,
-			includePageDecorations,
-		);
+		processDailyNoteNodes(tree, currentPage, index, options, includePageDecorations);
 	}
 
 	if (options.enableDataview) {
 		processDataviewNodes(tree, currentPage, index, file, options);
 	}
-	const footnoteSourceMetadata = extractFootnoteSourceMetadata(
-		sourceContent ?? String(file),
-	);
+	const footnoteSourceMetadata = extractFootnoteSourceMetadata(sourceContent ?? String(file));
 	const source = sourceContent ?? String(file);
 
 	// Callouts run before every text-level transform: their content paragraphs
@@ -435,11 +397,7 @@ async function remarkWikilinkInner(
 		const stripped = node.value.replace(COMMENT_PATTERN, "");
 		if (stripped === node.value) return;
 
-		if (
-			stripped.trim().length === 0 &&
-			parent &&
-			typeof position === "number"
-		) {
+		if (stripped.trim().length === 0 && parent && typeof position === "number") {
 			// Remove the now-empty text node from its parent
 			(parent as Parent & { children: unknown[] }).children.splice(position, 1);
 			return;
@@ -530,10 +488,7 @@ async function remarkWikilinkInner(
 				typeof lineNumber === "number" &&
 				footnoteSourceMetadata.continuationLineNumbers.has(lineNumber)
 			) {
-				(parent as Parent & { children: unknown[] }).children.splice(
-					position,
-					1,
-				);
+				(parent as Parent & { children: unknown[] }).children.splice(position, 1);
 			}
 		});
 	}
@@ -645,8 +600,7 @@ async function remarkWikilinkInner(
 
 		// If the node was only definition text it's now empty — remove it.
 		const nonEmpty = replacementNodes.filter(
-			(n): n is PhrasingContent =>
-				n.type !== "text" || (n as Text).value.trim().length > 0,
+			(n): n is PhrasingContent => n.type !== "text" || (n as Text).value.trim().length > 0,
 		);
 		if (nonEmpty.length === 0) {
 			(parent as Parent & { children: unknown[] }).children.splice(position, 1);
@@ -701,10 +655,7 @@ async function remarkWikilinkInner(
 
 				if (tagName && !/^[\p{N}/-]+$/u.test(tagName)) {
 					replacementNodes.push(
-						createLinkNode(
-							`/tags/${encodeTagPathSegment(tagName)}`,
-							`#${tagName}`,
-						),
+						createLinkNode(`/tags/${encodeTagPathSegment(tagName)}`, `#${tagName}`),
 					);
 				} else {
 					replacementNodes.push(createTextNode(fullMatch));
@@ -747,6 +698,7 @@ async function remarkWikilinkInner(
 			docsRoot,
 			visitedOverride ?? new Set([currentPage.absolutePath]),
 			depth,
+			getContentIndex,
 		);
 	}
 
@@ -762,15 +714,8 @@ async function remarkWikilinkInner(
 	// serialize with stray empty <p> wrappers around block-level HTML.
 	unistVisit(tree, "paragraph", (node, position, parent) => {
 		if (!parent || typeof position !== "number") return;
-		if (
-			node.children.length === 0 ||
-			node.children.every((child) => child.type === "html")
-		) {
-			(parent as Parent & { children: unknown[] }).children.splice(
-				position,
-				1,
-				...node.children,
-			);
+		if (node.children.length === 0 || node.children.every((child) => child.type === "html")) {
+			(parent as Parent & { children: unknown[] }).children.splice(position, 1, ...node.children);
 		}
 	});
 
@@ -809,11 +754,9 @@ async function renderTranscludedHtml(
 	currentFilePath: string,
 	visited: Set<string>,
 	depth: number,
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
 ): Promise<string> {
-	const transcludedAst = unified()
-		.use(remarkParse)
-		.use(remarkGfm)
-		.parse(content) as Root;
+	const transcludedAst = unified().use(remarkParse).use(remarkGfm).parse(content) as Root;
 	await remarkWikilinkInner(
 		transcludedAst,
 		file,
@@ -824,6 +767,7 @@ async function renderTranscludedHtml(
 		visited,
 		depth,
 		content,
+		getContentIndex,
 	);
 	const htmlProcessor = unified()
 		.use(remarkRehype, { allowDangerousHtml: true })
@@ -832,7 +776,6 @@ async function renderTranscludedHtml(
 	const hastTree = htmlProcessor.runSync(transcludedAst);
 	return htmlProcessor.stringify(hastTree);
 }
-
 interface PageEmbedContext {
 	options: NormalizedPluginOptions;
 	file: VFile;
@@ -840,6 +783,7 @@ interface PageEmbedContext {
 	currentPage: ContentPage;
 	visited: Set<string>;
 	depth: number;
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>;
 }
 
 /**
@@ -875,26 +819,17 @@ async function renderPageEmbed(
 	}
 
 	try {
-		const content = await fs.promises.readFile(
-			targetPage.absolutePath,
-			"utf-8",
-		);
+		const content = await fs.promises.readFile(targetPage.absolutePath, "utf-8");
 		let transcludedContent: string | undefined;
 
 		if (parsedEmbed.subpath) {
 			if (parsedEmbed.subpath.kind === "heading") {
-				const headingSlug = resolveHeadingSlug(
-					targetPage,
-					parsedEmbed.subpath.value,
-				);
+				const headingSlug = resolveHeadingSlug(targetPage, parsedEmbed.subpath.value);
 				if (headingSlug !== undefined) {
 					transcludedContent = extractHeadingSection(content, headingSlug);
 				}
 			} else if (parsedEmbed.subpath.kind === "block") {
-				transcludedContent = extractBlockSection(
-					content,
-					parsedEmbed.subpath.value,
-				);
+				transcludedContent = extractBlockSection(content, parsedEmbed.subpath.value);
 			}
 
 			if (transcludedContent === undefined) {
@@ -924,8 +859,8 @@ async function renderPageEmbed(
 			targetPage.absolutePath,
 			new Set([...ctx.visited, targetPage.absolutePath]),
 			ctx.depth + 1,
+			ctx.getContentIndex,
 		);
-
 		return {
 			type: "html",
 			value: `<div class="obsidian-transclusion" data-src="${escapeHtmlAttribute(resolved.href ?? "")}">\n${transcludedHtml}\n</div>`,
@@ -967,15 +902,12 @@ function parseMarkdownLinkUrl(
 	}
 
 	const hashIndex = decoded.indexOf("#");
-	const pathPart = (
-		hashIndex >= 0 ? decoded.slice(0, hashIndex) : decoded
-	).trim();
+	const pathPart = (hashIndex >= 0 ? decoded.slice(0, hashIndex) : decoded).trim();
 	if (!/\.(md|mdx)$/i.test(pathPart)) {
 		return undefined;
 	}
 
-	const anchor =
-		hashIndex >= 0 ? decoded.slice(hashIndex + 1).trim() : undefined;
+	const anchor = hashIndex >= 0 ? decoded.slice(hashIndex + 1).trim() : undefined;
 	const subpath = anchor
 		? anchor.startsWith("^")
 			? { kind: "block" as const, value: anchor.slice(1).trim() }
@@ -1042,8 +974,7 @@ function processMarkdownLinks(
 /**
  * Resolve markdown embeds of vault pages — `![alt](note.md)` — the form
  * Obsidian transcludes identically to `![[note]]`. With transclusion
- * enabled the page is inlined; otherwise the embed becomes a styled link,
- * mirroring how non-transcluded `![[Page]]` wikilinks behave.
+ * enabled the page is inlined; otherwise the embed becomes a styled link.
  */
 async function processMarkdownEmbeds(
 	tree: Root,
@@ -1054,6 +985,7 @@ async function processMarkdownEmbeds(
 	docsRoot: string,
 	visited: Set<string>,
 	depth: number,
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
 ): Promise<void> {
 	const resolveOptions = {
 		enableFuzzyMatching: options.enableFuzzyMatching,
@@ -1094,7 +1026,6 @@ async function processMarkdownEmbeds(
 			}
 			continue;
 		}
-
 		const replacement: PhrasingContent = options.enableTransclusion
 			? await renderPageEmbed(parsed, resolved, {
 					options,
@@ -1103,6 +1034,7 @@ async function processMarkdownEmbeds(
 					currentPage,
 					visited,
 					depth,
+					getContentIndex,
 				})
 			: createEmbedNode(
 					resolved.href ?? resolved.targetPage.routePath,
@@ -1177,9 +1109,7 @@ async function processEmbedsInTree(
 			const parsedEmbed = parseWikiLink(inner, fullMatch);
 			const sizeParam = parsedEmbed.alias ?? "";
 			const target = parsedEmbed.target;
-			const fragment = parsedEmbed.subpath
-				? `#${parsedEmbed.subpath.value}`
-				: "";
+			const fragment = parsedEmbed.subpath ? `#${parsedEmbed.subpath.value}` : "";
 			const ext = target.split(".").pop()?.toLowerCase() ?? "";
 			if (options.enableMediaEmbeds && IMAGE_EXTS.has(ext)) {
 				const sizeAttr = parseSizeAttr(sizeParam);
@@ -1254,8 +1184,7 @@ async function processEmbedsInTree(
 					);
 				}
 				const src = escapeHtmlAttribute(`${resolved.url}${fragment}`);
-				const pdfHeight =
-					parsedEmbed.subpath?.value.match(/^height=(\d+)$/i)?.[1] ?? "600";
+				const pdfHeight = parsedEmbed.subpath?.value.match(/^height=(\d+)$/i)?.[1] ?? "600";
 				replacementNodes.push({
 					type: "html",
 					value: `<iframe src="${src}" width="100%" height="${pdfHeight}px" frameborder="0"></iframe>`,
@@ -1302,8 +1231,7 @@ async function processEmbedsInTree(
 }
 
 function getCurrentFilePath(file: VFile): string | undefined {
-	const pathFromFile =
-		typeof file.path === "string" ? file.path : file.history.at(-1);
+	const pathFromFile = typeof file.path === "string" ? file.path : file.history.at(-1);
 	return pathFromFile ? normalizeFsPath(pathFromFile) : undefined;
 }
 
@@ -1401,8 +1329,7 @@ function emitBlockAnchors(tree: Root, currentPage: ContentPage): void {
 					replacement.push(createTextNode(leading));
 				}
 				replacement.push(createBlockAnchor(id));
-				const children = (parent as Parent & { children: PhrasingContent[] })
-					.children;
+				const children = (parent as Parent & { children: PhrasingContent[] }).children;
 				children.splice(position, 1, ...replacement);
 			}
 		}
@@ -1417,10 +1344,7 @@ function createBlockAnchor(id: string): HTML {
 }
 
 function escapeHtmlText(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeHtmlAttribute(value: string): string {
@@ -1487,15 +1411,11 @@ function resolveMediaSrc(
 	// cannot escape the docs root through the emitted URL.
 	const encodePath = (segments: string[]): string =>
 		`/${segments
-			.filter(
-				(segment) => segment !== "" && segment !== "." && segment !== "..",
-			)
+			.filter((segment) => segment !== "" && segment !== "." && segment !== "..")
 			.map((segment) => encodeURIComponent(segment))
 			.join("/")}`;
 
-	const relativeAsset = (
-		absolutePath: string,
-	): MediaResolveResult | undefined => {
+	const relativeAsset = (absolutePath: string): MediaResolveResult | undefined => {
 		const relativePath = path.relative(docsRoot, absolutePath);
 		if (
 			relativePath.startsWith("..") ||
@@ -1550,8 +1470,7 @@ function resolveMediaSrc(
 		return { url: exactBasename[0].urlPath, found: true };
 	}
 	if (enableCaseInsensitiveLookup) {
-		const caseInsensitiveBasename =
-			index.byAssetBaseNameCI.get(basename.toLowerCase()) ?? [];
+		const caseInsensitiveBasename = index.byAssetBaseNameCI.get(basename.toLowerCase()) ?? [];
 		if (caseInsensitiveBasename.length === 1 && caseInsensitiveBasename[0]) {
 			return { url: caseInsensitiveBasename[0].urlPath, found: true };
 		}
@@ -1669,22 +1588,13 @@ function restoreHijackedCallouts(tree: Root, source: string): void {
 		// Walk up through the contiguous blockquote lines covering the first
 		// positioned child.
 		let headerIndex = startLine - 1;
-		while (
-			headerIndex > 0 &&
-			(sourceLines[headerIndex - 1] ?? "").trimStart().startsWith(">")
-		) {
+		while (headerIndex > 0 && (sourceLines[headerIndex - 1] ?? "").trimStart().startsWith(">")) {
 			headerIndex -= 1;
 		}
 
-		const headerLine = (sourceLines[headerIndex] ?? "").replace(
-			/^(?:\s*>+)+\s*/,
-			"",
-		);
+		const headerLine = (sourceLines[headerIndex] ?? "").replace(/^(?:\s*>+)+\s*/, "");
 		const headerMatch = /^\[!(\w+)\]/.exec(headerLine);
-		if (
-			!headerMatch ||
-			headerMatch[1]?.toLowerCase() !== node.attributes.type
-		) {
+		if (!headerMatch || headerMatch[1]?.toLowerCase() !== node.attributes.type) {
 			return;
 		}
 
@@ -1717,10 +1627,7 @@ function restoreHijackedCallouts(tree: Root, source: string): void {
 		// Leading blank lines keep the re-parsed positions aligned with the
 		// original source lines.
 		const fragment = `${"\n".repeat(candidate.startLine - 1)}${blockquoteSource}`;
-		const parsed = unified()
-			.use(remarkParse)
-			.use(remarkGfm)
-			.parse(fragment) as Root;
+		const parsed = unified().use(remarkParse).use(remarkGfm).parse(fragment) as Root;
 		if (parsed.children.length === 0) {
 			continue;
 		}
@@ -1767,8 +1674,7 @@ function processCallouts(
 	const sourceLines = source.split(/\r?\n/);
 
 	// Strip leading blockquote markers (one or more levels) from a source line.
-	const stripQuoteMarker = (line: string): string =>
-		line.replace(/^(?:\s*>+)+\s*/, "");
+	const stripQuoteMarker = (line: string): string => line.replace(/^(?:\s*>+)+\s*/, "");
 
 	const headerLineOf = (bq: Blockquote): string | undefined => {
 		const firstPara = bq.children[0];
@@ -1781,9 +1687,7 @@ function processCallouts(
 		if (firstPara?.type !== "paragraph") {
 			return undefined;
 		}
-		const firstText = firstPara.children.find(
-			(c): c is Text => c.type === "text",
-		);
+		const firstText = firstPara.children.find((c): c is Text => c.type === "text");
 		return firstText?.value.split("\n")[0];
 	};
 
@@ -1811,9 +1715,7 @@ function processCallouts(
 		if (firstPara?.type !== "paragraph") continue;
 
 		const headerLine = headerLineOf(bq);
-		const calloutMatch = headerLine
-			? CALLOUT_HEADER_PATTERN.exec(headerLine)
-			: null;
+		const calloutMatch = headerLine ? CALLOUT_HEADER_PATTERN.exec(headerLine) : null;
 		if (!calloutMatch) continue;
 
 		const rawType = calloutMatch[1]?.toLowerCase() ?? "note";
@@ -1833,9 +1735,7 @@ function processCallouts(
 			startLine >= 1 &&
 			endLine <= sourceLines.length
 		) {
-			const contentLines = sourceLines
-				.slice(startLine, endLine)
-				.map(stripQuoteMarker);
+			const contentLines = sourceLines.slice(startLine, endLine).map(stripQuoteMarker);
 			const reParsed = unified().use(remarkParse).parse(contentLines.join("\n"))
 				.children as typeof bq.children;
 			if (reParsed.length === 0) {
@@ -1845,9 +1745,7 @@ function processCallouts(
 			}
 		} else {
 			// Fallback for positionless ASTs: operate on the first text node.
-			const firstText = firstPara.children.find(
-				(c): c is Text => c.type === "text",
-			);
+			const firstText = firstPara.children.find((c): c is Text => c.type === "text");
 			if (!firstText) continue;
 			const remainingLines = firstText.value.split("\n").slice(1);
 			if (remainingLines.length === 0) {
@@ -1859,12 +1757,7 @@ function processCallouts(
 
 		// Obsidian renders callout titles as inline markdown (and resolves
 		// wikilinks in them), so render before escaping into the title element.
-		const titleHtml = renderCalloutTitleHtml(
-			calloutTitle,
-			currentPage,
-			index,
-			options,
-		);
+		const titleHtml = renderCalloutTitleHtml(calloutTitle, currentPage, index, options);
 
 		const replacements: Root["children"] = buildCalloutNodes(
 			calloutType,
@@ -1936,11 +1829,7 @@ function buildCalloutNodes(
 		];
 	}
 
-	return [
-		openDiv,
-		titleDiv,
-		{ type: "html", value: '<div class="callout-content"></div></div>' },
-	];
+	return [openDiv, titleDiv, { type: "html", value: '<div class="callout-content"></div></div>' }];
 }
 
 /**
@@ -2070,10 +1959,7 @@ function stripFrontmatter(content: string): string {
 	return content.slice(end + 4).trimStart();
 }
 
-function extractHeadingSection(
-	content: string,
-	heading: string,
-): string | undefined {
+function extractHeadingSection(content: string, heading: string): string | undefined {
 	const stripped = stripFrontmatter(content);
 	const lines = stripped.split("\n");
 	const normalizedTarget =
@@ -2148,10 +2034,7 @@ function extractHeadingSection(
 	return undefined;
 }
 
-function extractBlockSection(
-	content: string,
-	blockId: string,
-): string | undefined {
+function extractBlockSection(content: string, blockId: string): string | undefined {
 	const stripped = stripFrontmatter(content);
 	const lines = stripped.split("\n");
 	const normalizedId = blockId.trim().toLowerCase();
@@ -2194,11 +2077,7 @@ function extractBlockSection(
  * their nested sub-items and continuation lines; every other block type is
  * returned as a single line, matching the indexed block-ID semantics.
  */
-function extractInlineBlock(
-	lines: string[],
-	index: number,
-	text: string,
-): string {
+function extractInlineBlock(lines: string[], index: number, text: string): string {
 	const listItem = text.match(/^(\s*)([-*+]|\d+[.)])\s+/);
 	if (!listItem) {
 		return text.trim();

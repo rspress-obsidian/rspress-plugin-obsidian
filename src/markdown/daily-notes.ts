@@ -20,20 +20,10 @@ const MONTHS = [
 	"November",
 	"December",
 ];
-const WEEKDAYS = [
-	"Sunday",
-	"Monday",
-	"Tuesday",
-	"Wednesday",
-	"Thursday",
-	"Friday",
-	"Saturday",
-];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const TOKEN_PATTERN = /YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd/g;
 
-export function normalizeDailyNoteConfig(
-	config?: Partial<DailyNoteConfig>,
-): DailyNoteConfig {
+export function normalizeDailyNoteConfig(config?: Partial<DailyNoteConfig>): DailyNoteConfig {
 	return {
 		folder: config?.folder?.replace(/^\/|\/$/g, "") ?? "",
 		dateFormat: config?.dateFormat ?? "YYYY-MM-DD",
@@ -47,8 +37,7 @@ export function parseDailyNoteDate(
 ): Date | undefined {
 	const withoutExtension = relativePath.replace(/\.(md|mdx)$/i, "");
 	const folderPrefix = config.folder ? `${config.folder}/` : "";
-	if (folderPrefix && !withoutExtension.startsWith(folderPrefix))
-		return undefined;
+	if (folderPrefix && !withoutExtension.startsWith(folderPrefix)) return undefined;
 	const candidate = withoutExtension.slice(folderPrefix.length);
 	const tokenMatches = [...config.dateFormat.matchAll(TOKEN_PATTERN)];
 	let pattern = "";
@@ -128,15 +117,11 @@ export function renderDailyNavigation(
 			page,
 			date: parseDailyNoteDate(page.relativePath, config),
 		}))
-		.filter((entry): entry is { page: ContentPage; date: Date } =>
-			Boolean(entry.date),
-		)
+		.filter((entry): entry is { page: ContentPage; date: Date } => Boolean(entry.date))
 		.sort((left, right) => left.date.getTime() - right.date.getTime());
 	const currentDate = parseDailyNoteDate(currentPage.relativePath, config);
 	if (!currentDate) return "";
-	const position = dated.findIndex(
-		(entry) => entry.page.absolutePath === currentPage.absolutePath,
-	);
+	const position = dated.findIndex((entry) => entry.page.absolutePath === currentPage.absolutePath);
 	if (position < 0) return "";
 	const previous = dated[position - 1];
 	const next = dated[position + 1];
@@ -151,35 +136,24 @@ function tokenRegex(token: string): string {
 	if (token === "YYYY") return "(\\d{4})";
 	if (token === "YY") return "(\\d{2})";
 	if (token === "MMMM") return `(${MONTHS.join("|")})`;
-	if (token === "MMM")
-		return `(${MONTHS.map((month) => month.slice(0, 3)).join("|")})`;
+	if (token === "MMM") return `(${MONTHS.map((month) => month.slice(0, 3)).join("|")})`;
 	if (token === "MM") return "(\\d{2})";
 	if (token === "M") return "(\\d{1,2})";
 	if (token === "DD") return "(\\d{2})";
 	if (token === "D") return "(\\d{1,2})";
 	if (token === "dddd") return `(?:${WEEKDAYS.join("|")})`;
-	if (token === "ddd")
-		return `(?:${WEEKDAYS.map((day) => day.slice(0, 3)).join("|")})`;
+	if (token === "ddd") return `(?:${WEEKDAYS.map((day) => day.slice(0, 3)).join("|")})`;
 	return escapeRegex(token);
 }
 
-function adjustDate(
-	date: Date,
-	sign?: string,
-	amount?: string,
-	unit?: string,
-): Date {
+function adjustDate(date: Date, sign?: string, amount?: string, unit?: string): Date {
 	const adjusted = new Date(date.getTime());
 	if (!sign || !amount || !unit) return adjusted;
 	const delta = (sign === "-" ? -1 : 1) * Number(amount);
-	if (unit.toLowerCase() === "d")
-		adjusted.setUTCDate(adjusted.getUTCDate() + delta);
-	else if (unit.toLowerCase() === "w")
-		adjusted.setUTCDate(adjusted.getUTCDate() + delta * 7);
-	else if (unit.toLowerCase() === "m")
-		adjusted.setUTCMonth(adjusted.getUTCMonth() + delta);
-	else if (unit.toLowerCase() === "y")
-		adjusted.setUTCFullYear(adjusted.getUTCFullYear() + delta);
+	if (unit.toLowerCase() === "d") adjusted.setUTCDate(adjusted.getUTCDate() + delta);
+	else if (unit.toLowerCase() === "w") adjusted.setUTCDate(adjusted.getUTCDate() + delta * 7);
+	else if (unit.toLowerCase() === "m") adjusted.setUTCMonth(adjusted.getUTCMonth() + delta);
+	else if (unit.toLowerCase() === "y") adjusted.setUTCFullYear(adjusted.getUTCFullYear() + delta);
 	return adjusted;
 }
 
@@ -188,10 +162,7 @@ function escapeRegex(value: string | undefined): string {
 }
 
 function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeAttribute(value: string): string {

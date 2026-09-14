@@ -1,0 +1,55 @@
+/* ─── Hover Preview ────────────────────────────────────────────────────── */
+
+.obsidian-hover-preview {
+  background: var(--rp-c-bg, #fff);
+  border: 1px solid var(--rp-c-divider, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  animation: hp-fade-in 0.15s ease-out;
+}
+
+@keyframes hp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.obsidian-hover-preview__header {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--rp-c-divider, #e5e7eb);
+  background: var(--rp-c-bg-soft, #f9fafb);
+}
+
+.obsidian-hover-preview__title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rp-c-text-1, #111827);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.obsidian-hover-preview__content {
+  padding: 0.75rem;
+  overflow-y: auto;
+  max-height: calc(240px - 40px);
+}
+
+/* ─── Dark mode ────────────────────────────────────────────────────────── */
+
+html.dark .obsidian-hover-preview {
+  background: var(--rp-c-bg, #1a1a1a);
+  border-color: var(--rp-c-divider, #374151);
+}
+
+html.dark .obsidian-hover-preview__header {
+  border-bottom-color: var(--rp-c-divider, #262626);
+  background: var(--rp-c-bg-soft, #1f1f1f);
+}

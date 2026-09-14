@@ -43,40 +43,24 @@ export function renderDataviewJs(
 		const output: string[] = [];
 		for (const statement of splitStatements(source)) {
 			if (!statement.trim()) continue;
-			const declaration =
-				/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([\s\S]+)$/.exec(
-					statement.trim(),
-				);
+			const declaration = /^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([\s\S]+)$/.exec(
+				statement.trim(),
+			);
 			if (declaration?.[1] && declaration[2]) {
 				environment.values.set(
 					declaration[1],
-					evaluateExpression(
-						declaration[2],
-						environment,
-						currentPage,
-						index,
-						dailyConfig,
-					),
+					evaluateExpression(declaration[2], environment, currentPage, index, dailyConfig),
 				);
 				continue;
 			}
-			const call =
-				/^dv\.(table|list|taskList|paragraph|header)\s*\(([\s\S]*)\)$/.exec(
-					statement.trim(),
-				);
+			const call = /^dv\.(table|list|taskList|paragraph|header)\s*\(([\s\S]*)\)$/.exec(
+				statement.trim(),
+			);
 			if (!call?.[1]) {
-				throw new Error(
-					`Unsupported DataviewJS statement: ${statement.trim()}`,
-				);
+				throw new Error(`Unsupported DataviewJS statement: ${statement.trim()}`);
 			}
 			const args = splitTopLevel(call[2] ?? "").map((argument) =>
-				evaluateExpression(
-					argument,
-					environment,
-					currentPage,
-					index,
-					dailyConfig,
-				),
+				evaluateExpression(argument, environment, currentPage, index, dailyConfig),
 			);
 			output.push(renderApiCall(call[1], args));
 		}
@@ -100,45 +84,16 @@ function evaluateExpression(
 		const parameter = arrow.left.replace(/[()]/g, "").trim();
 		return { kind: "function", parameter, body: arrow.right };
 	}
-	for (const operator of [
-		"||",
-		"&&",
-		"===",
-		"!==",
-		"==",
-		"!=",
-		">=",
-		"<=",
-		">",
-		"<",
-	]) {
+	for (const operator of ["||", "&&", "===", "!==", "==", "!=", ">=", "<=", ">", "<"]) {
 		const split = splitTopLevelOperator(value, operator);
 		if (split) {
-			const left = evaluateExpression(
-				split.left,
-				environment,
-				currentPage,
-				index,
-				dailyConfig,
-			);
-			const right = evaluateExpression(
-				split.right,
-				environment,
-				currentPage,
-				index,
-				dailyConfig,
-			);
+			const left = evaluateExpression(split.left, environment, currentPage, index, dailyConfig);
+			const right = evaluateExpression(split.right, environment, currentPage, index, dailyConfig);
 			return applyOperator(operator, left, right);
 		}
 	}
 	if (value.startsWith("!")) {
-		return !evaluateExpression(
-			value.slice(1),
-			environment,
-			currentPage,
-			index,
-			dailyConfig,
-		);
+		return !evaluateExpression(value.slice(1), environment, currentPage, index, dailyConfig);
 	}
 	if (isQuoted(value)) return value.slice(1, -1).replace(/\\([\\"'])/g, "$1");
 	if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
@@ -168,13 +123,7 @@ function evaluateExpression(
 	const call = splitCall(value);
 	if (call && (!call.name.includes(".") || call.name.startsWith("dv."))) {
 		const args = splitTopLevel(call.arguments).map((argument) =>
-			evaluateExpression(
-				argument,
-				environment,
-				currentPage,
-				index,
-				dailyConfig,
-			),
+			evaluateExpression(argument, environment, currentPage, index, dailyConfig),
 		);
 		return evaluateCall(call.name, args, currentPage, index, dailyConfig);
 	}
@@ -186,41 +135,17 @@ function evaluateExpression(
 		if (first === "dv" && firstCall) {
 			chain.shift();
 			const args = splitTopLevel(firstCall.arguments).map((argument) =>
-				evaluateExpression(
-					argument,
-					environment,
-					currentPage,
-					index,
-					dailyConfig,
-				),
+				evaluateExpression(argument, environment, currentPage, index, dailyConfig),
 			);
-			result = evaluateCall(
-				`dv.${firstCall.name}`,
-				args,
-				currentPage,
-				index,
-				dailyConfig,
-			);
+			result = evaluateCall(`dv.${firstCall.name}`, args, currentPage, index, dailyConfig);
 		} else {
-			result = evaluateExpression(
-				first,
-				environment,
-				currentPage,
-				index,
-				dailyConfig,
-			);
+			result = evaluateExpression(first, environment, currentPage, index, dailyConfig);
 		}
 		for (const part of chain) {
 			const methodCall = splitCall(part);
 			if (methodCall) {
 				const args = splitTopLevel(methodCall.arguments).map((argument) =>
-					evaluateExpression(
-						argument,
-						environment,
-						currentPage,
-						index,
-						dailyConfig,
-					),
+					evaluateExpression(argument, environment, currentPage, index, dailyConfig),
 				);
 				result = applyCollectionMethod(
 					result,
@@ -252,9 +177,7 @@ function evaluateCall(
 	if (name === "dv.current") return pageValue(currentPage, index, dailyConfig);
 	if (name === "dv.page") {
 		const target = normalizeFilePathKey(String(args[0] ?? "")).toLowerCase();
-		const page =
-			index.byFilePathKeyCI.get(target)?.[0] ??
-			index.byBaseNameCI.get(target)?.[0];
+		const page = index.byFilePathKeyCI.get(target)?.[0] ?? index.byBaseNameCI.get(target)?.[0];
 		return page ? pageValue(page, index, dailyConfig) : null;
 	}
 	if (name === "dv.array") return Array.isArray(args[0]) ? args[0] : [args[0]];
@@ -316,27 +239,19 @@ function applyCollectionMethod(
 		return collection.filter((item) => Boolean(applyCallback(item)));
 	if (method === "map") return collection.map((item) => applyCallback(item));
 	if (method === "sort") {
-		const direction =
-			String(args[1] ?? "asc").toLowerCase() === "desc" ? -1 : 1;
+		const direction = String(args[1] ?? "asc").toLowerCase() === "desc" ? -1 : 1;
 		return [...collection].sort(
 			(left, right) =>
 				direction *
-				String(applyCallback(left)).localeCompare(
-					String(applyCallback(right)),
-					undefined,
-					{
-						numeric: true,
-						sensitivity: "base",
-					},
-				),
+				String(applyCallback(left)).localeCompare(String(applyCallback(right)), undefined, {
+					numeric: true,
+					sensitivity: "base",
+				}),
 		);
 	}
 	if (method === "limit") return collection.slice(0, Number(args[0] ?? 0));
 	if (method === "slice")
-		return collection.slice(
-			Number(args[0] ?? 0),
-			Number(args[1] ?? collection.length),
-		);
+		return collection.slice(Number(args[0] ?? 0), Number(args[1] ?? collection.length));
 	if (method === "join") return collection.join(String(args[0] ?? ", "));
 	if (method === "flat") return collection.flat(Number(args[0] ?? 1));
 	throw new Error(`Unsupported DataviewJS collection method: ${method}.`);
@@ -345,18 +260,7 @@ function applyCollectionMethod(
 function readProperty(value: unknown, property: string): unknown {
 	if (Array.isArray(value)) {
 		if (property === "length") return value.length;
-		if (
-			[
-				"where",
-				"filter",
-				"map",
-				"sort",
-				"limit",
-				"slice",
-				"join",
-				"flat",
-			].includes(property)
-		) {
+		if (["where", "filter", "map", "sort", "limit", "slice", "join", "flat"].includes(property)) {
 			return { kind: "collection-method", collection: value, method: property };
 		}
 		return value.map((item) => readProperty(item, property));
@@ -369,8 +273,7 @@ function readProperty(value: unknown, property: string): unknown {
 }
 
 function renderApiCall(name: string, args: unknown[]): string {
-	if (name === "paragraph")
-		return `<p class="dataviewjs-paragraph">${renderValue(args[0])}</p>`;
+	if (name === "paragraph") return `<p class="dataviewjs-paragraph">${renderValue(args[0])}</p>`;
 	if (name === "header") {
 		const level = Math.min(6, Math.max(1, Number(args[0] ?? 2)));
 		return `<h${level}>${renderValue(args[1])}</h${level}>`;
@@ -389,8 +292,7 @@ function renderApiCall(name: string, args: unknown[]): string {
 }
 
 function renderTask(value: unknown): string {
-	if (!value || typeof value !== "object")
-		return `<li>${renderValue(value)}</li>`;
+	if (!value || typeof value !== "object") return `<li>${renderValue(value)}</li>`;
 	const completed = "completed" in value && value.completed === true;
 	const text = "text" in value ? String(value.text ?? "") : String(value);
 	return `<li><input type="checkbox" disabled${completed ? " checked" : ""} /> ${escapeHtml(text)}</li>`;
@@ -400,21 +302,14 @@ function renderValue(value: unknown): string {
 	if (value == null) return "";
 	if (isLink(value))
 		return `<a href="${escapeAttribute(value.href)}">${escapeHtml(value.label)}</a>`;
-	if (value instanceof Date)
-		return escapeHtml(value.toISOString().slice(0, 10));
+	if (value instanceof Date) return escapeHtml(value.toISOString().slice(0, 10));
 	if (Array.isArray(value)) return value.map(renderValue).join(", ");
 	if (typeof value === "object") return escapeHtml(JSON.stringify(value));
 	return escapeHtml(String(value));
 }
 
-function pageValue(
-	page: ContentPage,
-	index: ContentIndex,
-	dailyConfig?: DailyNoteConfig,
-): JsPage {
-	const dailyDate = dailyConfig
-		? parseDailyNoteDate(page.relativePath, dailyConfig)
-		: undefined;
+function pageValue(page: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig): JsPage {
+	const dailyDate = dailyConfig ? parseDailyNoteDate(page.relativePath, dailyConfig) : undefined;
 	const file: Record<string, unknown> = {
 		path: page.relativePath,
 		name: page.baseName,
@@ -427,9 +322,7 @@ function pageValue(
 		day: dailyDate,
 		tasks: page.dataviewTasks,
 		lists: page.dataviewLists,
-		outlinks: page.wikilinkTargets.map((target) =>
-			linkForTarget(target, index),
-		),
+		outlinks: page.wikilinkTargets.map((target) => linkForTarget(target, index)),
 	};
 	return {
 		...page.dataviewFields,
@@ -448,31 +341,21 @@ function pagesForSource(
 	if (source == null) return pages;
 	const query = String(source);
 	if (query.startsWith("#"))
-		return pages.filter(
-			(page) => Array.isArray(page.file.tags) && page.file.tags.includes(query),
-		);
+		return pages.filter((page) => Array.isArray(page.file.tags) && page.file.tags.includes(query));
 	if (query.startsWith('"') || query.startsWith("'")) {
 		const folder = stripQuotes(query).replace(/\/$/, "");
 		return pages.filter(
-			(page) =>
-				page.file.path === folder ||
-				String(page.file.path).startsWith(`${folder}/`),
+			(page) => page.file.path === folder || String(page.file.path).startsWith(`${folder}/`),
 		);
 	}
 	return pages;
 }
 
-function applyOperator(
-	operator: string,
-	left: unknown,
-	right: unknown,
-): unknown {
+function applyOperator(operator: string, left: unknown, right: unknown): unknown {
 	if (operator === "||") return Boolean(left) || Boolean(right);
 	if (operator === "&&") return Boolean(left) && Boolean(right);
-	if (operator === "===" || operator === "==")
-		return comparable(left) === comparable(right);
-	if (operator === "!==" || operator === "!=")
-		return comparable(left) !== comparable(right);
+	if (operator === "===" || operator === "==") return comparable(left) === comparable(right);
+	if (operator === "!==" || operator === "!=") return comparable(left) !== comparable(right);
 	if (operator === ">") return Number(left) > Number(right);
 	if (operator === "<") return Number(left) < Number(right);
 	if (operator === ">=") return Number(left) >= Number(right);
@@ -480,24 +363,14 @@ function applyOperator(
 }
 
 function comparable(value: unknown): unknown {
-	return isLink(value)
-		? value.href
-		: value instanceof Date
-			? value.getTime()
-			: value;
+	return isLink(value) ? value.href : value instanceof Date ? value.getTime() : value;
 }
 
 function flattenValues(value: unknown): unknown[] {
-	return Array.isArray(value)
-		? value.flat(Infinity)
-		: value == null
-			? []
-			: [value];
+	return Array.isArray(value) ? value.flat(Infinity) : value == null ? [] : [value];
 }
 
-function splitCall(
-	value: string,
-): { name: string; arguments: string } | undefined {
+function splitCall(value: string): { name: string; arguments: string } | undefined {
 	const open = value.indexOf("(");
 	if (open <= 0 || !value.endsWith(")")) return undefined;
 	let depth = 0;
@@ -559,10 +432,7 @@ function splitTopLevelOperator(
 		if (char === '"' || char === "'") quote = char;
 		else if (char === "(" || char === "[" || char === "{") depth += 1;
 		else if (char === ")" || char === "]" || char === "}") depth -= 1;
-		else if (
-			depth === 0 &&
-			value.slice(index, index + operator.length) === operator
-		)
+		else if (depth === 0 && value.slice(index, index + operator.length) === operator)
 			return {
 				left: value.slice(0, index),
 				right: value.slice(index + operator.length),
@@ -621,27 +491,16 @@ function pageLink(page: ContentPage): JsLink {
 function linkForTarget(target: string, index: ContentIndex): JsLink {
 	const key = normalizeFilePathKey(target).toLowerCase();
 	const page =
-		index.byFilePathKeyCI.get(key)?.[0] ??
-		index.byBaseNameCI.get(key.split("/").pop() ?? key)?.[0];
-	return page
-		? pageLink(page)
-		: { kind: "link", label: target, href: `/${target}` };
+		index.byFilePathKeyCI.get(key)?.[0] ?? index.byBaseNameCI.get(key.split("/").pop() ?? key)?.[0];
+	return page ? pageLink(page) : { kind: "link", label: target, href: `/${target}` };
 }
 
 function isLink(value: unknown): value is JsLink {
-	return Boolean(
-		value &&
-			typeof value === "object" &&
-			"kind" in value &&
-			value.kind === "link",
-	);
+	return Boolean(value && typeof value === "object" && "kind" in value && value.kind === "link");
 }
 
 function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;");
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeAttribute(value: string): string {

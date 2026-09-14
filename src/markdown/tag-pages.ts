@@ -90,10 +90,7 @@ function escapeMarkdownDestination(value: string): string {
 	return value.replace(/[()]/g, "\\$&").replace(/\s/g, "%20");
 }
 
-function generateTagPageContent(
-	displayName: string,
-	pages: ContentPage[],
-): string {
+function generateTagPageContent(displayName: string, pages: ContentPage[]): string {
 	const listItems = pages
 		.map((p) => {
 			const label = escapeMarkdownLabel(p.title ?? p.baseName);
@@ -128,9 +125,7 @@ export function generateTagPages(index: ContentIndex): AdditionalPage[] {
 	const tagMap = collectTags(index);
 
 	return [...tagMap.entries()]
-		.filter(
-			([, { displayName }]) => encodeTagPathSegment(displayName).length > 0,
-		)
+		.filter(([, { displayName }]) => encodeTagPathSegment(displayName).length > 0)
 		.map(([, { displayName, pages }]) => ({
 			routePath: `/tags/${encodeTagPathSegment(displayName)}`,
 			content: generateTagPageContent(displayName, pages),

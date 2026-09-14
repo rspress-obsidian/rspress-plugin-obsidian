@@ -5,10 +5,10 @@
 		"declaration": true,
 		"emitDeclarationOnly": true,
 		"outDir": "dist",
+		"rootDir": "src",
 		"isolatedModules": true,
 		"allowImportingTsExtensions": true,
-		"ignoreDeprecations": "6.0",
-		"baseUrl": "."
+		"ignoreDeprecations": "6.0"
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx"],
 	"exclude": ["dist", "node_modules", "test", "scripts", "doc_build"]

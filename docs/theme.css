@@ -1,0 +1,87 @@
+@import "../src/graph/runtime/graph-panels.css";
+
+/* rspress-plugin-obsidian docs — site-wide theme overrides.
+ * Loaded via `globalStyles` in rspress.config.ts. Keep token-driven and
+ * theme-aware (light + dark via Rspress CSS variables); no hard-coded
+ * light/dark backgrounds. */
+
+:root {
+	--site-accent: #6d5dfc;
+	--site-accent-2: #3b82f6;
+}
+
+html {
+	scroll-behavior: smooth;
+}
+
+/* Light + dark aware brand accents for interactive text. */
+.rspress-doc a,
+.rp-home-hero a,
+.rspress-nav a:hover,
+.rp-nav a:hover {
+	text-decoration-color: color-mix(in srgb, var(--rp-c-brand) 45%, transparent);
+}
+
+/* Subtle brand tint on the global nav bar. */
+.rp-nav {
+	background: color-mix(in srgb, var(--rp-c-bg) 82%, var(--site-accent) 3%);
+	backdrop-filter: saturate(1.4) blur(12px);
+	-webkit-backdrop-filter: saturate(1.4) blur(12px);
+}
+
+/* Landing page backdrop — brand radial glows over the Rspress bg token. */
+.rp-home-background {
+	background:
+		radial-gradient(circle at 18% 12%, rgb(109 93 252 / 16%), transparent 34rem),
+		radial-gradient(circle at 84% 22%, rgb(59 130 246 / 12%), transparent 32rem),
+		var(--rp-c-bg);
+}
+
+/* Feature cards: subtle lift, brand border on hover, token colors. */
+.rp-home-feature__item-wrapper {
+	content-visibility: auto;
+	contain-intrinsic-size: 1px 13rem;
+}
+
+.rp-home-feature__card {
+	background: color-mix(in srgb, var(--rp-c-bg-soft) 86%, transparent);
+	border: 1px solid color-mix(in srgb, var(--rp-c-divider) 76%, transparent);
+	border-radius: 1.1rem;
+	box-shadow: 0 10px 34px rgb(15 23 42 / 5%);
+	transition:
+		transform 160ms ease,
+		border-color 160ms ease,
+		box-shadow 160ms ease;
+}
+
+.rp-home-feature__item-wrapper:hover .rp-home-feature__card {
+	transform: translateY(-4px);
+	border-color: color-mix(in srgb, var(--site-accent) 48%, var(--rp-c-divider));
+	box-shadow: 0 18px 40px rgb(15 23 42 / 11%);
+}
+
+.rp-home-feature__icon {
+	display: grid;
+	place-items: center;
+	width: 2.7rem;
+	height: 2.7rem;
+	margin-bottom: 1rem;
+	border: 1px solid color-mix(in srgb, var(--site-accent) 30%, var(--rp-c-divider));
+	border-radius: 0.85rem;
+	background: color-mix(in srgb, var(--site-accent) 10%, transparent);
+	font-size: 1.25rem;
+}
+
+html.dark .rp-home-feature__card {
+	box-shadow: 0 14px 44px rgb(0 0 0 / 18%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.rp-home-feature__card {
+		transition: none;
+	}
+
+	.rp-home-feature__item-wrapper:hover .rp-home-feature__card {
+		transform: none;
+	}
+}

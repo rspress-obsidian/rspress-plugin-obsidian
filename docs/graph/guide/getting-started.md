@@ -67,6 +67,12 @@ The plugin operates in two phases:
 - [Large graph optimization](./graph-view.md#large-graphs) — automatically reduces visual cost for 80+ node graphs
 - [Color customization](./configuration.md#custom-colors) — override the default palette to match your brand
 
+
+## Unified Obsidian content
+
+The graph plugin works with the Markdown and Canvas plugins in the same Rspress site. It extracts ordinary Markdown links, Obsidian wikilinks, generated tag-page references, and Markdown references inside Canvas text/file nodes. Headings, block IDs, media assets, and external URLs remain attached to their source page instead of becoming separate graph nodes.
+
+See [Graph View: Obsidian content support](./graph-view.md#obsidian-content-support) for the complete integration table.
 See also:
 - [Configuration](./configuration.md)
 - [API Reference](../api.md)

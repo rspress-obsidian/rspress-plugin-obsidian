@@ -1,8 +1,9 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RspressPlugin } from "@rspress/core";
 import type { RemarkPluginFactory } from "rspress-plugin-devkit";
-import { buildContentIndex } from "./content-index.ts";
+import { buildContentIndex, type ContentIndex } from "./content-index.ts";
 import { normalizeDailyNoteConfig } from "./daily-notes.ts";
 import { remarkWikilink } from "./remark-wikilink.ts";
 import { generateTagPages } from "./tag-pages.ts";
@@ -65,6 +66,8 @@ function normalizePluginOptions(
 	options: RspressPluginObsidianWikiLinkOptions = {},
 ): NormalizedPluginOptions {
 	return {
+		vaultRoot: options.vaultRoot ? path.resolve(process.cwd(), options.vaultRoot) : undefined,
+		vaultRoutePrefix: normalizeRoutePrefix(options.vaultRoutePrefix),
 		onBrokenLink: options.onBrokenLink ?? "error",
 		onAmbiguousLink: options.onAmbiguousLink ?? "error",
 		enableFuzzyMatching: options.enableFuzzyMatching ?? false,
@@ -82,6 +85,13 @@ function normalizePluginOptions(
 		enableTagPages: options.enableTagPages ?? false,
 		enableDefaultStyles: options.enableDefaultStyles ?? false,
 	};
+}
+
+/** Normalize a route prefix: ensure leading slash, no trailing slash. */
+function normalizeRoutePrefix(value: string | undefined): string {
+	const prefix = value ?? "/vault";
+	const withLeading = prefix.startsWith("/") ? prefix : `/${prefix}`;
+	return withLeading.replace(/\/+$/, "") || "/vault";
 }
 
 // Resolved at module load time — works from both src/ (dev) and dist/ (published).
@@ -113,11 +123,49 @@ const STYLES_PATH = fileURLToPath(new URL("./styles.css", import.meta.url));
  *   optional; see {@link RspressPluginObsidianWikiLinkOptions} for details.
  * @returns An {@link RspressPlugin} ready to append to `plugins:`.
  */
+async function createVaultPages(vaultRoot: string, routePrefix: string): Promise<VaultPage[]> {
+	const pages: VaultPage[] = [];
+	const queue = [path.resolve(vaultRoot)];
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current) continue;
+		const entries = await fs.readdir(current, { withFileTypes: true });
+		for (const entry of entries) {
+			if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+			const absolutePath = path.join(current, entry.name);
+			if (entry.isDirectory()) {
+				queue.push(absolutePath);
+				continue;
+			}
+			if (!entry.isFile() || !/\.(md|mdx)$/i.test(entry.name)) continue;
+			const relativePath = path.relative(vaultRoot, absolutePath).replaceAll(path.sep, "/");
+			if (relativePath.split("/").some((part) => /^_[^_]/.test(part))) continue;
+			const withoutExtension = relativePath.replace(/\.(md|mdx)$/i, "");
+			const routePart = withoutExtension.replace(/\/index$/i, "");
+			const routePath = `${routePrefix}/${routePart}`.replace(/\/+/g, "/").replace(/\/$/, "") || routePrefix;
+			pages.push({ routePath, filepath: absolutePath });
+		}
+	}
+	return pages;
+}
+
+type VaultPage = { routePath: string; filepath?: string; content?: string };
 export function pluginObsidianWikiLink(
 	options: RspressPluginObsidianWikiLinkOptions = {},
 ): RspressPlugin {
 	const normalizedOptions = normalizePluginOptions(options);
 	let docsRoot = path.resolve(process.cwd(), "docs");
+	let vaultIndex: ContentIndex | undefined;
+
+	const getIndexForFile = async (filePath: string): Promise<ContentIndex> => {
+		if (normalizedOptions.vaultRoot && filePath.startsWith(`${normalizedOptions.vaultRoot}${path.sep}`)) {
+			vaultIndex ??= await buildContentIndex(normalizedOptions.vaultRoot, {
+				routePrefix: normalizedOptions.vaultRoutePrefix,
+			});
+			return vaultIndex;
+		}
+		return buildContentIndex(docsRoot);
+	};
 
 	const remarkPluginTuple: [
 		RemarkPluginFactory<RemarkWikiLinkPluginOptions>,
@@ -125,7 +173,11 @@ export function pluginObsidianWikiLink(
 	] = [
 		remarkWikilink,
 		{
-			getDocsRoot: () => docsRoot,
+			getDocsRoot: (filePath) =>
+				filePath && normalizedOptions.vaultRoot && filePath.startsWith(`${normalizedOptions.vaultRoot}${path.sep}`)
+					? normalizedOptions.vaultRoot
+					: docsRoot,
+			getContentIndex: getIndexForFile,
 			options: normalizedOptions,
 		},
 	];
@@ -139,6 +191,7 @@ export function pluginObsidianWikiLink(
 
 		config(config) {
 			docsRoot = path.resolve(process.cwd(), config.root ?? "docs");
+			vaultIndex = undefined;
 
 			// Vault-style markdown links (`[x](Page.md)` resolved by basename,
 			// not relative path) fail Rspress's own dead-link gate before this
@@ -158,16 +211,18 @@ export function pluginObsidianWikiLink(
 
 			return config;
 		},
-
-		...(normalizedOptions.enableTagPages && {
-			async addPages(config) {
-				const root = path.resolve(
-					process.cwd(),
-					(config as { root?: string }).root ?? "docs",
-				);
+		...((normalizedOptions.vaultRoot || normalizedOptions.enableTagPages) && {
+			async addPages(config): Promise<VaultPage[]> {
+				const root = path.resolve(process.cwd(), (config as { root?: string }).root ?? "docs");
 				docsRoot = root;
-				const index = await buildContentIndex(root);
-				return generateTagPages(index);
+				const pages = normalizedOptions.vaultRoot
+					? await createVaultPages(normalizedOptions.vaultRoot, normalizedOptions.vaultRoutePrefix)
+					: [];
+				if (normalizedOptions.enableTagPages) {
+					const index = await buildContentIndex(root);
+					pages.push(...generateTagPages(index));
+				}
+				return pages;
 			},
 		}),
 

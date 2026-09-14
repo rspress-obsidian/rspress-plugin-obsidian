@@ -14,7 +14,7 @@ export default defineConfig([
 			graph: "src/graph/index.ts",
 		},
 		format: ["esm", "cjs"],
-		dts: true,
+dts: false,
 		clean: true,
 		outDir: "dist",
 		target: "es2022",
@@ -41,10 +41,12 @@ export default defineConfig([
 			"canvas/components/CanvasEmbed": "src/canvas/components/CanvasEmbed.tsx",
 			"graph/runtime/GraphPanel": "src/graph/runtime/GraphPanel.tsx",
 			"graph/runtime/GraphSidebar": "src/graph/runtime/GraphSidebar.tsx",
+			"graph/runtime/LazyGraphPanel": "src/graph/runtime/LazyGraphPanel.tsx",
+			"graph/runtime/HoverPreview": "src/graph/runtime/HoverPreview.tsx",
 		},
 		format: ["esm"],
 		outDir: "dist",
-		dts: true,
+		dts: false,
 		external: [
 			"react",
 			"react-dom",
@@ -52,6 +54,7 @@ export default defineConfig([
 			"react-force-graph-2d",
 			"@rspress/core",
 			"virtual-graph-data",
+			"virtual-page-content-data",
 		],
 		target: "es2020",
 		noExternal: ["marked"],
@@ -65,6 +68,7 @@ export default defineConfig([
 			canvas: "src/canvas/styles/canvas.css",
 			"canvas-bundle": "src/canvas/styles/canvas.css",
 			styles: "src/markdown/styles.css",
+			"graph-panels": "src/graph/runtime/graph-panels.css",
 		},
 		format: ["esm"],
 		outDir: "dist",
@@ -74,6 +78,7 @@ export default defineConfig([
 			await minifyCssFile("dist/canvas.css");
 			await minifyCssFile("dist/styles.css");
 			await minifyCssFile("dist/canvas-bundle.css");
+			await minifyCssFile("dist/graph-panels.css");
 		},
 	},
 ]);

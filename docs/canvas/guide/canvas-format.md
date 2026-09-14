@@ -150,3 +150,14 @@ Both nodes and edges support the `canvasColor` type:
 ## Editor and persistence
 
 The default viewer is read-only. With `editable: true`, cards and edges can be created, moved, resized, deleted, and multi-selected in browser memory. Export the modified JSON Canvas and copy it back into the vault before the next build; the plugin never writes directly to `.canvas` files.
+
+## Graph integration
+
+With `pluginGraphview()` enabled, Canvas references can contribute to the documentation graph:
+
+- Markdown file nodes create edges to the matching published page;
+- wikilinks, Markdown links, and tags inside text nodes are extracted;
+- image, audio, video, PDF, and external URL nodes remain Canvas assets rather than graph nodes;
+- Canvas-only visual edges are intentionally kept inside the Canvas view.
+
+See the [Graph View guide](/graph/guide/graph-view#obsidian-content-support) for the combined setup.

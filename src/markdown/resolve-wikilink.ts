@@ -1,9 +1,5 @@
 import path from "node:path";
-import {
-	humanizeBaseName,
-	normalizeLookupValue,
-	slugifyHeading,
-} from "./slug.ts";
+import { humanizeBaseName, normalizeLookupValue, slugifyHeading } from "./slug.ts";
 import type {
 	ContentAsset,
 	ContentPage,
@@ -33,10 +29,7 @@ import {
  * 5. Shortest-suffix fuzzy match (opt-in via
  *    {@link NormalizedPluginOptions.enableFuzzyMatching})
  */
-export function resolveWikiLink(
-	parsed: ParsedWikiLink,
-	context: ResolveContext,
-): ResolvedWikiLink {
+export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext): ResolvedWikiLink {
 	if (parsed.search) {
 		return resolveVaultSearch(parsed, context);
 	}
@@ -52,10 +45,7 @@ export function resolveWikiLink(
 		};
 	}
 
-	const relativePathKey = resolveRelativePathKey(
-		context.currentPage.relativePath,
-		parsed.target,
-	);
+	const relativePathKey = resolveRelativePathKey(context.currentPage.relativePath, parsed.target);
 	if (relativePathKey !== undefined) {
 		const relativePage = context.index.byFilePathKey.get(relativePathKey);
 		if (relativePage) {
@@ -79,8 +69,7 @@ export function resolveWikiLink(
 					: relativePageResolution.result;
 			}
 
-			const relativeAssets =
-				context.index.byAssetPathCI.get(relativePathKey.toLowerCase()) ?? [];
+			const relativeAssets = context.index.byAssetPathCI.get(relativePathKey.toLowerCase()) ?? [];
 			if (relativeAssets.length === 1) {
 				const asset = relativeAssets[0];
 				if (asset) return resolveAgainstAsset(asset, parsed);
@@ -111,8 +100,7 @@ export function resolveWikiLink(
 	}
 	const assetBaseName = path.basename(exactPathKey);
 
-	const assetCandidates =
-		context.index.byAssetBaseName.get(assetBaseName) ?? [];
+	const assetCandidates = context.index.byAssetBaseName.get(assetBaseName) ?? [];
 	if (assetCandidates.length === 1) {
 		const asset = assetCandidates[0];
 		if (asset) return resolveAgainstAsset(asset, parsed);
@@ -125,8 +113,7 @@ export function resolveWikiLink(
 	}
 
 	const exactBaseName = path.basename(exactPathKey);
-	const exactBaseNameCandidates =
-		context.index.byBaseName.get(exactBaseName) ?? [];
+	const exactBaseNameCandidates = context.index.byBaseName.get(exactBaseName) ?? [];
 	const exactBaseNameResolution = resolveCandidateSet(
 		exactBaseNameCandidates,
 		parsed.target,
@@ -174,10 +161,7 @@ export function resolveWikiLink(
 	}
 
 	if (context.options?.enableCaseInsensitiveLookup) {
-		const caseInsensitiveResolution = resolveCaseInsensitivePage(
-			context,
-			parsed.target,
-		);
+		const caseInsensitiveResolution = resolveCaseInsensitivePage(context, parsed.target);
 		if (caseInsensitiveResolution) {
 			return caseInsensitiveResolution.kind === "resolved"
 				? resolveAgainstPage(caseInsensitiveResolution.page, parsed)
@@ -199,10 +183,7 @@ export function resolveWikiLink(
 		message: `Unable to resolve wikilink target "${parsed.target}".`,
 	};
 }
-function resolveVaultSearch(
-	parsed: ParsedWikiLink,
-	context: ResolveContext,
-): ResolvedWikiLink {
+function resolveVaultSearch(parsed: ParsedWikiLink, context: ResolveContext): ResolvedWikiLink {
 	const query = parsed.subpath?.value.trim().toLowerCase() ?? "";
 	if (!query || !parsed.search) {
 		return {
@@ -267,18 +248,13 @@ function resolveVaultSearch(
 	return {
 		status: "ok",
 		href: `${encodeRoutePath(match.page.routePath)}#${match.fragment}`,
-		label:
-			parsed.alias ??
-			(parsed.search === "block" ? match.label.slice(1) : match.label),
+		label: parsed.alias ?? (parsed.search === "block" ? match.label.slice(1) : match.label),
 		description: match.description,
 		targetPage: match.page,
 	};
 }
 
-function resolveCurrentPageReference(
-	page: ContentPage,
-	parsed: ParsedWikiLink,
-): ResolvedWikiLink {
+function resolveCurrentPageReference(page: ContentPage, parsed: ParsedWikiLink): ResolvedWikiLink {
 	const subpath = parsed.subpath;
 	if (!subpath?.value) {
 		return {
@@ -290,9 +266,7 @@ function resolveCurrentPageReference(
 	const resolvedSubpath = resolveSubpath(page, subpath);
 	if (!resolvedSubpath) {
 		const suffix =
-			subpath.kind === "heading"
-				? formatAvailableHeadings(page)
-				: formatAvailableBlocks(page);
+			subpath.kind === "heading" ? formatAvailableHeadings(page) : formatAvailableBlocks(page);
 		return {
 			status: "broken-anchor",
 			message: `Unable to resolve ${describeSubpath(subpath)} in ${page.relativePath}.${suffix}`,
@@ -314,10 +288,7 @@ function resolveCurrentPageReference(
 	};
 }
 
-function resolveAgainstPage(
-	page: ContentPage,
-	parsed: ParsedWikiLink,
-): ResolvedWikiLink {
+function resolveAgainstPage(page: ContentPage, parsed: ParsedWikiLink): ResolvedWikiLink {
 	const label = parsed.alias ?? defaultLabel(parsed, page);
 
 	if (!parsed.subpath) {
@@ -345,8 +316,7 @@ function resolveAgainstPage(
 	const description =
 		parsed.subpath?.kind === "heading"
 			? (page.headingBySlug.get(resolvedSubpath)?.preview ??
-				page.headingByText.get(normalizeLookupValue(parsed.subpath.value))
-					?.preview)
+				page.headingByText.get(normalizeLookupValue(parsed.subpath.value))?.preview)
 			: undefined;
 
 	return {
@@ -357,10 +327,7 @@ function resolveAgainstPage(
 		targetPage: page,
 	};
 }
-function resolveAgainstAsset(
-	asset: ContentAsset,
-	parsed: ParsedWikiLink,
-): ResolvedWikiLink {
+function resolveAgainstAsset(asset: ContentAsset, parsed: ParsedWikiLink): ResolvedWikiLink {
 	const fragment = parsed.subpath ? `#${parsed.subpath.value}` : "";
 	return {
 		status: "ok",
@@ -369,10 +336,7 @@ function resolveAgainstAsset(
 	};
 }
 
-function resolveSubpath(
-	page: ContentPage,
-	subpath: WikiSubpath,
-): string | undefined {
+function resolveSubpath(page: ContentPage, subpath: WikiSubpath): string | undefined {
 	if (subpath.kind === "block") {
 		return resolveBlockId(page, subpath.value);
 	}
@@ -380,10 +344,7 @@ function resolveSubpath(
 	return resolveHeadingSlug(page, subpath.value);
 }
 
-export function resolveHeadingSlug(
-	page: ContentPage,
-	anchor: string,
-): string | undefined {
+export function resolveHeadingSlug(page: ContentPage, anchor: string): string | undefined {
 	const headingParts = anchor
 		.split("#")
 		.map((part) => part.trim())
@@ -393,8 +354,7 @@ export function resolveHeadingSlug(
 
 	// Attempt 1: explicit heading ID match — O(1) via pre-computed map.
 	const explicitEntry =
-		page.headingBySlug.get(lookupAnchor) ??
-		page.headingBySlug.get(normalizedAnchor);
+		page.headingBySlug.get(lookupAnchor) ?? page.headingBySlug.get(normalizedAnchor);
 	if (explicitEntry?.explicitId) {
 		return explicitEntry.explicitId;
 	}
@@ -431,10 +391,7 @@ export function resolveHeadingSlug(
 	return undefined;
 }
 
-function resolveBlockId(
-	page: ContentPage,
-	blockId: string,
-): string | undefined {
+function resolveBlockId(page: ContentPage, blockId: string): string | undefined {
 	const normalizedBlockId = normalizeLookupValue(blockId);
 
 	for (const block of page.blocks) {
@@ -454,9 +411,7 @@ function defaultLabel(parsed: ParsedWikiLink, page: ContentPage): string {
 	const normalizedTarget = normalizeLookupValue(parsed.target);
 	if (
 		(page.title && normalizeLookupValue(page.title) === normalizedTarget) ||
-		page.aliases.some(
-			(alias) => normalizeLookupValue(alias) === normalizedTarget,
-		)
+		page.aliases.some((alias) => normalizeLookupValue(alias) === normalizedTarget)
 	) {
 		return parsed.target.trim();
 	}
@@ -468,10 +423,7 @@ function defaultLabel(parsed: ParsedWikiLink, page: ContentPage): string {
 	return parsed.target;
 }
 
-function getMetadataCandidates(
-	context: ResolveContext,
-	target: string,
-): ContentPage[] {
+function getMetadataCandidates(context: ResolveContext, target: string): ContentPage[] {
 	const normalizedTarget = normalizeLookupValue(target);
 	if (!normalizedTarget) {
 		return [];
@@ -535,8 +487,7 @@ function resolveFuzzyPage(
 	const suffixMatches = context.index.pages.filter((page) => {
 		const normalizedPagePath = normalizeFuzzyLookup(page.filePathKey);
 		return (
-			normalizedPagePath === normalizedTarget ||
-			normalizedPagePath.endsWith(`/${normalizedTarget}`)
+			normalizedPagePath === normalizedTarget || normalizedPagePath.endsWith(`/${normalizedTarget}`)
 		);
 	});
 
@@ -554,10 +505,7 @@ function resolveFuzzyPage(
 		return undefined;
 	}
 
-	if (
-		secondMatch &&
-		secondMatch.filePathKey.length === bestMatch.filePathKey.length
-	) {
+	if (secondMatch && secondMatch.filePathKey.length === bestMatch.filePathKey.length) {
 		return {
 			kind: "result",
 			result: {
@@ -592,11 +540,7 @@ function resolveCaseInsensitivePage(
 
 	const baseName = path.basename(normalizedTarget);
 	const baseCandidates = context.index.byBaseNameCI.get(baseName);
-	return resolveCandidateSet(
-		baseCandidates ?? [],
-		target,
-		"a path-qualified link",
-	);
+	return resolveCandidateSet(baseCandidates ?? [], target, "a path-qualified link");
 }
 function normalizeFuzzyLookup(input: string): string {
 	return normalizeFilePathKey(input).toLowerCase();

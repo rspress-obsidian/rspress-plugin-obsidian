@@ -76,9 +76,7 @@ export function resolveRelativePathKey(
 		return undefined;
 	}
 
-	const currentDirectory = path.posix.dirname(
-		normalizeFsPath(currentRelativePath),
-	);
+	const currentDirectory = path.posix.dirname(normalizeFsPath(currentRelativePath));
 	return normalizeFilePathKey(
 		path.posix.normalize(path.posix.join(currentDirectory, normalizedTarget)),
 	);

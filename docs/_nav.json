@@ -1,0 +1,22 @@
+[
+  {
+    "text": "Wikilinks",
+    "link": "/wikilinks/getting-started",
+    "activeMatch": "/wikilinks/"
+  },
+  {
+    "text": "Tags & Daily Notes",
+    "link": "/tags-daily-notes/",
+    "activeMatch": "/tags-daily-notes/"
+  },
+  {
+    "text": "Graph Features",
+    "link": "/graph/guide/graph-view",
+    "activeMatch": "/graph/"
+  },
+  {
+    "text": "Canvas",
+    "link": "/canvas/guide/getting-started",
+    "activeMatch": "/canvas/"
+  }
+]

@@ -68,18 +68,13 @@ async function collectSourceFiles(
 	});
 	const files: SourceFile[] = [];
 
-	for (const entry of entries.sort((left, right) =>
-		left.name.localeCompare(right.name),
-	)) {
+	for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
 		if (entry.isDirectory() && isIgnoredDirectory(entry.name)) {
 			continue;
 		}
 		if (entry.isDirectory()) {
 			files.push(
-				...(await collectSourceFiles(
-					rootDir,
-					path.join(currentRelativePath, entry.name),
-				)),
+				...(await collectSourceFiles(rootDir, path.join(currentRelativePath, entry.name))),
 			);
 			continue;
 		}
@@ -87,9 +82,7 @@ async function collectSourceFiles(
 			continue;
 		}
 
-		const relativePath = normalizeRelativePath(
-			path.join(currentRelativePath, entry.name),
-		);
+		const relativePath = normalizeRelativePath(path.join(currentRelativePath, entry.name));
 		const absolutePath = path.join(rootDir, relativePath);
 		const stats = await fs.promises.stat(absolutePath);
 		files.push({
@@ -103,9 +96,7 @@ async function collectSourceFiles(
 	return files;
 }
 
-async function readManifest(
-	targetDir: string,
-): Promise<SyncManifest | undefined> {
+async function readManifest(targetDir: string): Promise<SyncManifest | undefined> {
 	const manifestPath = path.join(targetDir, MANIFEST_NAME);
 	try {
 		const raw = await fs.promises.readFile(manifestPath, "utf8");
@@ -128,9 +119,7 @@ async function readManifest(
 	}
 }
 
-async function prepareTarget(
-	targetDir: string,
-): Promise<SyncManifest | undefined> {
+async function prepareTarget(targetDir: string): Promise<SyncManifest | undefined> {
 	await fs.promises.mkdir(targetDir, { recursive: true });
 	const manifest = await readManifest(targetDir);
 	if (manifest) return manifest;
@@ -157,17 +146,10 @@ async function copyAtomically(
 	await fs.promises.rename(tempPath, targetPath);
 }
 
-async function writeManifest(
-	targetDir: string,
-	manifest: SyncManifest,
-): Promise<void> {
+async function writeManifest(targetDir: string, manifest: SyncManifest): Promise<void> {
 	const manifestPath = path.join(targetDir, MANIFEST_NAME);
 	const temporaryPath = `${manifestPath}.tmp`;
-	await fs.promises.writeFile(
-		temporaryPath,
-		`${JSON.stringify(manifest, null, 2)}\n`,
-		"utf8",
-	);
+	await fs.promises.writeFile(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 	await fs.promises.rename(temporaryPath, manifestPath);
 }
 
@@ -175,16 +157,10 @@ async function writeManifest(
  * Copy visible vault files into a dedicated, guarded Rspress source directory.
  * The target is never touched unless it contains this tool's manifest marker.
  */
-export async function syncObsidianVault(
-	options: ObsidianSyncOptions,
-): Promise<ObsidianSyncResult> {
+export async function syncObsidianVault(options: ObsidianSyncOptions): Promise<ObsidianSyncResult> {
 	const sourceDir = path.resolve(options.sourceDir);
 	const targetDir = path.resolve(options.targetDir);
-	if (
-		sourceDir === targetDir ||
-		isInside(targetDir, sourceDir) ||
-		isInside(sourceDir, targetDir)
-	) {
+	if (sourceDir === targetDir || isInside(targetDir, sourceDir) || isInside(sourceDir, targetDir)) {
 		throw new Error("Source and target directories must be separate trees.");
 	}
 
@@ -197,9 +173,7 @@ export async function syncObsidianVault(
 	const sourceFiles = await collectSourceFiles(sourceDir);
 	const nextFiles: Record<string, ManifestFile> = {};
 	const previousFiles = previousManifest?.files ?? {};
-	const temporaryDirectory = await fs.promises.mkdtemp(
-		path.join(targetDir, TEMP_DIRECTORY_PREFIX),
-	);
+	const temporaryDirectory = await fs.promises.mkdtemp(path.join(targetDir, TEMP_DIRECTORY_PREFIX));
 	let copied = 0;
 	let unchanged = 0;
 	let removed = 0;
@@ -212,10 +186,7 @@ export async function syncObsidianVault(
 			};
 			nextFiles[sourceFile.relativePath] = metadata;
 			const previous = previousFiles[sourceFile.relativePath];
-			if (
-				previous?.size === metadata.size &&
-				previous.mtimeMs === metadata.mtimeMs
-			) {
+			if (previous?.size === metadata.size && previous.mtimeMs === metadata.mtimeMs) {
 				unchanged += 1;
 				continue;
 			}
@@ -250,9 +221,7 @@ export async function syncObsidianVault(
 }
 
 /** Watch a vault and serialize debounced one-way syncs until interrupted. */
-export async function watchObsidianVault(
-	options: ObsidianSyncOptions,
-): Promise<void> {
+export async function watchObsidianVault(options: ObsidianSyncOptions): Promise<void> {
 	const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 	await syncObsidianVault(options);
 	const sourceDir = path.resolve(options.sourceDir);
@@ -390,9 +359,7 @@ if (import.meta.main) {
 			);
 		}
 	} catch (error) {
-		console.error(
-			`[obsidian-sync] ${error instanceof Error ? error.message : String(error)}`,
-		);
+		console.error(`[obsidian-sync] ${error instanceof Error ? error.message : String(error)}`);
 		process.exitCode = 1;
 	}
 }
