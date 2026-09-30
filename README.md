@@ -34,27 +34,36 @@ import path from "node:path";
 import { defineConfig } from "@rspress/core";
 import { markdown, canvas, graphview } from "rspress-plugin-obsidian";
 
+const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
+
 export default defineConfig({
   root: path.join(import.meta.dirname, "docs"),
   plugins: [
     markdown({
-      // Point this at your vault to publish notes alongside your docs.
-      // Omit it and only `root` is published.
-      vaultRoot: "./Obsidian Vault",
+      // Publish this vault's notes alongside your docs. Omit `vaultRoot` and
+      // only `root` is published.
+      vaultRoot,
       vaultRoutePrefix: "/vault",
 
       enableCallouts: true,
       enableBacklinks: true,
       enableDefaultStyles: true, // the stylesheet the above two need
     }),
-    canvas({ vaultRoot: "./Obsidian Vault", routePrefix: "/canvas" }),
+    canvas({
+      vaultRoot,
+      routePrefix: "/canvas",
+      // Must match `vaultRoutePrefix` above. Without it a canvas file card
+      // links to `/Note`, which the vault build never publishes.
+      fileRoutePrefix: "/vault",
+    }),
     graphview(),
   ],
 });
 ```
 
 `pluginObsidian((markdown, canvas, graphview) => [...])` composes the same three
-in one call, and each is importable on its own.
+in one call — the form this repository's own `rspress.config.ts` uses — and each
+feature is importable on its own.
 
 ## The three features
 
