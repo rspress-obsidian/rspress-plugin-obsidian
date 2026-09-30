@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
 import { findCanvasBoardByPath, setCanvasRoutes } from "../shared/canvas-routes.js";
 import { canvas } from "./index";
 import type { CanvasData, CanvasFileData, CanvasGroupData } from "./types";
@@ -425,23 +426,26 @@ describe("canvas enrichment", () => {
 		expect(routePaths).toEqual(["/canvas/board"]);
 	});
 
-	test("reports a route collision instead of publishing one canvas twice", async () => {
-		const fixture = await createVaultFixture();
-		await writeFile(
-			path.join(fixture.vault, "Board.canvas"),
-			JSON.stringify({ nodes: [], edges: [] }),
-		);
-		await writeFile(
-			path.join(fixture.vault, "board.canvas"),
-			JSON.stringify({ nodes: [], edges: [] }),
-		);
+	test.skipIf(!caseSensitiveFilesystem)(
+		"reports a route collision instead of publishing one canvas twice",
+		async () => {
+			const fixture = await createVaultFixture();
+			await writeFile(
+				path.join(fixture.vault, "Board.canvas"),
+				JSON.stringify({ nodes: [], edges: [] }),
+			);
+			await writeFile(
+				path.join(fixture.vault, "board.canvas"),
+				JSON.stringify({ nodes: [], edges: [] }),
+			);
 
-		const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
+			const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
 
-		await expect(plugin.addPages?.({ root: fixture.docs }, false)).rejects.toThrow(
-			/route collision/,
-		);
-	});
+			await expect(plugin.addPages?.({ root: fixture.docs }, false)).rejects.toThrow(
+				/route collision/,
+			);
+		},
+	);
 
 	test("reports a failure to write the embed JSON", async () => {
 		const fixture = await createVaultFixture();

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
 import { buildContentIndex } from "./content-index.ts";
 
 /** Run `body` against a throwaway vault built from `files`. */
@@ -190,29 +191,34 @@ describe("unicode-normalized resolution", () => {
  * differ per OS.
  */
 describe("case-only-different files", () => {
-	test("keeps both candidates and reports the ambiguity instead of picking one", async () => {
-		await withVault(
-			{ "Note.md": "# Note\n", "NOTE.md": "# NOTE\n", "source.md": "[[note]]\n" },
-			async (root) => {
-				const index = await buildContentIndex(root);
-				const routes = index.pages
-					.filter((page) => page.baseName.toLowerCase() === "note")
-					.map((page) => page.routePath);
+	test.skipIf(!caseSensitiveFilesystem)(
+		"keeps both candidates and reports the ambiguity instead of picking one",
+		async () => {
+			await withVault(
+				{ "Note.md": "# Note\n", "NOTE.md": "# NOTE\n", "source.md": "[[note]]\n" },
+				async (root) => {
+					const index = await buildContentIndex(root);
+					const routes = index.pages
+						.filter((page) => page.baseName.toLowerCase() === "note")
+						.map((page) => page.routePath);
 
-				expect(routes).toHaveLength(2);
-				// Both case-insensitive maps see both pages: a lookup that lands
-				// there is ambiguous, and must be reported as such.
-				expect(index.byBaseNameCI.get("note")).toHaveLength(2);
-				expect(index.byFilePathKeyCI.get("note")).toHaveLength(2);
+					expect(routes).toHaveLength(2);
+					// Both case-insensitive maps see both pages: a lookup that lands
+					// there is ambiguous, and must be reported as such.
+					expect(index.byBaseNameCI.get("note")).toHaveLength(2);
+					expect(index.byFilePathKeyCI.get("note")).toHaveLength(2);
 
-				// The backlink resolver reaches that ambiguity and records a backlink
-				// for every candidate instead of guessing one.
-				for (const route of routes) {
-					expect(index.backlinks.get(route)?.map((ref) => ref.relativePath)).toEqual(["source.md"]);
-				}
-			},
-		);
-	});
+					// The backlink resolver reaches that ambiguity and records a backlink
+					// for every candidate instead of guessing one.
+					for (const route of routes) {
+						expect(index.backlinks.get(route)?.map((ref) => ref.relativePath)).toEqual([
+							"source.md",
+						]);
+					}
+				},
+			);
+		},
+	);
 });
 
 describe("attachment URLs", () => {

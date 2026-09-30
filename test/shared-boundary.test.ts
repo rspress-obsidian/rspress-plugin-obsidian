@@ -109,9 +109,12 @@ describe("src/shared boundary", () => {
 							resolved.startsWith(`${path.join(SRC, candidate)}${path.sep}`),
 					);
 					if (!target || target === feature) continue;
-					// Report the specifier as written — that is what a reader sees
-					// in the source and what the allowlist is keyed on.
-					found.add(`${path.relative(SRC, file)} -> ${match[1] as string}`);
+					// Report the specifier as written — that is what a reader sees in
+					// the source and what the allowlist is keyed on. The file side is
+					// normalised to `/` because `path.relative` yields `\` on Windows,
+					// where the allowlist entry would otherwise never match.
+					const relative = path.relative(SRC, file).replace(/\\/g, "/");
+					found.add(`${relative} -> ${match[1] as string}`);
 				}
 			}
 		}
