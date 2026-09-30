@@ -1,10 +1,25 @@
 ---
-description: Install and configure rspress-plugin-obsidian-wikilink. Covers wikilink syntax, transclusion, media embeds, callouts, tags, comments, highlights, footnotes, and frontmatter support.
+description: Install and configure rspress-plugin-obsidian. Covers wikilink syntax, transclusion, media embeds, callouts, tags, comments, highlights, footnotes, and frontmatter support.
 ---
 
 # Getting Started
 
-Welcome to **rspress-plugin-obsidian-wikilink** — a Rspress plugin that brings full Obsidian-style markdown to your documentation.
+Welcome to **rspress-plugin-obsidian** — a Rspress plugin that brings Obsidian-style markdown to your documentation.
+
+It publishes a *subset* of an Obsidian vault: the Markdown dialect, the `.canvas` format, and a link graph. There is no plugin API, no `.obsidian/` configuration, and no live preview — this is a static-site publisher, not Obsidian.
+[What is and is not supported is itemised here.](/obsidian-compatibility)
+
+Almost everything beyond the core syntax is **opt-in**. Out of the box you get
+wikilinks, embeds, heading and block anchors, `==highlights==`, `%%comments%%`,
+footnotes and frontmatter. Callouts, transclusion, media embeds, tags and tag
+pages, daily notes, Dataview, math, Mermaid and the backlinks panel are each
+behind an `enable*` flag described [below](#optional-features).
+
+> `onBrokenLink` and `onAmbiguousLink` default to `"error"`, so the first build
+> of a real vault **fails on every unresolved `[[link]]`**. That is the
+> diagnostic doing its job. See
+> [how to check your own vault](/obsidian-compatibility#how-to-check-your-own-vault)
+> for downgrading it to a warning.
 
 ## Prerequisites
 
@@ -15,22 +30,22 @@ Welcome to **rspress-plugin-obsidian-wikilink** — a Rspress plugin that brings
 
 ```bash
 # Bun (recommended)
-bun add rspress-plugin-obsidian-wikilink
+bun add rspress-plugin-obsidian
 
 # npm
-npm install rspress-plugin-obsidian-wikilink
+npm install rspress-plugin-obsidian
 
 # pnpm
-pnpm add rspress-plugin-obsidian-wikilink
+pnpm add rspress-plugin-obsidian
 
 # yarn
-yarn add rspress-plugin-obsidian-wikilink
+yarn add rspress-plugin-obsidian
 ```
 
 Peer requirements:
 
-- `@rspress/core`
-- `typescript`
+- `@rspress/core` (required)
+- `react`, `react-dom`, `react-force-graph-2d` (optional peers — only needed by the graph view)
 
 ## Quick Setup
 
@@ -39,11 +54,38 @@ Add the plugin to your `rspress.config.ts`:
 ```ts
 import path from "node:path";
 import { defineConfig } from "@rspress/core";
-import { pluginObsidianWikiLink } from "rspress-plugin-obsidian-wikilink";
+import { markdown } from "rspress-plugin-obsidian";
 
 export default defineConfig({
   root: path.join(__dirname, "docs"),
-  plugins: [pluginObsidianWikiLink()],
+  plugins: [
+    // `enableDefaultStyles` bundles the plugin's stylesheet into the site.
+    markdown({ enableDefaultStyles: true }),
+  ],
+});
+```
+
+Load that stylesheet. Callouts, tag links, backlink panels and PDF transclusion
+frames all emit classes whose colours, glyphs and layout live in it, so without
+it the build succeeds and the page renders unstyled.
+
+It cannot be loaded by importing it from `rspress.config.ts`: Rspress loads the
+config with Node, not with the bundler, so a `.css` specifier — with or without
+a `?url` suffix — fails with `ERR_UNKNOWN_FILE_EXTENSION` or
+`ERR_PACKAGE_PATH_NOT_EXPORTED` before the build starts. If you need control
+over load order or a custom entry point, turn `enableDefaultStyles` off and
+point `globalStyles` at the resolved file instead:
+
+```ts
+import path from "node:path";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const pkgDir = path.dirname(require.resolve("rspress-plugin-obsidian/package.json"));
+
+export default defineConfig({
+  globalStyles: path.join(pkgDir, "dist/markdown.css"),
+  plugins: [markdown({ enableDefaultStyles: false })],
 });
 ```
 
@@ -84,6 +126,11 @@ Enable with `enableTransclusion: true` and `enableMediaEmbeds: true`:
 | `![[video.mp4]]` | Embed a video |
 | `![[audio.mp3]]` | Embed audio |
 | `![[doc.pdf]]` | Embed a PDF |
+| `![[doc.pdf#page=3]]` | Embed a PDF opened at page 3 |
+| `![[doc.pdf#height=400]]` | Embed a PDF in a 400px-tall frame |
+| `![300](image.png)` | Size a markdown image (Obsidian's syntax) |
+| `![300x200](image.png)` | Size a markdown image by width×height |
+| `![A caption\|300](image.png)` | Caption plus size, like the wikilink pipe |
 
 ## Obsidian Comments
 
@@ -119,10 +166,13 @@ This is a statement[^1] with a footnote.
 [^1]: This is the footnote definition.
 ```
 
-Inline footnotes are also supported:
+Definition text is inline Markdown like the rest of the page: bold, code, links,
+highlights, and resolved wikilinks all render inside the footnotes block.
+
+Inline footnotes are also supported, and their content is full Markdown:
 
 ```markdown
-Inline footnote^[This is inline] works differently.
+Inline footnote^[with **bold**, [a link](https://example.com) and [[a page]]] works.
 ```
 
 ## Frontmatter
@@ -156,7 +206,12 @@ excerpt: A brief description of this page
 
 ### Draft Pages with `publish: false`
 
-Add `publish: false` to frontmatter to keep a page out of the content index:
+Add `publish: false` to frontmatter to keep a page off the site. In a vault this
+takes the page out of the content index; in your own docs directory it removes
+the page's route, so the page is not built, does not appear in the
+auto-generated sidebar or nav, and is not in the search index. If a hand-written
+`_meta.json` or `themeConfig` still lists the page, remove it there too — that
+entry would be a link to nothing.
 
 ```yaml
 ---
@@ -172,6 +227,7 @@ Pages with `publish: false` are excluded from:
 - Tag page generation
 - Backlinks index
 - Content lookup tables
+- The build itself, when the page lives in the docs directory
 
 If no `publish` field is set, the page defaults to being included.
 
@@ -184,15 +240,18 @@ If no `publish` field is set, the page defaults to being included.
 | `enableCallouts` | `> [!note]` → styled HTML (+ foldable with `+`/`-`) |
 | `enableBacklinks` | Appends backlinks panel to each page |
 | `enableTransclusion` | `![[Page]]` inlines file content |
-| `enableMediaEmbeds` | `![[img.png]]` renders as `<img>` |
-| `enableDefaultStyles` | Injects bundled CSS for all plugin classes |
+| `enableMediaEmbeds` | `![[img.png]]` renders as `<img>`; covers every format Obsidian accepts — see [Embed & Transclusion Syntax](#embed--transclusion-syntax) |
+| `enableMath` | `$inline$` / `$$display$$` rendered with KaTeX (loads KaTeX's stylesheet) |
+| `enableMermaid` | ` ```mermaid ` fences drawn as diagrams in the browser |
+| `mermaidSecurityLevel` | Mermaid's `securityLevel`; `"strict"` (default) sanitizes, looser levels do not |
+| `enableDefaultStyles` | Injects the bundled stylesheet (callouts, backlinks, transclusion, embeds) |
 | `enableFuzzyMatching` | Shortest-suffix path fallback |
 | `enableCaseInsensitiveLookup` | Case-insensitive path resolution |
 
 Full configuration example:
 
 ```ts
-pluginObsidianWikiLink({
+markdown({
   onBrokenLink: "error",
   onAmbiguousLink: "error",
   enableFuzzyMatching: false,

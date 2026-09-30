@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defineConfig } from "@rspress/core";
-import { pluginObsidianWikiLink, pluginObsidianCanvas, pluginGraphview } from "./src";
+import { pluginObsidian } from "./src";
 
 const docsRoot = path.join(import.meta.dirname, "docs");
 const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
@@ -11,8 +11,8 @@ export default defineConfig({
   description: "One Obsidian-publishing suite for Rspress: wikilinks, canvas, graph",
   globalStyles: path.join(docsRoot, "theme.css"),
   themeDir: path.join(import.meta.dirname, "theme"),
-  plugins: [
-    pluginObsidianWikiLink({
+  plugins: pluginObsidian((markdown, canvas, graphview) => [
+    markdown({
       vaultRoot,
       vaultRoutePrefix: "/vault",
       enableTagLinking: true,
@@ -22,16 +22,24 @@ export default defineConfig({
       enableMediaEmbeds: true,
       enableTagPages: true,
       enableDailyNotes: true,
+      enableDataview: true,
+      enableMath: true,
+      enableMermaid: true,
       enableDefaultStyles: true,
       onBrokenLink: "warn",
     }),
-    pluginObsidianCanvas({
+    canvas({
       vaultRoot,
       routePrefix: "/canvas",
+      fileRoutePrefix: "/vault",
     }),
-    pluginGraphview({
+    graphview({
       defaultOpen: true,
       enableHoverPreviews: true,
+      // The examples page documents an unresolved link on purpose, and the
+      // markdown plugin already reports every unresolved wikilink through
+      // `onBrokenLink` above. Without this the same link is reported twice.
+      onUnresolvedLink: "ignore",
     }),
-  ],
+  ]),
 });

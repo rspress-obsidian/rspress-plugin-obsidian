@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import fc from "fast-check";
 import { CanvasParseError, parseCanvas } from "./parser";
 import type { CanvasEdgeData, CanvasNode } from "./types";
 
@@ -164,6 +165,8 @@ test("edge defaults: missing fromSide/toSide/fromEnd/toEnd are undefined", () =>
 	expect(edge.toEnd).toBeUndefined();
 });
 
+// A structurally broken document is still a hard error: there is nothing to
+// render, so a partial board would be worse than a clear failure.
 test("throws on invalid JSON", () => {
 	expect(() => parseCanvas("not json")).toThrow(CanvasParseError);
 });
@@ -185,47 +188,47 @@ test("throws when edges is not an array", () => {
 	expect(() => parseCanvas(json)).toThrow(/edges must be an array/);
 });
 
-test("throws on invalid node type", () => {
+test("skips invalid node type", () => {
 	const json = JSON.stringify({
 		nodes: [{ id: "n1", type: "unknown", x: 0, y: 0, width: 100, height: 100 }],
 		edges: [],
 	});
-	expect(() => parseCanvas(json)).toThrow(/Invalid node type/);
+	expect(firstProblem(json)).toMatch(/Invalid node type/);
 });
 
-test("throws on missing required node fields", () => {
+test("skips missing required node fields", () => {
 	const json = JSON.stringify({
 		nodes: [{ id: "n1", type: "text", x: 0, y: 0 }],
 		edges: [],
 	});
-	expect(() => parseCanvas(json)).toThrow(CanvasParseError);
+	expect(parseCanvas(json).problems?.join("\n")).toMatch(/width|width must be/);
 });
 
-test("throws on missing text for text node", () => {
+test("skips missing text for text node", () => {
 	const json = JSON.stringify({
 		nodes: [{ id: "n1", type: "text", x: 0, y: 0, width: 100, height: 100 }],
 		edges: [],
 	});
-	expect(() => parseCanvas(json)).toThrow(/node\.text/);
+	expect(firstProblem(json)).toMatch(/node\.text/);
 });
 
-test("throws on missing file for file node", () => {
+test("skips missing file for file node", () => {
 	const json = JSON.stringify({
 		nodes: [{ id: "n1", type: "file", x: 0, y: 0, width: 100, height: 100 }],
 		edges: [],
 	});
-	expect(() => parseCanvas(json)).toThrow(/node\.file/);
+	expect(firstProblem(json)).toMatch(/node\.file/);
 });
 
-test("throws on missing url for link node", () => {
+test("skips missing url for link node", () => {
 	const json = JSON.stringify({
 		nodes: [{ id: "n1", type: "link", x: 0, y: 0, width: 100, height: 100 }],
 		edges: [],
 	});
-	expect(() => parseCanvas(json)).toThrow(/node\.url/);
+	expect(firstProblem(json)).toMatch(/node\.url/);
 });
 
-test("throws on invalid fromSide", () => {
+test("skips invalid fromSide", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -240,10 +243,10 @@ test("throws on invalid fromSide", () => {
 		],
 		edges: [{ id: "e1", fromNode: "n1", toNode: "n1", fromSide: "center" }],
 	});
-	expect(() => parseCanvas(json)).toThrow(/Invalid fromSide/);
+	expect(firstProblem(json)).toMatch(/Invalid fromSide/);
 });
 
-test("throws on invalid toSide", () => {
+test("skips invalid toSide", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -258,10 +261,10 @@ test("throws on invalid toSide", () => {
 		],
 		edges: [{ id: "e1", fromNode: "n1", toNode: "n1", toSide: "middle" }],
 	});
-	expect(() => parseCanvas(json)).toThrow(/Invalid toSide/);
+	expect(firstProblem(json)).toMatch(/Invalid toSide/);
 });
 
-test("throws on invalid fromEnd", () => {
+test("skips invalid fromEnd", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -276,10 +279,10 @@ test("throws on invalid fromEnd", () => {
 		],
 		edges: [{ id: "e1", fromNode: "n1", toNode: "n1", fromEnd: "circle" }],
 	});
-	expect(() => parseCanvas(json)).toThrow(/Invalid fromEnd/);
+	expect(firstProblem(json)).toMatch(/Invalid fromEnd/);
 });
 
-test("throws on invalid toEnd", () => {
+test("skips invalid toEnd", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -294,10 +297,10 @@ test("throws on invalid toEnd", () => {
 		],
 		edges: [{ id: "e1", fromNode: "n1", toNode: "n1", toEnd: "diamond" }],
 	});
-	expect(() => parseCanvas(json)).toThrow(/Invalid toEnd/);
+	expect(firstProblem(json)).toMatch(/Invalid toEnd/);
 });
 
-test("throws when edge references nonexistent node", () => {
+test("skips when edge references nonexistent node", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -312,10 +315,10 @@ test("throws when edge references nonexistent node", () => {
 		],
 		edges: [{ id: "e1", fromNode: "n1", toNode: "ghost" }],
 	});
-	expect(() => parseCanvas(json)).toThrow(/references unknown.*toNode/);
+	expect(firstProblem(json)).toMatch(/Skipped edge "e1": endpoint is not a rendered node$/);
 });
 
-test("throws when edge references nonexistent fromNode", () => {
+test("skips when edge references nonexistent fromNode", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -330,10 +333,10 @@ test("throws when edge references nonexistent fromNode", () => {
 		],
 		edges: [{ id: "e1", fromNode: "ghost", toNode: "n1" }],
 	});
-	expect(() => parseCanvas(json)).toThrow(/references unknown.*fromNode/);
+	expect(firstProblem(json)).toMatch(/Skipped edge "e1": endpoint is not a rendered node$/);
 });
 
-test("x, y, width, height must be finite numbers", () => {
+test("skips a node whose geometry is not finite", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -348,10 +351,10 @@ test("x, y, width, height must be finite numbers", () => {
 		],
 		edges: [],
 	});
-	expect(() => parseCanvas(json)).toThrow(/node\.x.*finite number/);
+	expect(firstProblem(json)).toMatch(/node\.x.*finite number/);
 });
 
-test("color can be hex, preset, or rgb", () => {
+test("accepts hex, preset and rgb colours", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -393,7 +396,7 @@ test("color can be hex, preset, or rgb", () => {
 	expect(data.nodes[2]?.color).toBe("rgb(255,0,0)");
 });
 
-test("subpath is optional on file nodes", () => {
+test("treats subpath as optional on file nodes", () => {
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -413,7 +416,7 @@ test("subpath is optional on file nodes", () => {
 	if (node.type === "file") expect(node.subpath).toBeUndefined();
 });
 
-test("label and background are optional on group nodes", () => {
+test("treats label and background as optional on group nodes", () => {
 	const json = JSON.stringify({
 		nodes: [{ id: "n1", type: "group", x: 0, y: 0, width: 100, height: 100 }],
 		edges: [],
@@ -456,9 +459,16 @@ test("parses enriched file node fields", () => {
 test("parses real Demo.canvas file", async () => {
 	const content = await Bun.file("Obsidian Vault/Demo.canvas").text();
 	const data = parseCanvas(content);
-	expect(data.nodes).toHaveLength(5);
-	expect(data.edges).toHaveLength(3);
-	expect(data.nodes.map((n) => n.type)).toEqual(["group", "file", "text", "text", "link"]);
+
+	// The point is that the board shipped in this repository is valid, not that
+	// it holds a particular number of cards — the demo grows, and pinning its
+	// shape here would fail on a demo edit rather than on a real defect.
+	expect(data.problems).toEqual([]);
+	expect(data.edges.length).toBeGreaterThan(0);
+	const types = new Set(data.nodes.map((n) => n.type));
+	for (const type of ["text", "file", "link", "group"]) {
+		expect(types.has(type as (typeof data.nodes)[number]["type"])).toBe(true);
+	}
 });
 test("accepts fractional geometry", () => {
 	const canvas = {
@@ -480,17 +490,19 @@ test("accepts fractional geometry", () => {
 	expect(data.nodes[0]?.y).toBe(-10.25);
 });
 
-test("rejects non-finite geometry", () => {
+test("skips non-finite geometry", () => {
 	for (const value of [Infinity, -Infinity, NaN]) {
-		const canvas = {
+		const board = {
 			nodes: [{ id: "n1", type: "text", x: value, y: 0, width: 100, height: 100, text: "text" }],
 			edges: [],
 		};
-		expect(() => parseCanvas(JSON.stringify(canvas))).toThrow(/node\.x.*finite number/);
+		expect(firstProblem(JSON.stringify(board))).toMatch(/node\.x.*finite number/);
 	}
 });
 
-test("rejects duplicate node and edge ids", () => {
+test("keeps the first of a duplicated id and reports the rest", () => {
+	// A copy-pasted card must not make the node it duplicates unaddressable, and
+	// it must not cost the board the node that was already there.
 	const duplicateNodes = {
 		nodes: [
 			{ id: "n1", type: "text", x: 0, y: 0, width: 100, height: 100, text: "a" },
@@ -498,7 +510,9 @@ test("rejects duplicate node and edge ids", () => {
 		],
 		edges: [],
 	};
-	expect(() => parseCanvas(JSON.stringify(duplicateNodes))).toThrow(/Duplicate node id/);
+	const nodes = parseCanvas(JSON.stringify(duplicateNodes));
+	expect(nodes.nodes).toHaveLength(1);
+	expect(nodes.problems?.[0]).toMatch(/Skipped duplicate node id: "n1"$/);
 
 	const duplicateEdges = {
 		nodes: [
@@ -510,5 +524,230 @@ test("rejects duplicate node and edge ids", () => {
 			{ id: "e1", fromNode: "n2", toNode: "n1" },
 		],
 	};
-	expect(() => parseCanvas(JSON.stringify(duplicateEdges))).toThrow(/Duplicate edge id/);
+	const edges = parseCanvas(JSON.stringify(duplicateEdges));
+	expect(edges.edges).toHaveLength(1);
+	expect(edges.problems?.[0]).toMatch(/Skipped duplicate edge id: "e1"$/);
+});
+
+function textNode(overrides: Record<string, unknown> = {}) {
+	return { id: "n1", type: "text", x: 0, y: 0, width: 100, height: 100, text: "hi", ...overrides };
+}
+
+function canvas(overrides: Record<string, unknown>) {
+	return JSON.stringify({ nodes: [textNode()], edges: [], ...overrides });
+}
+/**
+ * The reason the parser recorded for the item it dropped.
+ *
+ * A malformed node or edge is skipped and reported rather than thrown, so every
+ * per-item assertion goes through here. A document-level failure — unparseable
+ * JSON, `nodes` not an array, a malformed asset map — still throws, and those
+ * tests assert `toThrow` instead.
+ */
+function firstProblem(json: string): string {
+	return parseCanvas(json).problems?.[0] ?? "";
+}
+
+test("throws on a document-level failure but only reports an item-level one", () => {
+	// Unparseable JSON leaves nothing to render, so it is still a hard error.
+	expect(() => parseCanvas("{oops")).toThrow(CanvasParseError);
+	expect(() => parseCanvas("{oops")).toThrow(/^Canvas parse error: Invalid JSON: /);
+
+	// A malformed node is dropped and reported, and the reason names the node so
+	// a broken file can be fixed rather than silently losing a card.
+	const semantic = parseCanvas(canvas({ nodes: [textNode({ type: "blob" })] }));
+	expect(semantic.nodes).toHaveLength(0);
+	expect(semantic.problems?.[0]).toMatch(/^Skipped node 0 "n1"/);
+	expect(semantic.problems?.[0]).toMatch(/Invalid node type: blob$/);
+});
+
+test("names the missing field when a required node field has the wrong type", () => {
+	expect(firstProblem(canvas({ nodes: [textNode({ id: 7 })] }))).toMatch(
+		/Expected node\.id to be a string, got number$/,
+	);
+	expect(firstProblem(canvas({ nodes: [textNode({ type: null })] }))).toMatch(
+		/Expected node\.type to be a string, got object$/,
+	);
+	expect(firstProblem(canvas({ nodes: [textNode({ width: "100" })] }))).toMatch(
+		/Expected node\.width to be a finite number, got string$/,
+	);
+});
+
+test("skips nodes that are not objects", () => {
+	for (const node of [42, "n1", null, true]) {
+		expect(firstProblem(JSON.stringify({ nodes: [node] }))).toMatch(/Node must be an object$/);
+	}
+});
+
+test("skips a non-string optional node field", () => {
+	expect(firstProblem(canvas({ nodes: [textNode({ color: 3 })] }))).toMatch(
+		/Expected node\.color to be a string, got number$/,
+	);
+	expect(
+		firstProblem(
+			canvas({
+				nodes: [
+					{ id: "f1", type: "file", x: 0, y: 0, width: 1, height: 1, file: "a.md", subpath: 9 },
+				],
+			}),
+		),
+	).toMatch(/Expected node\.subpath to be a string, got number$/);
+});
+
+test("skips non-boolean media flags on file nodes", () => {
+	const flags = ["isImage", "isVideo", "isAudio", "isPdf", "isError"];
+	for (const flag of flags) {
+		const fileNode = {
+			id: "f1",
+			type: "file",
+			x: 0,
+			y: 0,
+			width: 1,
+			height: 1,
+			file: "a.md",
+			[flag]: "yes",
+		};
+		expect(firstProblem(JSON.stringify({ nodes: [fileNode] }))).toMatch(
+			new RegExp(`Expected node\\.${flag} to be a boolean$`),
+		);
+	}
+});
+
+test("keeps explicit false media flags on file nodes", () => {
+	const fileNode = {
+		id: "f1",
+		type: "file",
+		x: 0,
+		y: 0,
+		width: 1,
+		height: 1,
+		file: "a.md",
+		isImage: false,
+		isVideo: false,
+		isAudio: false,
+		isPdf: false,
+		isError: false,
+	};
+	const node = parseCanvas(JSON.stringify({ nodes: [fileNode] })).nodes[0];
+	if (node?.type !== "file") throw new Error("expected a file node");
+	expect([node.isImage, node.isVideo, node.isAudio, node.isPdf, node.isError]).toEqual([
+		false,
+		false,
+		false,
+		false,
+		false,
+	]);
+});
+
+test("skips an unknown group backgroundStyle", () => {
+	const group = {
+		id: "g1",
+		type: "group",
+		x: 0,
+		y: 0,
+		width: 1,
+		height: 1,
+		backgroundStyle: "diagonal",
+	};
+	expect(firstProblem(JSON.stringify({ nodes: [group] }))).toMatch(
+		/Invalid backgroundStyle: diagonal$/,
+	);
+});
+
+test("skips edges that are not objects or are missing their identity fields", () => {
+	for (const edge of [42, null]) {
+		expect(firstProblem(JSON.stringify({ nodes: [], edges: [edge] }))).toMatch(
+			/Edge must be an object$/,
+		);
+	}
+	expect(firstProblem(canvas({ edges: [{}] }))).toMatch(
+		/Expected edge\.id to be a string, got undefined$/,
+	);
+	expect(firstProblem(canvas({ edges: [{ id: "e1" }] }))).toMatch(
+		/Expected edge\.fromNode to be a string, got undefined$/,
+	);
+	expect(firstProblem(canvas({ edges: [{ id: "e1", fromNode: "n1" }] }))).toMatch(
+		/Expected edge\.toNode to be a string, got undefined$/,
+	);
+});
+
+test("skips a non-string optional edge field", () => {
+	expect(
+		firstProblem(canvas({ edges: [{ id: "e1", fromNode: "n1", toNode: "n1", color: 5 }] })),
+	).toMatch(/Expected edge\.color to be a string, got number$/);
+});
+
+test("carries the offending ids so a broken file can be fixed", () => {
+	expect(
+		firstProblem(JSON.stringify({ nodes: [textNode({ id: "dup" }), textNode({ id: "dup" })] })),
+	).toMatch(/Skipped duplicate node id: "dup"$/);
+
+	expect(
+		firstProblem(
+			JSON.stringify({
+				nodes: [textNode({ id: "a" }), textNode({ id: "b" })],
+				edges: [
+					{ id: "e9", fromNode: "a", toNode: "b" },
+					{ id: "e9", fromNode: "b", toNode: "a" },
+				],
+			}),
+		),
+	).toMatch(/Skipped duplicate edge id: "e9"$/);
+
+	// A dangling edge is dropped with the edge named, so a broken file can be
+	// fixed: it is the endpoint that is missing, not the edge.
+	expect(firstProblem(canvas({ edges: [{ id: "e1", fromNode: "ghost", toNode: "n1" }] }))).toMatch(
+		/Skipped edge "e1": endpoint is not a rendered node$/,
+	);
+
+	expect(firstProblem(canvas({ edges: [{ id: "e1", fromNode: "n1", toNode: "ghost" }] }))).toMatch(
+		/Skipped edge "e1": endpoint is not a rendered node$/,
+	);
+});
+
+test("parses asset and note maps", () => {
+	const data = parseCanvas(
+		canvas({ assets: { "img.png": "https://cdn/img.png" }, notes: { "a.md": "hello" } }),
+	);
+	expect(data.assets).toEqual({ "img.png": "https://cdn/img.png" });
+	expect(data.notes).toEqual({ "a.md": "hello" });
+});
+
+test("leaves asset and note maps undefined when the file omits them", () => {
+	const data = parseCanvas(canvas({}));
+	expect(data.assets).toBeUndefined();
+	expect(data.notes).toBeUndefined();
+});
+
+// The asset and note maps are document-level, not per-item, so a wrong map is
+// still a hard error — there is no partial reading of it worth rendering.
+test("rejects malformed asset and note maps", () => {
+	for (const assets of ["", 3, null, []]) {
+		expect(() => parseCanvas(canvas({ assets }))).toThrow(/assets must be an object/);
+	}
+	for (const notes of ["", 3, null, []]) {
+		expect(() => parseCanvas(canvas({ notes }))).toThrow(/notes must be an object/);
+	}
+	expect(() => parseCanvas(canvas({ assets: { "img.png": 5 } }))).toThrow(
+		/Expected assets\.img\.png to be a string, got number/,
+	);
+	expect(() => parseCanvas(canvas({ notes: { "a.md": 5 } }))).toThrow(
+		/Expected notes\.a\.md to be a string, got number/,
+	);
+});
+
+test("property: any JSON input either parses or throws CanvasParseError", () => {
+	// The build treats a malformed board as a logged, non-fatal error while
+	// the raw board stays published — that promise holds only if nothing else
+	// (TypeError, SyntaxError, RangeError) can escape the parser.
+	fc.assert(
+		fc.property(fc.json(), (json) => {
+			try {
+				const parsed = parseCanvas(json);
+				return Array.isArray(parsed.nodes) && Array.isArray(parsed.edges);
+			} catch (error) {
+				return error instanceof CanvasParseError;
+			}
+		}),
+	);
 });

@@ -1,9 +1,19 @@
 import { expect, test } from "@playwright/test";
 
+// Anchors as Rspress renders them on docs/markdown/guide/examples.md: wikilinks
+// keep the route path, markdown links are rewritten to `.html` (and keep their
+// `#fragment`).
+const WIKILINK = 'a[href="/markdown/guide/advanced"]';
+const MARKDOWN_LINK = 'a[href="/markdown/guide/getting-started.html"]';
+const MARKDOWN_LINK_WITH_FRAGMENT = 'a[href="/markdown/guide/getting-started.html#Install"]';
+
 test.describe("Hover Previews", () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto("/markdown/guide/examples.html");
-		await page.waitForTimeout(300);
+		// The hover listener is attached on hydration, and the graph panel's footer
+		// stats are the client-only signal that the plugin's React tree has mounted.
+		// Waiting for them replaces the fixed sleep (and the hover race it hid).
+		await expect(page.locator("#rspress-graph-view-panel span[aria-live='polite']")).toBeVisible();
 	});
 
 	test("hover preview popup is hidden initially", async ({ page }) => {
@@ -11,63 +21,42 @@ test.describe("Hover Previews", () => {
 		await expect(popup).not.toBeVisible();
 	});
 
-	test("hovering over internal link shows preview", async ({ page }) => {
-		// Find an internal link with data-route-path
-		const link = page.locator("a[data-route-path]").first();
-		if (await link.count()) {
-			await link.hover();
-			await page.waitForTimeout(500);
-			const popup = page.locator(".obsidian-hover-preview");
-			await expect(popup).toBeVisible();
-		}
+	test("hovering an internal link shows preview", async ({ page }) => {
+		await page.locator(WIKILINK).first().hover();
+
+		const popup = page.locator(".obsidian-hover-preview");
+		await expect(popup).toBeVisible();
+		await expect(popup.locator(".obsidian-hover-preview__title")).toHaveText("Advanced");
+		await expect(popup.locator(".obsidian-hover-preview__content")).not.toBeEmpty();
 	});
 
-	test("hover preview shows page title", async ({ page }) => {
-		const link = page.locator("a[data-route-path]").first();
-		if (await link.count()) {
-			await link.hover();
-			await page.waitForTimeout(500);
-			const title = page.locator(".obsidian-hover-preview__title");
-			await expect(title).toBeVisible();
-			const titleText = await title.textContent();
-			expect(titleText).toBeTruthy();
-		}
+	test("hovering a markdown link rewritten to .html shows preview", async ({ page }) => {
+		await page.locator(MARKDOWN_LINK).first().hover();
+
+		await expect(page.locator(".obsidian-hover-preview__title")).toHaveText("Getting Started");
 	});
 
-	test("hover preview shows page content", async ({ page }) => {
-		const link = page.locator("a[data-route-path]").first();
-		if (await link.count()) {
-			await link.hover();
-			await page.waitForTimeout(500);
-			const content = page.locator(".obsidian-hover-preview__content");
-			await expect(content).toBeVisible();
-		}
+	test("hovering a markdown link with a fragment shows preview", async ({ page }) => {
+		await page.locator(MARKDOWN_LINK_WITH_FRAGMENT).first().hover();
+
+		await expect(page.locator(".obsidian-hover-preview__title")).toHaveText("Getting Started");
 	});
 
 	test("moving mouse away hides preview", async ({ page }) => {
-		const link = page.locator("a[data-route-path]").first();
-		if (await link.count()) {
-			await link.hover();
-			await page.waitForTimeout(500);
-			const popup = page.locator(".obsidian-hover-preview");
-			await expect(popup).toBeVisible();
-			// Move mouse away
-			await page.mouse.move(0, 0);
-			await page.waitForTimeout(200);
-			await expect(popup).not.toBeVisible();
-		}
+		await page.locator(WIKILINK).first().hover();
+
+		const popup = page.locator(".obsidian-hover-preview");
+		await expect(popup).toBeVisible();
+
+		await page.mouse.move(0, 0);
+		await expect(popup).not.toBeVisible();
 	});
 
 	test("hover preview has correct styling", async ({ page }) => {
-		const link = page.locator("a[data-route-path]").first();
-		if (await link.count()) {
-			await link.hover();
-			await page.waitForTimeout(500);
-			const popup = page.locator(".obsidian-hover-preview");
-			await expect(popup).toBeVisible();
-			// Check it's positioned fixed
-			const position = await popup.evaluate((el) => getComputedStyle(el).position);
-			expect(position).toBe("fixed");
-		}
+		await page.locator(WIKILINK).first().hover();
+
+		const popup = page.locator(".obsidian-hover-preview");
+		await expect(popup).toBeVisible();
+		expect(await popup.evaluate((el) => getComputedStyle(el).position)).toBe("fixed");
 	});
 });

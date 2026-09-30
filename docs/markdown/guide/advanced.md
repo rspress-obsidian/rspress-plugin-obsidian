@@ -1,5 +1,5 @@
 ---
-description: Complete configuration reference for rspress-plugin-obsidian-wikilink. Covers all options, callout types and aliases, transclusion, media embeds, highlights, footnotes, comments, link resolution rules, and frontmatter fields.
+description: Complete configuration reference for rspress-plugin-obsidian. Covers all options, callout types and aliases, transclusion, media embeds, highlights, footnotes, comments, link resolution rules, and frontmatter fields.
 ---
 
 # Advanced
@@ -7,10 +7,16 @@ description: Complete configuration reference for rspress-plugin-obsidian-wikili
 ## All Configuration Options
 
 ```ts
-pluginObsidianWikiLink({
+markdown({
+  // Where content comes from
+  vaultRoot: undefined,               // absolute path to an external Obsidian vault
+  vaultRoutePrefix: "/vault",         // route prefix for published vault pages
+
   // Link diagnostics
   onBrokenLink: "error",              // "error" | "warn" (default: "error")
   onAmbiguousLink: "error",           // "error" | "warn" (default: "error")
+  onDataviewError: "error",           // "error" | "warn" (default: "error")
+  onUnsupportedBlock: "warn",         // "error" | "warn" (default: "warn")
 
   // Resolution
   enableFuzzyMatching: false,         // shortest-suffix path fallback
@@ -22,32 +28,84 @@ pluginObsidianWikiLink({
   enableTagPages: false,              // generate /tags/{name} index pages
   enableCallouts: false,              // > [!note] → styled HTML
   enableBacklinks: false,             // append backlinks panel
+  enableUnlinkedMentions: false,      // pages that name this one without linking
   enableTransclusion: false,          // ![[Page]] → inline content
   enableMediaEmbeds: false,           // ![[img.png]] → <img>
+  enableDataview: false,              // ```dataview blocks + inline = expr
+  enableDailyNotes: false,            // date-filed notes + navigation
+  dailyNotes: undefined,              // { folder, dateFormat, navigation, template, calendar }
+  enableMath: false,                  // $inline$ / $$display$$ → KaTeX
+  mathEngine: "katex",                // "katex" | "mathjax"
+  enableMermaid: false,               // ```mermaid fences → diagrams
+  mermaidSecurityLevel: "strict",     // Mermaid's own sanitising level
 
   // Styling
   enableDefaultStyles: false,         // inject bundled CSS
 });
 ```
 
+### `vaultRoot`
+
+Absolute path to an Obsidian vault published alongside the Rspress `docs/`
+directory. When set, every routable `.md`/`.mdx` file in the vault becomes a
+page under `vaultRoutePrefix`, with the full pipeline applied. Unset (the
+default) means the docs directory is the only source.
+
+The vault is indexed **separately** from the docs root: wikilinks inside vault
+pages resolve against vault files, and wikilinks inside normal docs pages are
+unaffected. A `[[wikilink]]` in the vault cannot therefore name a docs page —
+reach one by its published route.
+
+```ts
+markdown({
+  vaultRoot: "./Obsidian Vault",
+  vaultRoutePrefix: "/vault",
+  enableTransclusion: true,
+  enableMediaEmbeds: true,
+  enableBacklinks: true,
+});
+```
+
+### `vaultRoutePrefix`
+
+Route prefix published vault pages sit under. Default `"/vault"`. If the canvas
+feature also publishes boards, its `fileRoutePrefix` must name the same prefix
+so a canvas file card links to `/vault/Note` rather than `/Note`.
+
 ### `onBrokenLink`
 
 Controls how the plugin handles links to non-existent pages or headings:
 
 - `"error"` (default) — fail the build when a link target is missing
-- `"warn"` — emit a warning but leave the original wikilink text in place
+- `"warn"` — emit a warning and render the link's label as an unresolved marker (`<span class="obsidian-unresolved">`) instead of a link
+
+### `onDataviewError`
+
+Controls how a `dataview` block that will not evaluate is handled:
+
+- `"error"` (default) — fail the build
+- `"warn"` — emit a warning and leave the block as code
+
+### `onUnsupportedBlock`
+
+Reports fences belonging to a plugin runtime this plugin cannot run — `tasks`,
+`excalidraw`, `base`, `kanban`, `dataviewjs`, and `dataview` while
+`enableDataview` is off. They stay published as code either way.
+
+- `"warn"` (default) — report and continue
+- `"error"` — fail the build
 
 ### `onAmbiguousLink`
 
 Controls how the plugin handles ambiguous links (multiple pages share the same basename):
 
 - `"error"` (default) — fail the build when multiple pages match
-- `"warn"` — emit a warning but leave the original wikilink text in place
+- `"warn"` — emit a warning and render the label as an unresolved marker
 
 ### `enableFuzzyMatching`
 
-- `false` (default) — only exact path, basename, title, and alias lookups
-- `true` — enables case-insensitive and shortest-suffix fallback matching
+- `false` (default) — no suffix fallback: lookups stop after exact path, basename, title, alias, and (when `enableCaseInsensitiveLookup` is on) case-insensitive matches
+- `true` — additionally tries a shortest-suffix path match, so a unique `guide/setup.md` can resolve `[[setup]]`
 
 ### `enableCaseInsensitiveLookup`
 
@@ -64,22 +122,25 @@ Only `.md` / `.mdx` destinations are considered; external URLs, pure `#anchors`,
 **Dead-link gate.** Rspress resolves `[](x.md)` relative to the current page and
 fails the build on misses — before plugin remark plugins can resolve
 vault-style basename links. When this option is on, the plugin therefore
-defaults `markdown.link.checkDeadLinks` to `false` (an explicit setting in
-your Rspress config wins) and takes over the diagnostic itself: unresolvable
-`.md` destinations are reported through `onBrokenLink`, so genuinely broken
-links still fail the build by default.
+rewrites `markdown.link.checkDeadLinks` to exempt exactly the `.md`/`.mdx`
+destinations it resolves itself (`{ excludes: … }`) rather than switching the
+gate off (an explicit setting in your Rspress config wins). Rspress keeps
+checking everything else — extensionless routes, anchors, queries and external
+URLs — so a broken `[x](../missing.md)` is still reported, now by the plugin
+through `onBrokenLink`, while a broken `/typo-route` is still reported by
+Rspress.
 
 ### `enableTagLinking`
 
 - `false` (default) — tags are left as-is in the output
 - `true` — converts `#tag` to `[#tag](/tags/tag)`; skips code blocks and URL fragments
 
-Tag names must start with a letter or underscore (pure-numeric strings like `#123` are never matched). Nested tags (`#parent/child`) and Unicode letters (Latin extended, CJK) are supported.
+A tag links only when its name contains at least one character that is not a digit, slash, or hyphen — `#123` and `#2024/12` stay plain text, while `#1a` and `#2024-report` link. Nested tags (`#parent/child`) and Unicode letters (Latin extended, CJK) are supported.
 
 ### `enableTagPages`
 
 - `false` (default) — no tag pages generated
-- `true` — auto-generates a `/tags/{name}` index page for every unique tag found in frontmatter `tags:` fields
+- `true` — auto-generates a `/tags/{name}` index page for every unique tag found across pages: frontmatter `tags:` fields **and** inline `#tags` in body text. Nested tags also get an index page for each parent segment (`#parent/child` generates `/tags/parent/child` and `/tags/parent`).
 
 Each generated page lists all pages with that tag:
 
@@ -107,7 +168,7 @@ Produces `/tags/tutorial` and `/tags/obsidian`, each listing all pages tagged wi
 | `note` | Blue accent |
 | `tip` | Teal accent |
 | `info` | Cyan accent |
-| `todo` | Green accent |
+| `todo` | Blue accent |
 | `success` | Green accent |
 | `question` | Lime accent |
 | `warning` | Orange accent |
@@ -118,6 +179,8 @@ Produces `/tags/tutorial` and `/tags/obsidian`, each listing all pages tagged wi
 | `abstract` | Cyan accent |
 | `caution` | Orange accent |
 | `failure` | Red accent |
+
+Any other type (or `details`, restored from Rspress's alert transform) keeps its own `callout-<type>` class and falls back to Obsidian's `note` styling — the blue card and pencil glyph — not to a neutral placeholder. Add a rule to give it its own colour and icon; see [Callouts](./callouts#custom-callout-types).
 
 **Supported aliases** (map to canonical type above):
 
@@ -140,7 +203,7 @@ Produces `/tags/tutorial` and `/tags/obsidian`, each listing all pages tagged wi
 
 Output:
 ```html
-<div class="callout callout-failure">
+<div class="callout callout-failure" data-callout="failure">
   <div class="callout-title">Watch out</div>
   <div class="callout-content">This will be transformed.</div>
 </div>
@@ -208,49 +271,155 @@ Output wraps content in:
 </div>
 ```
 
+### `enableMath`
+
+- `false` (default) — `$…$` stays literal text
+- `true` — inline and display math are rendered to KaTeX HTML during the build
+
+| Syntax | Result |
+|--------|--------|
+| `$E = mc^2$` | inline formula |
+| `$$…$$` | display formula, may span lines |
+
+Delimiters follow Obsidian's rules: no space directly inside them and no
+newline for inline math, so `$5 and $10` stays prose. Code fences, inline code
+and raw HTML are never touched. Malformed TeX is rendered by KaTeX as its own
+inline error rather than failing the build.
+
+Enabling math also loads KaTeX's stylesheet through the `globalStyles` hook —
+together with the plugin's own stylesheet when `enableDefaultStyles` is set, on
+its own otherwise. KaTeX is already a dependency, so the site build resolves its
+fonts from the installed package. You never need to import KaTeX's stylesheet
+yourself: it is injected whenever math is enabled, regardless of
+`enableDefaultStyles`.
+
+### `mathEngine`
+
+- `"katex"` (default) — what `enableMath` has always used
+- `"mathjax"` — the engine Obsidian itself renders math with
+
+KaTeX covers most notes and is much faster, but it is not MathJax: TeX that
+only MathJax understands will not render under it. Set `mathEngine: "mathjax"`
+for those pages' worth of formulas:
+
+```ts
+markdown({ enableMath: true, mathEngine: "mathjax" });
+```
+
+MathJax is an **optional** dependency — around 40 MB with its TeX packages, so
+it is not installed for you. Add it when you want the engine:
+
+```bash
+bun add mathjax-full
+```
+
+Selecting `"mathjax"` without it fails the build with that instruction rather
+than quietly falling back to KaTeX. The engine is loaded once, on the first file
+that renders math, and its CommonHTML stylesheet — which MathJax generates at
+render time — is emitted inline with each page, so no stylesheet import is
+needed. MathJax loads its web fonts from its default CDN; the KaTeX stylesheet
+is not loaded at all in this mode.
+
+### `enableMermaid`
+
+- `false` (default) — ` ```mermaid ` stays a code block
+- `true` — the fence becomes a diagram drawn in the browser
+
+Mermaid needs the DOM, so the plugin emits a placeholder at build time and
+registers a client component (`globalUIComponents`) that draws it after mount
+and on navigation. Diagrams are rendered with `securityLevel: "strict"` by
+default: mermaid runs its own sanitizer over the SVG and drops unsafe link
+URLs. Set `mermaidSecurityLevel` to `"loose"`, `"antiscript"` or `"sandbox"`
+to render what a strict build refuses — the level is stamped on every
+placeholder, so it configures the shared client instance before the first
+diagram draws. A diagram that fails to render keeps its source and gains an
+`.obsidian-mermaid-error` class.
+
 ### `enableMediaEmbeds`
 
 - `false` (default) — `![[file]]` is rewritten to an embed anchor
 - `true` — renders media files as native HTML elements
 
+These are the formats Obsidian accepts, kept in one table
+(`src/shared/media-exts.ts`) that the canvas renderer reads too, so a format
+embeds in a note and in a canvas text card or neither.
+
 | Extension | Output element |
 |-----------|---------------|
-| `png`, `jpg`, `jpeg`, `gif`, `svg`, `webp`, `avif` | `<img loading="lazy">` |
-| `mp3`, `wav`, `ogg`, `m4a`, `flac` | `<audio controls>` |
-| `mp4`, `webm`, `mov`, `mkv` | `<video controls>` |
-| `pdf` | `<iframe>` |
+| `avif`, `bmp`, `gif`, `jpeg`, `jpg`, `png`, `svg`, `webp` | `<img loading="lazy">` |
+| `3gp`, `flac`, `m4a`, `mp3`, `ogg`, `wav` | `<audio controls>` |
+| `mkv`, `mov`, `mp4`, `ogv`, `webm` | `<video controls>` |
+| `pdf` | `<iframe loading="lazy">` |
 
-Size parameter: `![[image.png|300x200]]` → `width="300" height="200"`. Width-only: `![[image.png|300]]` → `width="300"`.
+Obsidian lists `.webm` under both audio and video. It is rendered as video here:
+the renderers test audio first, so claiming it for audio would turn every video
+`.webm` into an `<audio>` element. An audio-only `.webm` still plays through the
+video element. Whether a browser can decode a format at all — `3gp` audio most of
+all — is the same codec question it is in Obsidian.
+
+A PDF embed is a `figure` with a caption bar naming the file and an "Open" link to
+it, above the frame. The bar is not decoration: a bare `<iframe>` gives a reader
+no way to tell which document they are looking at, and on a browser that cannot
+display a PDF in place — iOS webviews, desktop Firefox, anything headless — it is
+all they get, since a frame with nothing in it is indistinguishable from a bug.
+
+The frame is deliberately not sandboxed: Chromium's PDF viewer needs scripts and
+renders a broken-document icon inside a sandboxed one (verified in a browser), so
+a sandbox there would break the embed instead of hardening it. The file is served
+from the site's own origin. Turn `enableMediaEmbeds` off if you would rather link
+to PDFs than embed them.
+
+Styling the frame is yours: the bar, border and radius are plain CSS in
+`rspress-plugin-obsidian/markdown/styles.css`, under `.obsidian-pdf`. The canvas
+renderer emits the same markup and pulls the same rules from its own stylesheet, so
+a card and a note never disagree.
+
+Size parameter: `![[image.png|300x200]]` → `width="300" height="200"`. Width-only: `![[image.png|300]]` → `width="300"`. A markdown image takes the same syntax, which is how Obsidian documents it — the size alone (`![300](image.png)`) or after a caption (`![A caption|300](image.png)`); anything that is not a bare dimension, `![A caption|wide](image.png)`, stays caption text.
+
+PDF embeds take their two knobs from the subpath: `![[doc.pdf#page=3]]` opens the frame at that page, `![[doc.pdf#height=400]]` sizes the frame (default 600). Only the page reaches the URL — the height is an attribute of the embed, not something the file is asked for.
 
 Media paths are resolved in order:
-1. Relative to the current file's directory
-2. Relative to the docs root
-3. Root-relative fallback (`/filename`)
+1. On disk relative to the current file's directory
+2. Indexed asset at that docs-root-relative path (finds attachments outside the docs tree, e.g. under `vaultRoot`)
+3. On disk relative to the docs root
+4. Indexed asset at the docs-root path
+5. Unique asset basename anywhere in the index (exact, then case-insensitive) — this is what makes a bare `![[photo.png]]` work
+6. Root-relative URL fallback (`/filename`), reported as unresolved
 
 ### `enableDefaultStyles`
 
 - `false` (default) — no styles injected
 - `true` — automatically injects the bundled stylesheet via Rspress `globalStyles`
 
-Covers all CSS classes emitted by this plugin: `.callout-*`, `.obsidian-backlinks`, `.obsidian-transclusion`, `.obsidian-embed`. Uses Rspress CSS variables (`--rp-c-brand`, `--rp-c-bg-soft`, etc.) for automatic dark/light mode compatibility.
+Styles the plugin's main classes — `.callout-*`, `.obsidian-backlinks`, `.obsidian-transclusion`, `.obsidian-embed` (footnote output is intentionally unstyled). Uses Rspress CSS variables (`--rp-c-brand`, `--rp-c-bg-soft`, etc.) for automatic dark/light mode compatibility.
 
-You can also import the stylesheet manually instead:
+If you would rather wire it up yourself, turn `enableDefaultStyles` off and
+point `globalStyles` at the resolved file. It cannot be `import`ed from
+`rspress.config.ts`: Rspress loads the config with Node rather than the
+bundler, so a `.css` specifier — with or without a `?url` suffix — fails before
+the build starts, with `ERR_UNKNOWN_FILE_EXTENSION` or
+`ERR_PACKAGE_PATH_NOT_EXPORTED`.
 
 ```ts
 // rspress.config.ts
-import { pluginObsidianWikiLink } from "rspress-plugin-obsidian-wikilink";
-import stylesPath from "rspress-plugin-obsidian-wikilink/styles.css?url";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { defineConfig } from "@rspress/core";
+import { markdown } from "rspress-plugin-obsidian";
+
+const require = createRequire(import.meta.url);
+const pkgDir = path.dirname(require.resolve("rspress-plugin-obsidian/package.json"));
 
 export default defineConfig({
-  globalStyles: stylesPath,
-  plugins: [pluginObsidianWikiLink()],
+  globalStyles: path.join(pkgDir, "dist/markdown.css"),
+  plugins: [markdown({ enableDefaultStyles: false })],
 });
 ```
 
-Or in a CSS file:
+Or from a CSS file of your own, which the bundler *does* resolve:
 
 ```css
-@import "rspress-plugin-obsidian-wikilink/styles.css";
+@import "rspress-plugin-obsidian/markdown/styles.css";
 ```
 
 ## Obsidian Comments
@@ -269,7 +438,27 @@ This entire paragraph is a private draft.
 %%
 ```
 
-> **Limitation**: comments that span multiple paragraphs (opening `%%` in one paragraph, closing `%%` in another) are not stripped.
+A comment runs from an opening `%%` to the next closing `%%`, so it may span
+paragraphs, headings and lists — everything between the delimiters is dropped,
+including the container it empties:
+
+```markdown
+Visible text. %%
+## This heading is private
+And so is this paragraph.
+%% Still visible.
+```
+
+Delimiters inside frontmatter, fenced code and inline code spans are literal,
+and an unclosed `%%` is left as written.
+
+The body, the page outline and the search index are all cleaned. A *heading*
+inside a comment is removed from the outline too: Rspress builds that outline
+from its own parse of the source, before plugin remark plugins run, so the plugin
+drops the matching entries from the page data afterwards. Entries are matched by
+the offsets Rspress records; with `search: false` those are absent, and the
+entries are reconciled by heading identity instead, which still keeps a live
+heading that happens to share its text with the commented one.
 
 ## Text Highlighting
 
@@ -397,7 +586,7 @@ YAML strings are case-insensitive: `publish: "False"` and `publish: "No"` both e
 Use `"warn"` to inspect which links can't be resolved without failing the build:
 
 ```ts
-pluginObsidianWikiLink({
+markdown({
   onBrokenLink: "warn",
   onAmbiguousLink: "warn",
 });
@@ -410,7 +599,7 @@ pluginObsidianWikiLink({
 The plugin's default `onBrokenLink: "error"` stops the build on any unresolvable wikilink. To find which links are broken:
 
 ```ts
-pluginObsidianWikiLink({
+markdown({
   onBrokenLink: "warn",
   onAmbiguousLink: "warn",
 });
@@ -424,29 +613,23 @@ Multiple pages share the same filename (e.g. `docs/guide/getting-started.md` and
 
 ### Transcluded content shows "Heading not found" but the heading exists
 
-The heading matching is case-sensitive by default and respects exact text including punctuation. Enable fuzzy fallbacks:
-
-```ts
-pluginObsidianWikiLink({
-  enableFuzzyMatching: true,
-  enableCaseInsensitiveLookup: true,
-});
-```
-
-Or check the available headings listed in the diagnostic message — you may have a subtle character difference.
+The heading lookup is case-insensitive (matching is done on normalized slugs), but it does respect exact text including punctuation — `[[Page#Getting Started!]]` will not match a heading written `Getting Started?`. Check the available headings listed in the diagnostic message — you may have a subtle character difference. An unmatched heading falls back to a plain link to the page itself.
 
 ### My `![[image.png|300x200]]` renders as a broken embed anchor
 
-The file isn't found on disk. The plugin resolves media paths in this order:
-1. Relative to the current markdown file
-2. Relative to the docs root
-3. As a root-relative URL (fallback, with a warning)
+The file isn't found. The plugin resolves media paths in this order:
+1. On disk relative to the current markdown file
+2. Indexed asset at that docs-root-relative path
+3. On disk relative to the docs root
+4. Indexed asset at the docs-root path
+5. Unique asset basename anywhere in the index (exact, then case-insensitive)
+6. As a root-relative URL (fallback, with a warning)
 
 Move the file into your docs directory or update the path.
 
 ### Callouts render as plain blockquotes
 
-Callouts require `enableCallouts: true` in the plugin options. All features except wikilinks, comments, highlights, and footnotes are opt-in.
+Callouts require `enableCallouts: true` in the plugin options. Wikilinks, comments, highlights, footnotes, and markdown-link resolution (`enableMarkdownLinks`) are on by default; everything else — callouts, tags, backlinks, transclusion, media embeds, Dataview, daily notes, tag pages, math, mermaid, and the bundled styles — is opt-in.
 
 ### My `publish: false` page still appears in the build
 
@@ -462,8 +645,8 @@ The content index cache is bounded to 10 entries with LRU eviction. If you need 
 
 ### I found a bug or have a feature request
 
-Open an issue at [github.com/Jacob-Valor/rspress-plugin-obsidian-wikilink/issues](https://github.com/Jacob-Valor/rspress-plugin-obsidian-wikilink/issues). See the [Contributing Guide](https://github.com/Jacob-Valor/rspress-plugin-obsidian-wikilink/blob/main/.github/CONTRIBUTING.md) for development workflow and commit conventions.
+Open an issue at [github.com/rspress-obsidian/rspress-plugin-obsidian/issues](https://github.com/rspress-obsidian/rspress-plugin-obsidian/issues). Releases are cut by semantic-release from Conventional Commits, so commit messages follow that convention.
 
 ## Changelog
 
-See the [CHANGELOG](https://github.com/Jacob-Valor/rspress-plugin-obsidian-wikilink/blob/main/CHANGELOG.md) for version history and release notes.
+See the [CHANGELOG](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/CHANGELOG.md) for version history and release notes.

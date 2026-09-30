@@ -1,4 +1,4 @@
-import type { GraphData } from "../types";
+import type { GraphData } from "../types.js";
 
 export interface CollectedRoute {
 	routePath: string;
@@ -10,6 +10,8 @@ export interface CollectedRoute {
 export interface GraphBuildOptions {
 	profile?: boolean;
 	logger?: (message: string) => void;
+	/** What to do about a link that resolves to no route. @default "warn" */
+	onUnresolvedLink?: "error" | "warn" | "ignore";
 }
 
 export interface GraphBuildDiagnostics {

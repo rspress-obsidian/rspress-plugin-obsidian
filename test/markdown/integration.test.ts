@@ -2,121 +2,193 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
-const DOC_BUILD = path.resolve(import.meta.dir, "../doc_build");
-const GUIDE_DIR = path.join(DOC_BUILD, "guide");
-const TAGS_DIR = path.join(DOC_BUILD, "tags");
+// End-to-end check of the real Rspress build output. Opt-in: build the docs
+// first (`bun run docs:build`), then run
+// `RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts` — the
+// step the `e2e` CI job runs before Playwright. The gate is explicit because
+// the build must also be from the current tree: a stale `doc_build/` can pass
+// while today's sources emit different markup, so rebuild before enabling it.
+const DOC_BUILD = path.resolve(import.meta.dir, "..", "..", "doc_build");
 
-// Verifies the full Rspress build pipeline end-to-end. Requires a docs build
-// first (`bun run docs:build`); CI runs this file in the docs job after
-// building. Skips with a notice when no build output exists so a plain
-// `bun test` stays green without a docs build.
-const hasBuildOutput = fs.existsSync(path.join(DOC_BUILD, "index.html"));
+const hasBuildOutput =
+	process.env.RUN_DOCS_BUILD_TESTS === "1" && fs.existsSync(path.join(DOC_BUILD, "index.html"));
 if (!hasBuildOutput) {
 	console.info(
-		"[integration] doc_build/ not found — run `bun run docs:build` to enable rspress build integration tests.",
+		"[integration] skipped — run `bun run docs:build`, then RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts.",
 	);
 }
 
+/** Read a built page, failing loudly when the route was not emitted. */
+function page(relativePath: string): string {
+	const filePath = path.join(DOC_BUILD, relativePath);
+	expect(fs.existsSync(filePath)).toBe(true);
+	return fs.readFileSync(filePath, "utf-8");
+}
+
+/** An emitted href resolves when either the route file or its `.html` exists. */
+function routeExists(href: string): boolean {
+	const clean = href.replace(/^\/|\/$/g, "").split("#")[0] ?? "";
+	const candidates = [
+		path.join(DOC_BUILD, `${clean}.html`),
+		path.join(DOC_BUILD, clean, "index.html"),
+	];
+	return candidates.some((candidate) => fs.existsSync(candidate));
+}
+
+/** Every built HTML file, recursively. */
+function htmlFiles(dir: string): string[] {
+	return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+		const entryPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) return htmlFiles(entryPath);
+		return entry.name.endsWith(".html") ? [entryPath] : [];
+	});
+}
+
 describe.skipIf(!hasBuildOutput)("rspress build integration", () => {
-	test("build output directory exists with expected pages", () => {
-		expect(fs.existsSync(DOC_BUILD)).toBe(true);
-		expect(fs.existsSync(GUIDE_DIR)).toBe(true);
-		expect(fs.existsSync(TAGS_DIR)).toBe(true);
+	test("emits docs, vault, canvas and tag pages", () => {
+		for (const relativePath of [
+			"index.html",
+			"markdown/guide/examples.html",
+			"vault/Welcome.html",
+			"canvas/demo.html",
+			"tags/examples.html",
+		]) {
+			expect(fs.existsSync(path.join(DOC_BUILD, relativePath))).toBe(true);
+		}
 	});
 
-	test("index page has resolved wikilinks", () => {
-		const html = fs.readFileSync(path.join(DOC_BUILD, "index.html"), "utf-8");
-		expect(html).toContain("/guide/getting-started");
-		expect(html).toContain("/guide/examples");
+	test("resolves wikilinks to published routes", () => {
+		const html = page("markdown/guide/examples.html");
+		for (const href of ["/markdown/guide/getting-started", "/markdown/guide/advanced"]) {
+			expect(html).toContain(`href="${href}"`);
+			expect(routeExists(href)).toBe(true);
+		}
+		expect(html).not.toContain("[[markdown/guide");
 	});
 
-	test("markdown links to vault pages are resolved", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).toContain(">Markdown link to the guide</a>");
-		expect(html).toContain(">Markdown link to the vault root</a>");
-		expect(html).toContain(">Markdown link with an anchor</a>");
-		expect(html).not.toContain(".md)");
+	test("resolves Obsidian-style markdown links and leaves no .md destinations", () => {
+		const html = page("markdown/guide/examples.html");
+		expect(html).toContain('href="/markdown/guide/getting-started');
+		expect(html).not.toContain("getting-started.md");
 	});
 
-	test("guide pages have resolved heading anchors", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "getting-started.html"), "utf-8");
-		expect(html).toContain('href="#install"');
+	test("renders plugin-owned callouts and restores the types Rspress claims", () => {
+		const html = page("markdown/guide/examples.html");
+		for (const type of ["success", "question", "bug", "example", "quote", "abstract", "failure"]) {
+			expect(html).toContain(`callout-${type}`);
+		}
+		for (const type of ["note", "tip", "warning", "danger", "info"]) {
+			expect(html).toContain(`callout-${type}`);
+		}
 	});
 
-	test("backlinks panel is rendered", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "advanced.html"), "utf-8");
-		expect(html).toContain('class="obsidian-backlinks"');
+	test("renders foldable callouts as details elements", () => {
+		expect(page("markdown/guide/examples.html")).toContain("<details");
 	});
 
-	test("callouts are transformed to styled divs for plugin-owned types", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).toContain('class="callout callout-success"');
-		expect(html).toContain('class="callout callout-question"');
-		expect(html).toContain('class="callout callout-example"');
-		expect(html).toContain('class="callout callout-failure"');
-	});
-
-	test("callouts claimed by Rspress's built-in alert transform are restored", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		// note/tip/warning/danger/info are hijacked by Rspress before plugin
-		// remark plugins run; the plugin restores and renders them itself.
-		expect(html).toContain('class="callout callout-note"');
-		expect(html).toContain('class="callout callout-tip"');
-		expect(html).toContain('class="callout callout-warning"');
-		expect(html).toContain('class="callout callout-danger"');
-		expect(html).toContain('class="callout callout-info"');
-		expect(html).not.toContain("$$$callout$$$");
-	});
-
-	test("restored foldable callouts keep their title and first paragraph", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		// Rspress's conversion leaks the fold suffix and drops the first
-		// paragraph; both must survive the restoration.
-		expect(html).toContain('<details class="callout callout-note" data-callout="note">');
-		expect(html).toContain("Collapsed by Default</summary>");
-		expect(html).toContain("This content is hidden until the user expands the callout.");
-		expect(html).toContain('<details class="callout callout-tip" data-callout="tip" open');
-		expect(html).toContain("Expanded by Default</summary>");
-	});
-
-	test("foldable callouts render as details elements", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).toContain("<details");
-		expect(html).toMatch(/<summary class="callout-title">/);
-	});
-
-	test("callout titles render inline markdown", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).toContain('<div class="callout-title">A <strong>bold</strong> title linking to');
-	});
-
-	test("transclusion is rendered", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).toContain('class="obsidian-transclusion"');
-	});
-
-	test("tag pages are generated", () => {
-		expect(fs.existsSync(path.join(TAGS_DIR, "demo.html"))).toBe(true);
-		expect(fs.existsSync(path.join(TAGS_DIR, "examples.html"))).toBe(true);
-	});
-
-	test("generated tag page lists linked pages", () => {
-		const html = fs.readFileSync(path.join(TAGS_DIR, "demo.html"), "utf-8");
-		expect(html).toContain("/guide/examples");
-	});
-
-	test("highlights are transformed to mark tags", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
+	test("renders highlights, footnote references and tag links", () => {
+		const html = page("markdown/guide/examples.html");
 		expect(html).toContain("<mark>");
+		expect(html).toContain("footnote-ref");
+		expect(html).toContain('href="/tags/examples"');
 	});
 
-	test("footnotes are rendered", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).toContain('class="footnote-ref"');
+	test("strips Obsidian comments", () => {
+		expect(page("markdown/guide/examples.html")).not.toContain(
+			"This text will not appear in the rendered page",
+		);
 	});
 
-	test("no stray empty paragraphs remain after transforms", () => {
-		const html = fs.readFileSync(path.join(GUIDE_DIR, "examples.html"), "utf-8");
-		expect(html).not.toContain("<p></p>");
+	test("transcludes sections with a prefixed source and resolved body", () => {
+		const html = page("markdown/guide/examples.html");
+		expect(html).toContain('class="obsidian-transclusion"');
+		expect(html).toContain('data-src="/markdown/guide/getting-started');
+	});
+
+	test("keeps vault hrefs inside transclusions on the vault prefix", () => {
+		// Regression guard: transcluded content used to fall back to an index
+		// built without the vault route prefix, emitting `/Welcome` instead of
+		// `/vault/Welcome`.
+		const html = page("vault/create a link.html");
+		expect(html).toContain('class="obsidian-transclusion"');
+		const transclusion = html.slice(html.indexOf('class="obsidian-transclusion"'));
+		expect(transclusion).toContain('href="/vault/');
+		expect(transclusion).not.toContain('href="/Welcome"');
+	});
+
+	test("renders math to KaTeX HTML", () => {
+		const html = page("markdown/guide/examples.html");
+		expect(html).toContain('class="obsidian-math"');
+		expect(html).toContain('class="obsidian-math-display"');
+		expect(html).toContain("katex");
+		// Prices stay prose: inline math requires no space inside the delimiters.
+		expect(html).toContain("$5 and $10");
+	});
+
+	test("emits mermaid placeholders for the client renderer", () => {
+		const html = page("markdown/guide/examples.html");
+		expect(html).toContain('class="obsidian-mermaid-block"');
+		expect(html).toContain("data-code=");
+	});
+
+	test("marks unresolved wikilinks instead of printing the raw syntax", () => {
+		const html = page("markdown/guide/examples.html");
+
+		expect(html).toContain('class="obsidian-unresolved"');
+		expect(html).toContain(">Missing page<");
+		expect(html).not.toContain(">[[not-a-real-page");
+	});
+
+	test("drops comments that span paragraphs and lists", () => {
+		const html = page("markdown/guide/examples.html");
+
+		expect(html).not.toContain("This paragraph is not published either");
+		expect(html).not.toContain("Neither is this list item");
+		expect(html).toContain("Still visible.");
+	});
+
+	test("renders the backlinks panel", () => {
+		expect(page("markdown/guide/examples.html")).toContain("obsidian-backlinks");
+	});
+
+	test("every internal href in the built site resolves to the file the host will serve", () => {
+		// The guard for the whole class of dead links this suite kept missing: an
+		// index route emitted without its trailing slash (Rspress turns `/guide`
+		// into `guide.html`, and the file is `guide/index.html`). Passive href
+		// assertions only check the ones a test author remembered to look at.
+		const missing: string[] = [];
+
+		for (const file of htmlFiles(DOC_BUILD)) {
+			const html = fs.readFileSync(file, "utf-8");
+			for (const match of html.matchAll(/href="(\/[^"]*)"/g)) {
+				const href = match[1] ?? "";
+				// A static host percent-decodes the request before mapping it to a
+				// file, so `/vault/create%20a%20link` must be checked against
+				// `vault/create a link.html`.
+				const encoded = href.split("#")[0]?.split("?")[0] ?? "";
+				if (!encoded.startsWith("/")) continue;
+
+				let target = encoded;
+				try {
+					target = decodeURIComponent(encoded);
+				} catch {
+					continue; // not valid percent-encoding: Rspress's problem, not a route
+				}
+				// Assets and externals are served as-is; only route hrefs are checked.
+				if (/\.(?!html$)[a-z0-9]+$/i.test(target)) continue;
+
+				const targetFile = target.endsWith("/")
+					? path.join(DOC_BUILD, target, "index.html")
+					: target.endsWith(".html")
+						? path.join(DOC_BUILD, target)
+						: path.join(DOC_BUILD, `${target}.html`);
+
+				if (!fs.existsSync(targetFile)) {
+					missing.push(`${path.relative(DOC_BUILD, file)} -> ${href}`);
+				}
+			}
+		}
+
+		expect(missing).toEqual([]);
 	});
 });

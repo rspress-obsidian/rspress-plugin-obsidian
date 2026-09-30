@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
-// Regenerates the callout icon CSS block embedded in src/styles.css.
+// Regenerates the callout icon CSS block embedded in src/markdown/styles.css.
 // Run via `bun scripts/generate-icons.ts` whenever icon mappings change.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dir, "..");
-const STYLES_PATH = path.join(ROOT, "src", "styles.css");
+const STYLES_PATH = path.join(ROOT, "src", "markdown", "styles.css");
 
 // Stable, CSP-safe callout glyphs. CSS data-URI masks are not rendered by
 // every documentation host, so these use ordinary text content instead.
 const ICON_MAP: Record<string, string> = {
 	note: "✎",
+	todo: "☑",
 	tip: "✦",
 	info: "i",
 	success: "✓",
@@ -28,22 +29,37 @@ const ICON_MAP: Record<string, string> = {
 const START_MARKER = "/* ── CALL OUT ICONS (generated) ── */";
 const END_MARKER = "/* ── END CALL OUT ICONS ── */";
 
+function glyphRule(selector: string, glyph: string): string[] {
+	return [
+		`${selector} {`,
+		`\tcontent: "${glyph}";`,
+		"\tbackground: none;",
+		"\tcolor: var(--callout-color, currentColor);",
+		"\tfont-size: 1rem;",
+		"\tfont-weight: 800;",
+		"\tline-height: 1.1rem;",
+		"\ttext-align: center;",
+		"\tmask: none;",
+		"\t-webkit-mask: none;",
+		"}",
+	];
+}
+
 function buildBlock(): string {
 	const lines: string[] = [START_MARKER];
+	// Custom (unrecognised) types fall back to Obsidian's note glyph. This rule
+	// is emitted first: it ties on specificity with the per-type rules below,
+	// so document order lets each known type — and `todo` — win.
+	lines.push(
+		...glyphRule(".callout .callout-title::before,\n.rp-callout .rp-callout__title::before", "✎"),
+	);
 	for (const [type, glyph] of Object.entries(ICON_MAP)) {
 		lines.push(
-			`.callout-${type} .callout-title::before,\n.rp-callout--${type} .rp-callout__title::before {`,
+			...glyphRule(
+				`.callout-${type} .callout-title::before,\n.rp-callout--${type} .rp-callout__title::before`,
+				glyph,
+			),
 		);
-		lines.push(`\tcontent: "${glyph}";`);
-		lines.push("\tbackground: none;");
-		lines.push("\tcolor: var(--callout-color, currentColor);");
-		lines.push("\tfont-size: 1rem;");
-		lines.push("\tfont-weight: 800;");
-		lines.push("\tline-height: 1.1rem;");
-		lines.push("\ttext-align: center;");
-		lines.push("\tmask: none;");
-		lines.push("\t-webkit-mask: none;");
-		lines.push("}");
 	}
 	lines.push(END_MARKER);
 	return lines.join("\n");
@@ -61,4 +77,4 @@ if (start !== -1 && end !== -1) {
 }
 
 writeFileSync(STYLES_PATH, next);
-console.log("  generated callout icons in src/styles.css");
+console.log("  generated callout icons in src/markdown/styles.css");

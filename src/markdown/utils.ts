@@ -1,10 +1,75 @@
 import path from "node:path";
 
-import { humanizeBaseName } from "./slug.ts";
-import type { ContentPage } from "./types.ts";
+import { normalizeFilePathKey } from "../shared/paths.js";
+import { normalizeFsPath } from "../shared/route-path.js";
+import { humanizeBaseName, normalizeUnicode } from "../shared/slug.js";
+import type { ContentPage } from "./types.js";
 
-export function normalizeFsPath(input: string): string {
-	return input.replace(/\\/g, "/");
+export { normalizeFilePathKey } from "../shared/paths.js";
+export { normalizeFsPath, normalizeRoutePath as normalizePathKey } from "../shared/route-path.js";
+
+/**
+ * True when `filePath` is inside the already-absolute `rootDir`.
+ *
+ * Both sides are normalized to forward slashes before comparing: the remark
+ * pass hands out paths that already went through {@link normalizeFsPath},
+ * while `rootDir` usually comes from `path.resolve` and carries `\` separators
+ * on Windows. A raw `${root}${path.sep}` prefix test therefore never matches
+ * there, and the caller silently picks the wrong root.
+ *
+ * The comparison is case-insensitive on the platforms whose default filesystem
+ * is case-insensitive (Windows, macOS): a `vaultRoot` that differs from the
+ * reported file path only in case names the same directory, and a
+ * case-sensitive test would drop every file under it into the docs root —
+ * silently disabling vault processing. The platform is taken as an argument
+ * (defaulting to `process.platform`) rather than detected by probing the
+ * filesystem: a probe needs a writable temp file and only ever discovers the
+ * OS default anyway, while this function stays pure and testable.
+ */
+export function isPathInsideRoot(
+	filePath: string,
+	rootDir: string,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	const root = normalizeFsPath(rootDir).replace(/\/+$/, "");
+	const candidate = normalizeFsPath(filePath);
+	if (platform === "win32" || platform === "darwin") {
+		return candidate.toLowerCase().startsWith(`${root.toLowerCase()}/`);
+	}
+	return candidate.startsWith(`${root}/`);
+}
+
+/**
+ * Strip the extended-length prefix Windows' `realpathSync` may return.
+ *
+ * A resolved path longer than `MAX_PATH` comes back as `\\?\C:\vault`, and a
+ * resolved UNC share as `\\?\UNC\server\share`. The prefix is not part of the
+ * path, but it is invisible to a `startsWith` test: whichever of the two sides
+ * carries it, the pair never matches and a file that is genuinely inside the
+ * vault is refused. Strip it before comparing; callers keep the raw path for
+ * the actual file access.
+ */
+export function normalizeRealPath(value: string): string {
+	if (value.startsWith("\\\\?\\UNC\\")) {
+		return `\\\\${value.slice("\\\\?\\UNC\\".length)}`;
+	}
+	if (value.startsWith("\\\\?\\")) {
+		return value.slice("\\\\?\\".length);
+	}
+	return value;
+}
+
+/**
+ * True when `realPath` is `realRoot` or lives beneath it, ignoring an
+ * extended-length prefix on either side. Separator-agnostic (unlike a
+ * `path.sep` test) so it is exercisable with synthetic Windows strings on any
+ * host — the real prefix behaviour can only be produced on Windows.
+ */
+export function isRealPathInsideRoot(realPath: string, realRoot: string): boolean {
+	const candidate = normalizeRealPath(realPath);
+	const root = normalizeRealPath(realRoot).replace(/[\\/]+$/, "");
+	if (candidate === root) return true;
+	return candidate.startsWith(root) && /[\\/]/.test(candidate.charAt(root.length));
 }
 
 /**
@@ -24,42 +89,18 @@ export function backlinkLabel(page: ContentPage): string {
 	return humanizeBaseName(page.baseName) || page.baseName;
 }
 
-export function normalizePathKey(input: string): string {
-	const normalized = normalizeFsPath(input)
-		.replace(/\.(md|mdx)$/i, "")
-		.replace(/^\/+|\/+$/g, "")
-		.replace(/\/index$/i, "")
-		.trim();
-
-	if (normalized.length === 0 || normalized.toLowerCase() === "index") {
-		return "";
-	}
-
-	return normalized.replace(/\\/g, "/");
-}
-
 /**
  * Normalize a vault-relative Markdown path without applying Rspress route
- * aliases such as removing a trailing `index` segment.
+ * aliases such as removing a trailing `index` segment. The result is folded to
+ * NFC (see {@link normalizeUnicode}) because it doubles as a lookup key.
  */
-export function normalizeFilePathKey(input: string): string {
-	return normalizeFsPath(input)
-		.replace(/\.(md|mdx)$/i, "")
-		.replace(/^\/+|\/+$/g, "")
-		.trim();
-}
 
 /**
  * Encode a page route for use as an HTML URL while preserving its slash
  * separators. Content-page route paths remain unencoded as index keys; only
  * emitted href values use this helper.
  */
-export function encodeRoutePath(routePath: string): string {
-	return routePath
-		.split("/")
-		.map((segment, index) => (index === 0 ? "" : encodeURIComponent(segment)))
-		.join("/");
-}
+export { encodeRoutePath, isIndexRoute, routeHref } from "../shared/route-path.js";
 
 /**
  * Resolve an explicitly relative wikilink target from the current note.

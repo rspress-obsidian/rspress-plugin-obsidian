@@ -1,8 +1,8 @@
 import { memo, useMemo } from "react";
-import type { CanvasNode } from "../types";
-import { resolveBgColor, resolveColor } from "../utils/color";
-import { renderMarkdown, sanitizeUrl } from "../utils/markdown";
-import { isMarkdownFile, resolveFileRoute } from "../utils/resolver";
+import type { CanvasNode } from "../types.js";
+import { resolveBgColor, resolveColor } from "../utils/color.js";
+import { anchorHref, renderMarkdown, sanitizeUrl } from "../utils/markdown.js";
+import { isMarkdownFile, resolveFileRoute } from "../utils/resolver.js";
 
 interface CanvasNodeProps {
 	node: CanvasNode;
@@ -67,7 +67,11 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 		<div
 			style={{
 				position: "absolute",
-				zIndex: zIndex + (isHovered ? 100 : 0) + (isSelected ? 120 : 0),
+				// Groups are containers and stay in the band the renderer ranked them
+				// into — a selected group must not rise above the cards it holds.
+				// Their hover/selected feedback is the border and shadow below.
+				zIndex:
+					zIndex + (node.type === "group" ? 0 : (isHovered ? 100 : 0) + (isSelected ? 120 : 0)),
 				borderLeftColor: node.type === "group" ? undefined : borderColor,
 				borderColor: node.color && node.type !== "group" ? borderColor : undefined,
 				backgroundColor: resolveBgColor(node.color, node.type === "group" ? "group" : "other"),
@@ -128,10 +132,15 @@ function NodeContent({
 	iframeSandbox: string;
 }) {
 	const borderColor = nodeBorderColor(node.color);
-	const text = node.type === "text" ? node.text : "";
+	// One memo for both card kinds. A drag patches only the dragged node, so this
+	// still holds while other cards move; previously the file-card path called
+	// renderMarkdown inline and re-parsed on every render of any kind.
+	const markdownSource =
+		node.type === "text" ? node.text : node.type === "file" ? (node.fileContent ?? "") : "";
 	const renderedMarkdown = useMemo(
-		() => (text ? renderMarkdown(text, { assets, notes, fileRoutePrefix }) : ""),
-		[text, assets, notes, fileRoutePrefix],
+		() =>
+			markdownSource ? renderMarkdown(markdownSource, { assets, notes, fileRoutePrefix }) : "",
+		[markdownSource, assets, notes, fileRoutePrefix],
 	);
 
 	switch (node.type) {
@@ -199,7 +208,9 @@ function NodeContent({
 			}
 
 			if (node.fileContent !== undefined) {
-				const fileMarkdown = renderMarkdown(node.fileContent, { assets, notes, fileRoutePrefix });
+				// Built here so the element below stays on the single line its
+				// sanitization ignore-comment covers.
+				const markdownHtml = { __html: renderedMarkdown };
 				return (
 					<div className="canvas-node-content">
 						<div
@@ -211,7 +222,7 @@ function NodeContent({
 						>
 							<span className="canvas-node-file-header-title">{titleText}</span>
 							<a
-								href={route + (node.subpath || "")}
+								href={anchorHref(route, node.subpath)}
 								className="canvas-node-file-header-link"
 								title="Open note page"
 								aria-label="Open note page"
@@ -222,7 +233,7 @@ function NodeContent({
 						</div>
 						<div className="canvas-node-file-body">
 							{/* biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown sanitizes HTML and URLs before insertion */}
-							<div className="canvas-markdown" dangerouslySetInnerHTML={{ __html: fileMarkdown }} />
+							<div className="canvas-markdown" dangerouslySetInnerHTML={markdownHtml} />
 						</div>
 					</div>
 				);
@@ -239,7 +250,7 @@ function NodeContent({
 
 			return (
 				<a
-					href={route + (node.subpath || "")}
+					href={anchorHref(route, node.subpath)}
 					className="canvas-node-content canvas-file-fallback"
 					onClick={(event) => event.stopPropagation()}
 				>

@@ -1,4 +1,4 @@
-import type { CanvasData, CanvasEdgeData, CanvasNode } from "./types";
+import type { CanvasData, CanvasEdgeData, CanvasNode } from "./types.js";
 
 export class CanvasParseError extends Error {
 	constructor(message: string) {
@@ -212,13 +212,46 @@ export function parseCanvas(json: string): CanvasData {
 
 	const d = data as Record<string, unknown>;
 
+	// Per-item tolerance. A board is one JSON file the user hand-edits, and
+	// aborting the whole thing because of a single bad node left every other
+	// card on the board unrendered. A node or edge that fails validation is
+	// dropped and recorded in `problems` instead, so the loss is never silent;
+	// only a structurally broken document (bad JSON, `nodes` not an array) is a
+	// hard error, because then nothing can be rendered at all.
+	const problems: string[] = [];
+	const describe = (item: unknown, index: number): string => {
+		const id =
+			typeof item === "object" && item !== null && "id" in item && typeof item.id === "string"
+				? ` "${item.id}"`
+				: "";
+		return `node ${index}${id}`;
+	};
+
+	const nodeIds = new Set<string>();
 	const nodes: CanvasNode[] = [];
 	if (d.nodes !== undefined) {
 		if (!Array.isArray(d.nodes)) {
 			throw new CanvasParseError("nodes must be an array");
 		}
-		for (const node of d.nodes) {
-			nodes.push(validateNode(node));
+		for (const [index, raw] of d.nodes.entries()) {
+			let node: CanvasNode;
+			try {
+				node = validateNode(raw);
+			} catch (e) {
+				if (!(e instanceof CanvasParseError)) throw e;
+				problems.push(
+					`Skipped ${describe(raw, index)}: ${e.message.replace(/^Canvas parse error: /, "")}`,
+				);
+				continue;
+			}
+			// A duplicate id would make the node unaddressable; keep the first and
+			// report the rest rather than losing the board over a copy-paste.
+			if (nodeIds.has(node.id)) {
+				problems.push(`Skipped duplicate node id: "${node.id}"`);
+				continue;
+			}
+			nodeIds.add(node.id);
+			nodes.push(node);
 		}
 	}
 
@@ -227,30 +260,29 @@ export function parseCanvas(json: string): CanvasData {
 		if (!Array.isArray(d.edges)) {
 			throw new CanvasParseError("edges must be an array");
 		}
-		for (const edge of d.edges) {
-			edges.push(validateEdge(edge));
-		}
-	}
-
-	const nodeIds = new Set<string>();
-	for (const node of nodes) {
-		if (nodeIds.has(node.id)) {
-			throw new CanvasParseError(`Duplicate node id: ${node.id}`);
-		}
-		nodeIds.add(node.id);
-	}
-
-	const edgeIds = new Set<string>();
-	for (const edge of edges) {
-		if (edgeIds.has(edge.id)) {
-			throw new CanvasParseError(`Duplicate edge id: ${edge.id}`);
-		}
-		edgeIds.add(edge.id);
-		if (!nodeIds.has(edge.fromNode)) {
-			throw new CanvasParseError(`Edge ${edge.id} references unknown fromNode: ${edge.fromNode}`);
-		}
-		if (!nodeIds.has(edge.toNode)) {
-			throw new CanvasParseError(`Edge ${edge.id} references unknown toNode: ${edge.toNode}`);
+		const edgeIds = new Set<string>();
+		for (const [index, raw] of d.edges.entries()) {
+			let edge: CanvasEdgeData;
+			try {
+				edge = validateEdge(raw);
+			} catch (e) {
+				if (!(e instanceof CanvasParseError)) throw e;
+				problems.push(`Skipped edge ${index}: ${e.message.replace(/^Canvas parse error: /, "")}`);
+				continue;
+			}
+			if (edgeIds.has(edge.id)) {
+				problems.push(`Skipped duplicate edge id: "${edge.id}"`);
+				continue;
+			}
+			// An edge whose endpoint was dropped (malformed, or a duplicate) cannot
+			// be drawn, so it goes with it — checking this last is what stops the
+			// tolerance above from cascading straight back into a hard failure.
+			if (!nodeIds.has(edge.fromNode) || !nodeIds.has(edge.toNode)) {
+				problems.push(`Skipped edge "${edge.id}": endpoint is not a rendered node`);
+				continue;
+			}
+			edgeIds.add(edge.id);
+			edges.push(edge);
 		}
 	}
 
@@ -275,5 +307,5 @@ export function parseCanvas(json: string): CanvasData {
 		}
 	}
 
-	return { nodes, edges, assets, notes };
+	return { nodes, edges, assets, notes, problems };
 }

@@ -1,21 +1,31 @@
 import { useLocation, useNavigate } from "@rspress/core/runtime";
-import { useCallback, useEffect, useRef, useState } from "react";
-import GraphIcon from "./components/GraphIcon";
-import ZoomButton from "./components/ZoomButton";
-import GraphView, { type GraphViewColors, type GraphViewHandle } from "./GraphView";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { GraphViewGroup } from "../types.js";
+import GraphIcon from "./components/GraphIcon.js";
+import ZoomButton from "./components/ZoomButton.js";
+import { type GraphScope, MAX_DEPTH } from "./deriveGraphViewData.js";
+import GraphView, {
+	type GraphViewColors,
+	type GraphViewFilters,
+	type GraphViewHandle,
+	type GraphViewStats,
+} from "./GraphView.js";
+import {
+	LOCAL_STORAGE_KEY_FILTERS,
+	LOCAL_STORAGE_KEY_OPEN,
+	LOCAL_STORAGE_KEY_POS,
+} from "./graph-panel-storage.js";
 
 interface GraphPanelProps {
 	defaultOpen?: boolean;
 	colors?: GraphViewColors;
+	groups?: readonly GraphViewGroup[];
 }
 
 const STYLE_ID = "graph-panel-keyframes";
 const PANEL_ID = "rspress-graph-view-panel";
 const PANEL_TITLE_ID = "rspress-graph-view-title";
 const GRAPH_REGION_ID = "rspress-graph-view-region";
-
-const LOCAL_STORAGE_KEY_OPEN = "rspress-graph-view-open";
-const LOCAL_STORAGE_KEY_POS = "rspress-graph-view-pos";
 
 function injectKeyframes() {
 	if (typeof document === "undefined") return;
@@ -51,7 +61,7 @@ function injectKeyframes() {
 	document.head.appendChild(style);
 }
 
-export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelProps) {
+export default function GraphPanel({ defaultOpen = false, colors, groups }: GraphPanelProps) {
 	const navigate = useNavigate();
 	const { pathname } = useLocation();
 	const [isHydrated, setIsHydrated] = useState(false);
@@ -61,13 +71,22 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 	const [windowSize, setWindowSize] = useState({ width: 1000, height: 800 });
 	const [panelSize, setPanelSize] = useState({ width: 320, height: 252 });
 	const [panelVisible, setPanelVisible] = useState(false);
-	const [stats, setStats] = useState<{ nodes: number; links: number } | null>(null);
+	const [stats, setStats] = useState<GraphViewStats | null>(null);
+	const [filtersOpen, setFiltersOpen] = useState(false);
+	const [query, setQuery] = useState("");
+	const [depth, setDepth] = useState(1);
+	const [showTags, setShowTags] = useState(true);
+	const [showOrphans, setShowOrphans] = useState(true);
+	const [scope, setScope] = useState<GraphScope>("local");
 	const panelRef = useRef<HTMLDivElement>(null);
 	const wrapperRef = useRef<HTMLDivElement>(null);
-	const graphAreaRef = useRef<HTMLDivElement>(null);
 	const graphViewRef = useRef<GraphViewHandle>(null);
 	const fabRef = useRef<HTMLButtonElement>(null);
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
+	// True when the reader opened the panel themselves. Only then does the panel
+	// take focus on open, and only then does closing it hand focus back to the FAB:
+	// a `defaultOpen` panel must not move focus the reader never asked it to move.
+	const readerOpenedRef = useRef(false);
 
 	const isDragging = useRef(false);
 	const dragStart = useRef({ x: 0, y: 0, posX: 0, posY: 0 });
@@ -80,6 +99,17 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 
 			const storedPos = localStorage.getItem(LOCAL_STORAGE_KEY_POS);
 			if (storedPos) setPos(JSON.parse(storedPos));
+
+			const storedFilters = localStorage.getItem(LOCAL_STORAGE_KEY_FILTERS);
+			if (storedFilters) {
+				const parsed = JSON.parse(storedFilters) as Partial<GraphViewFilters>;
+				if (typeof parsed.depth === "number") {
+					setDepth(Math.min(MAX_DEPTH, Math.max(1, Math.round(parsed.depth))));
+				}
+				if (typeof parsed.showTags === "boolean") setShowTags(parsed.showTags);
+				if (typeof parsed.showOrphans === "boolean") setShowOrphans(parsed.showOrphans);
+				if (parsed.scope === "global" || parsed.scope === "local") setScope(parsed.scope);
+			}
 		} catch {
 			// localStorage may be unavailable (private mode, SSR, storage disabled)
 		}
@@ -95,10 +125,14 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 		try {
 			localStorage.setItem(LOCAL_STORAGE_KEY_OPEN, String(isOpen));
 			localStorage.setItem(LOCAL_STORAGE_KEY_POS, JSON.stringify(pos));
+			localStorage.setItem(
+				LOCAL_STORAGE_KEY_FILTERS,
+				JSON.stringify({ depth, showTags, showOrphans, scope }),
+			);
 		} catch {
 			// localStorage may be unavailable (private mode, SSR, storage disabled)
 		}
-	}, [isOpen, pos, isHydrated]);
+	}, [isOpen, pos, depth, showTags, showOrphans, scope, isHydrated]);
 
 	const handlePointerDown = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
@@ -158,23 +192,41 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 	}, []);
 
 	useEffect(() => {
-		if (isOpen) {
-			const timer = setTimeout(() => {
-				const s = graphViewRef.current?.getStats();
-				if (s) setStats(s);
-				closeButtonRef.current?.focus();
-			}, 150);
-			return () => clearTimeout(timer);
+		if (!isOpen) {
+			readerOpenedRef.current = false;
+			return;
 		}
+		const timer = setTimeout(() => {
+			const s = graphViewRef.current?.getStats();
+			if (s) setStats(s);
+			// `defaultOpen` panels mount already open, and focusing 150ms later pulled
+			// focus out of whatever the reader had focused in the meantime — a canvas
+			// help dialog, for one.
+			if (readerOpenedRef.current) {
+				closeButtonRef.current?.focus();
+			}
+		}, 150);
+		return () => clearTimeout(timer);
 	}, [isOpen]);
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape" && isOpen) {
+				// A non-empty search clears first — a filter bar you cannot
+				// backspace out of with Escape is a trap — and only the next
+				// Escape closes the panel.
+				if (query) {
+					e.preventDefault();
+					setQuery("");
+					return;
+				}
 				e.preventDefault();
+				// A panel the reader opened hands focus back to the FAB; an auto-opened
+				// one leaves focus wherever it is (another plugin's dialog, say).
+				const readerOpened = readerOpenedRef.current;
 				setIsOpen(false);
 				setIsFullscreen(false);
-				fabRef.current?.focus();
+				if (readerOpened) fabRef.current?.focus();
 				return;
 			}
 
@@ -208,27 +260,34 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 				target.isContentEditable;
 			if (e.key === "g" && !isEditable && !e.metaKey && !e.ctrlKey && !e.altKey) {
 				e.preventDefault();
-				setIsOpen((prev) => {
-					if (prev) setIsFullscreen(false);
-					return !prev;
-				});
+				// Two separate setters, not a setState updater with a side effect:
+				// updaters must stay pure or a double-invoked render toggles twice.
+				readerOpenedRef.current = true;
+				setIsOpen((prev) => !prev);
+				setIsFullscreen(false);
 			}
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [isOpen]);
+	}, [isOpen, query]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: pathname triggers stats refresh on route change
+	// biome-ignore lint/correctness/useExhaustiveDependencies: stats track route and filter changes; graphViewRef is stable
 	useEffect(() => {
 		const s = graphViewRef.current?.getStats();
 		if (s) setStats(s);
-	}, [pathname]);
+	}, [pathname, depth, showTags, showOrphans, scope, query]);
+
+	// Stable identity: GraphView re-derives only when a filter value changes,
+	// not on every panel re-render (position drags, stats ticks).
+	const filters = useMemo(
+		() => ({ query, depth, showTags, showOrphans, scope }),
+		[query, depth, showTags, showOrphans, scope],
+	);
 
 	const handleToggle = useCallback(() => {
-		setIsOpen((prev) => {
-			if (prev) setIsFullscreen(false);
-			return !prev;
-		});
+		readerOpenedRef.current = true;
+		setIsOpen((prev) => !prev);
+		setIsFullscreen(false);
 	}, []);
 
 	const handleClose = useCallback(() => {
@@ -246,9 +305,20 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 
 	const FOOTER_HEIGHT = 22;
 	const HEADER_HEIGHT = 34;
+	const FILTER_BAR_HEIGHT = 32;
 	const actualWidth = isFullscreen ? windowSize.width : panelSize.width;
 	const actualHeight = isFullscreen ? windowSize.height : panelSize.height;
-	const graphHeight = actualHeight - HEADER_HEIGHT - FOOTER_HEIGHT;
+
+	const neighborsShown =
+		stats && stats.neighborCount < stats.neighborTotal
+			? `${stats.neighborCount} of ${stats.neighborTotal} neighbors`
+			: null;
+	// The global scope caps the drawn nodes so d3-force stays usable; say how
+	// many were left out rather than presenting a partial vault as the whole one.
+	const truncationShown =
+		stats && stats.truncatedCount > 0 ? `${stats.truncatedCount} more not drawn` : null;
+	const graphHeight =
+		actualHeight - HEADER_HEIGHT - FOOTER_HEIGHT - (filtersOpen ? FILTER_BAR_HEIGHT : 0);
 
 	return (
 		<>
@@ -258,6 +328,10 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 				onClick={handleToggle}
 				aria-controls={PANEL_ID}
 				aria-expanded={isOpen}
+				// Fullscreen only fades the FAB out; without this it stays in the tab
+				// order and is announced while invisible.
+				aria-hidden={isFullscreen}
+				tabIndex={isFullscreen ? -1 : 0}
 				style={{
 					position: "fixed",
 					bottom: 24,
@@ -540,6 +614,25 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 											<path d="M3 3v5h5" />
 										</svg>
 									</ZoomButton>
+									<ZoomButton
+										ariaLabel={filtersOpen ? "Hide graph filters" : "Show graph filters"}
+										ariaExpanded={filtersOpen}
+										onClick={() => setFiltersOpen((open) => !open)}
+									>
+										<svg
+											aria-hidden="true"
+											width="12"
+											height="12"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											strokeWidth="2"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+										>
+											<path d="M4 5h16l-6.5 7.5V19l-3 1.5v-8L4 5z" />
+										</svg>
+									</ZoomButton>
 								</div>
 
 								<div
@@ -598,13 +691,216 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 							</div>
 						</div>
 
+						{filtersOpen && (
+							<div
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: 6,
+									padding: "5px 8px",
+									height: FILTER_BAR_HEIGHT,
+									boxSizing: "border-box",
+									borderBottom:
+										"1px solid color-mix(in srgb, var(--rp-c-divider, #e2e8f0) 40%, transparent)",
+									background: "color-mix(in srgb, var(--rp-c-bg, #ffffff) 45%, transparent)",
+									flexShrink: 0,
+								}}
+							>
+								<input
+									type="search"
+									value={query}
+									onChange={(event) => setQuery(event.target.value)}
+									placeholder="Search… (path:, file:, tag:)"
+									aria-label="Filter graph nodes"
+									style={{
+										flex: 1,
+										minWidth: 0,
+										fontSize: 11,
+										padding: "3px 6px",
+										borderRadius: 6,
+										border:
+											"1px solid color-mix(in srgb, var(--rp-c-divider, #e2e8f0) 60%, transparent)",
+										background: "color-mix(in srgb, var(--rp-c-bg, #ffffff) 70%, transparent)",
+										color: "var(--rp-c-text-1, #334155)",
+										fontFamily:
+											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+										outline: "none",
+									}}
+								/>
+								{/* Local is the neighborhood of the current page; global is the
+								    whole vault with the current page highlighted. */}
+								<div
+									role="group"
+									aria-label="Graph scope"
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 1,
+										flexShrink: 0,
+										border:
+											"1px solid color-mix(in srgb, var(--rp-c-divider, #e8e8f0) 50%, transparent)",
+										borderRadius: 6,
+										padding: "1px",
+									}}
+								>
+									{(["local", "global"] as const).map((value) => {
+										const active = scope === value;
+										return (
+											<button
+												key={value}
+												type="button"
+												aria-label={`${value === "local" ? "Local" : "Global"} graph`}
+												aria-pressed={active}
+												onClick={() => setScope(value)}
+												style={{
+													border: "none",
+													borderRadius: 4,
+													padding: "1px 6px",
+													fontSize: 10,
+													lineHeight: "16px",
+													cursor: "pointer",
+													background: active
+														? "color-mix(in srgb, var(--rp-c-brand, #3b82f6) 18%, transparent)"
+														: "transparent",
+													color: active
+														? "var(--rp-c-text-1, #334155)"
+														: "var(--rp-c-text-2, #64748b)",
+													fontWeight: active ? 600 : 400,
+													fontFamily:
+														"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+												}}
+											>
+												{value === "local" ? "Local" : "Global"}
+											</button>
+										);
+									})}
+								</div>
+								<div
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 1,
+										flexShrink: 0,
+										border:
+											"1px solid color-mix(in srgb, var(--rp-c-divider, #e8e8f0) 50%, transparent)",
+										borderRadius: 6,
+										padding: "1px",
+									}}
+									// The stepper is one control; the count between the buttons
+									// announces itself when it changes. Depth sizes the local
+									// neighborhood, so the control is hidden in the global scope.
+									role="group"
+									aria-label="Neighborhood depth"
+									hidden={scope === "global"}
+								>
+									<button
+										type="button"
+										aria-label="Decrease depth"
+										disabled={depth <= 1}
+										onClick={() => setDepth((value) => Math.max(1, value - 1))}
+										style={{
+											width: 18,
+											height: 18,
+											border: "none",
+											borderRadius: 4,
+											background: "transparent",
+											color: "var(--rp-c-text-2, #64748b)",
+											cursor: depth <= 1 ? "default" : "pointer",
+											fontSize: 12,
+											lineHeight: 1,
+											padding: 0,
+											opacity: depth <= 1 ? 0.4 : 1,
+										}}
+									>
+										−
+									</button>
+									<span
+										aria-live="polite"
+										style={{
+											fontSize: 10,
+											minWidth: 12,
+											textAlign: "center",
+											color: "var(--rp-c-text-2, #64748b)",
+											fontFamily:
+												"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+											userSelect: "none",
+										}}
+									>
+										{depth}
+									</span>
+									<button
+										type="button"
+										aria-label="Increase depth"
+										disabled={depth >= MAX_DEPTH}
+										onClick={() => setDepth((value) => Math.min(MAX_DEPTH, value + 1))}
+										style={{
+											width: 18,
+											height: 18,
+											border: "none",
+											borderRadius: 4,
+											background: "transparent",
+											color: "var(--rp-c-text-2, #64748b)",
+											cursor: depth >= MAX_DEPTH ? "default" : "pointer",
+											fontSize: 12,
+											lineHeight: 1,
+											padding: 0,
+											opacity: depth >= MAX_DEPTH ? 0.4 : 1,
+										}}
+									>
+										+
+									</button>
+								</div>
+								<label
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 3,
+										flexShrink: 0,
+										fontSize: 10,
+										color: "var(--rp-c-text-2, #64748b)",
+										fontFamily:
+											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+										userSelect: "none",
+										cursor: "pointer",
+									}}
+								>
+									<input
+										type="checkbox"
+										checked={showTags}
+										onChange={(event) => setShowTags(event.target.checked)}
+									/>
+									Tags
+								</label>
+								<label
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: 3,
+										flexShrink: 0,
+										fontSize: 10,
+										color: "var(--rp-c-text-2, #64748b)",
+										fontFamily:
+											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+										userSelect: "none",
+										cursor: "pointer",
+									}}
+								>
+									<input
+										type="checkbox"
+										checked={showOrphans}
+										onChange={(event) => setShowOrphans(event.target.checked)}
+									/>
+									Orphans
+								</label>
+							</div>
+						)}
+
 						<div
 							id={GRAPH_REGION_ID}
-							ref={graphAreaRef}
 							role="img"
 							aria-label={
 								stats
-									? `Graph view showing ${stats.nodes} ${stats.nodes === 1 ? "node" : "nodes"} and ${stats.links} ${stats.links === 1 ? "link" : "links"}. Click graph nodes to navigate documentation pages.`
+									? `Graph view showing ${stats.nodes} ${stats.nodes === 1 ? "node" : "nodes"} and ${stats.links} ${stats.links === 1 ? "link" : "links"}${neighborsShown ? ` (${neighborsShown})` : ""}${truncationShown ? ` (${truncationShown})` : ""}. Click graph nodes to navigate documentation pages.`
 									: "Interactive documentation graph loading."
 							}
 							style={{ position: "relative", width: "100%", flex: 1, overflow: "hidden" }}
@@ -615,6 +911,8 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 								height={graphHeight}
 								onNodeClick={handleNodeClick}
 								colors={colors}
+								filters={filters}
+								groups={groups}
 							/>
 
 							{/* Hover tooltip removed for Obsidian-like canvas-only text */}
@@ -665,6 +963,18 @@ export default function GraphPanel({ defaultOpen = false, colors }: GraphPanelPr
 										{stats.nodes} {stats.nodes === 1 ? "node" : "nodes"}
 										{" · "}
 										{stats.links} {stats.links === 1 ? "link" : "links"}
+										{neighborsShown ? (
+											<>
+												{" · "}
+												{neighborsShown}
+											</>
+										) : null}
+										{truncationShown ? (
+											<>
+												{" · "}
+												{truncationShown}
+											</>
+										) : null}
 									</span>
 								</>
 							) : (

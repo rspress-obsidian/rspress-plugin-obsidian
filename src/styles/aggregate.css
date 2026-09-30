@@ -7,6 +7,6 @@
  *   rspress-plugin-obsidian/markdown/styles.css
  *   rspress-plugin-obsidian/canvas/styles.css
  */
-@import "../src/markdown/styles.css";
-@import "../src/canvas/styles/canvas.css";
-@import "../src/graph/runtime/graph-panels.css";
+@import "../markdown/styles.css";
+@import "../canvas/styles/canvas.css";
+@import "../graph/runtime/graph-panels.css";

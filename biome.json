@@ -6,7 +6,15 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "test/**/*.{ts,tsx}", "theme/**/*.tsx", "*.config.ts", "*.ts"],
+		"includes": [
+			"src/**/*.{ts,tsx}",
+			"scripts/**/*.ts",
+			"test/**/*.{ts,tsx}",
+			"theme/**/*.tsx",
+			"*.config.ts",
+			"*.ts",
+			"**/*.css"
+		],
 		"ignoreUnknown": false
 	},
 	"linter": {
@@ -14,11 +22,11 @@
 		"rules": {
 			"recommended": true,
 			"style": {
-				"noNonNullAssertion": "warn",
+				"noNonNullAssertion": "error",
 				"useBlockStatements": "off"
 			},
 			"suspicious": {
-				"noExplicitAny": "warn"
+				"noExplicitAny": "error"
 			},
 			"a11y": {
 				"noNoninteractiveTabindex": "off",

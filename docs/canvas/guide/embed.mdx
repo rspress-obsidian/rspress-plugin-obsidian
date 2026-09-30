@@ -1,5 +1,6 @@
 ---
 title: Inline Canvas Embed
+description: Embed a .canvas file inside any MDX page with the CanvasEmbed component, including base-path handling for proxied sites.
 ---
 
 # Inline Canvas Embed
@@ -7,6 +8,17 @@ title: Inline Canvas Embed
 You can embed a canvas directly into any MDX page.
 
 <CanvasEmbed src="Demo.canvas" />
+
+If the vault contains the board, the Obsidian wikilink form works too — inside this site, `![[Demo.canvas]]` resolves to the component above (and `[[Demo.canvas]]` links to the board's page):
+
+```md
+![[Demo.canvas]]
+[[Demo.canvas|The demo board]]
+```
+
+![[Demo.canvas]]
+
+That live embed above came from `![[Demo.canvas]]`, and [[Demo.canvas|this link]] comes from `[[Demo.canvas]]` — both resolve through the canvas feature's published board, not the raw JSON attachment.
 
 Rspress base paths are detected automatically. If the site is served behind a proxy that does not expose its base in asset URLs, pass it explicitly:
 

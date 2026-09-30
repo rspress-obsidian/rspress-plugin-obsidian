@@ -1,0 +1,28 @@
+# -------------------------------------------------------------------
+# .gitattributes — rspress-plugin-obsidian
+# -------------------------------------------------------------------
+# Line endings are part of this package's contract: the markdown and canvas
+# parsers split on "\n", the tests assert exact "\n"-joined strings, and the
+# snapshot fixtures are LF. `core.autocrlf=true` — the default most Windows
+# installers write — rewrites every text blob to CRLF on checkout, so a
+# Windows contributor would see the suite fail against files they never
+# touched. `eol=lf` takes precedence over that config, so the checkout is
+# byte-identical on all three platforms.
+* text=auto eol=lf
+
+# Assets must never be text-normalised: `text=auto` is a heuristic, and a CRLF
+# rewrite (or a line-wise diff/merge) corrupts the bytes. `binary` is the
+# `-text -diff` macro. Images and PDFs are what the repo tracks today; fonts are
+# the other asset a theme ships beside its stylesheets — the docs build already
+# copies KaTeX's woff/woff2/ttf files into `doc_build/static/font`.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary

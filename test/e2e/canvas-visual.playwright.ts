@@ -1,10 +1,30 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+
+// The server renders `.canvas-world` at 1:1 and the runtime's fit-on-mount
+// replaces that transform. Polling for the change is the real hydration wait the
+// fixed sleeps were standing in for: it also guarantees the pointer handlers the
+// transform tests drive are attached.
+const SERVER_RENDERED_TRANSFORM = "translate(0px, 0px) scale(1)";
+
+const worldTransform = (page: Page): Promise<string> =>
+	// `.first()`: the embed guide page carries two live boards, and the value
+	// under test is whichever one the test hovers (also the first).
+	page
+		.locator(".canvas-world")
+		.first()
+		.evaluate((el) => (el as HTMLElement).style.transform);
+
+const waitForCanvasRuntime = (page: Page): Promise<void> =>
+	expect.poll(() => worldTransform(page)).not.toBe(SERVER_RENDERED_TRANSFORM);
+
+/** One of each node type the demo canvas uses — the renderer's contract. */
+const NODE_TYPES = ["text", "file", "link", "group"];
 
 test.describe("Canvas visual rendering", () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto("/canvas/demo.html");
 		await page.waitForSelector(".canvas-viewport");
-		await page.waitForTimeout(500);
+		await waitForCanvasRuntime(page);
 	});
 
 	test("canvas viewport is visible", async ({ page }) => {
@@ -13,41 +33,11 @@ test.describe("Canvas visual rendering", () => {
 	});
 
 	test("all node types are rendered", async ({ page }) => {
-		await expect(page.locator(".canvas-node-text")).toHaveCount(2);
-		await expect(page.locator(".canvas-node-file")).toHaveCount(1);
-		await expect(page.locator(".canvas-node-link")).toHaveCount(1);
-		await expect(page.locator(".canvas-node-group")).toHaveCount(1);
-	});
-
-	test("edges are rendered", async ({ page }) => {
-		const edges = page.locator(".canvas-edge");
-		await expect(edges).toHaveCount(3);
-	});
-
-	test("toolbar controls are visible", async ({ page }) => {
-		const toolbar = page.locator(".canvas-toolbar");
-		await expect(toolbar).toBeVisible();
-		const buttons = toolbar.locator("> button");
-		await expect(buttons).toHaveCount(6);
-		await expect(page.locator('button[aria-label="Toggle Grid Dots"]')).toBeVisible();
-		await expect(page.locator('button[aria-label="Zoom in"]')).toBeVisible();
-		await expect(page.locator('button[aria-label="Zoom out"]')).toBeVisible();
-		await expect(page.locator('button[aria-label="Fit to View"]')).toBeVisible();
-		await expect(page.locator('button[aria-label="Reset zoom (1:1)"]')).toBeVisible();
-		await expect(page.locator('button[aria-label="Help"]')).toBeVisible();
-	});
-
-	test("pan and zoom works", async ({ page }) => {
-		const world = page.locator(".canvas-world");
-		const initialTransform = await world.evaluate((el) => el.style.transform);
-
-		const viewport = page.locator(".canvas-viewport");
-		await viewport.hover();
-		await page.mouse.wheel(0, -100);
-		await page.waitForTimeout(200);
-
-		const newTransform = await world.evaluate((el) => el.style.transform);
-		expect(newTransform).not.toBe(initialTransform);
+		// Per-type presence, not the fixture's exact counts: `docs/public/demo.canvas`
+		// is a demo, and editing it must not fail a renderer test.
+		for (const type of NODE_TYPES) {
+			await expect(page.locator(`.canvas-node-${type}`).first()).toBeVisible();
+		}
 	});
 
 	test("edges have proper SVG paths", async ({ page }) => {
@@ -66,41 +56,200 @@ test.describe("Canvas visual rendering", () => {
 		}
 	});
 
+	test("file node links to a published vault page", async ({ page }) => {
+		// `Demo.canvas` links `Welcome.md#getting-started`; the href must be the route
+		// the markdown plugin publishes (case- and space-preserving), not a slugified one.
+		const link = page.locator(".canvas-node-file a").first();
+		await expect(link).toHaveAttribute("href", /^\/vault\/Welcome/);
+
+		const href = (await link.getAttribute("href")) ?? "";
+		const route = href.split("#")[0];
+		const response = await page.request.get(`${route}.html`);
+		expect(response.status()).toBe(200);
+	});
+
+	// A text card runs the canvas feature's own Markdown renderer, so the two
+	// constructs a card used to get wrong are worth holding in place here: the
+	// demo board showcases both.
+	test("a text card renders highlights and protects them inside inline code", async ({ page }) => {
+		const card = page.locator(".canvas-node-text", { hasText: "Highlights" }).first();
+		await expect(card.locator("mark")).toHaveCount(1);
+		// The literal `==…==` the card mentions sits in a code span, so it must
+		// survive as text rather than being highlighted too.
+		await expect(card).toContainText("==this stays literal==");
+	});
+
+	test("a card embeds one section of a note, not the whole file", async ({ page }) => {
+		const card = page.locator(".canvas-node-text", { hasText: "Section Embeds" }).first();
+		// `![[guide/intro#Transclusion Target]]` inlines that heading's section…
+		await expect(card).toContainText("Transclusion Target");
+		// …and `![[guide/intro#^anchor-demo]]` inlines only the block carrying
+		// that id. Neither drags in the rest of the note.
+		await expect(card).toContainText("This paragraph carries one");
+		await expect(card).not.toContainText("Daily Notes");
+		await expect(card).not.toContainText("Back to Welcome home");
+	});
+
+	test("a file card still inlines the whole note, unlike a text card", async ({ page }) => {
+		// The contrast is the point: file cards inline the file, text cards honour
+		// the fragment.
+		const fileCard = page.locator(".canvas-node-file", { hasText: "intro" }).first();
+		await expect(fileCard).toContainText("A vault-level intro page");
+		await expect(fileCard).toContainText("Daily Notes");
+	});
+
+	test("toolbar controls are visible", async ({ page }) => {
+		const toolbar = page.locator(".canvas-toolbar");
+		await expect(toolbar).toBeVisible();
+		// The buttons are the contract, not how many there are: assert each control
+		// by name. Scope every lookup to the toolbar — the graph panel renders its
+		// own zoom/close controls with the same aria-labels.
+		for (const label of [
+			"Toggle Grid Dots",
+			"Zoom in",
+			"Zoom out",
+			"Fit to View",
+			"Reset zoom (1:1)",
+			"Help",
+		]) {
+			await expect(toolbar.locator(`button[aria-label="${label}"]`)).toBeVisible();
+		}
+	});
+
+	test("pan and zoom works", async ({ page }) => {
+		const initialTransform = await worldTransform(page);
+
+		const viewport = page.locator(".canvas-viewport");
+		await viewport.hover();
+		await page.mouse.wheel(0, -100);
+
+		await expect.poll(() => worldTransform(page)).not.toBe(initialTransform);
+	});
+
 	test("fit to view via toolbar", async ({ page }) => {
 		const toolbar = page.locator(".canvas-toolbar");
-		const fitButton = toolbar.locator('button[title="Fit to View"]');
-		await expect(fitButton).toBeVisible();
+		const fitButton = toolbar.locator('button[aria-label="Fit to View"]');
 		await expect(fitButton).toBeEnabled();
+
+		// Zoom away from the fitted view first, so fitting has something to undo.
+		await page.locator(".canvas-viewport").hover();
+		await page.mouse.wheel(0, -400);
+		const zoomedTransform = await worldTransform(page);
+
+		await fitButton.click();
+		await expect.poll(() => worldTransform(page)).not.toBe(zoomedTransform);
+	});
+
+	test("help modal is a labelled dialog that closes with Escape", async ({ page }) => {
+		const help = page.locator('.canvas-toolbar button[aria-label="Help"]');
+		await expect(help).toHaveAttribute("aria-expanded", "false");
+
+		await help.click();
+
+		const modal = page.locator(".canvas-help-modal");
+		await expect(modal).toBeVisible();
+		await expect(modal).toHaveAttribute("role", "dialog");
+		await expect(modal).toHaveAttribute("aria-modal", "true");
+		await expect(modal.locator("h3")).toHaveText("Canvas Controls");
+		// The × glyph carries no accessible name of its own, and opening the dialog
+		// moves focus onto it.
+		await expect(modal.locator('button[aria-label="Close help"]')).toBeFocused();
+
+		await page.keyboard.press("Escape");
+
+		await expect(page.locator(".canvas-help-modal")).toHaveCount(0);
+		await expect(help).toHaveAttribute("aria-expanded", "false");
+	});
+
+	test("honours prefers-reduced-motion", async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: "reduce" });
+
+		const transition = await page
+			.locator(".canvas-node")
+			.first()
+			.evaluate((el) => getComputedStyle(el).transitionProperty);
+		expect(transition).toBe("none");
+	});
+
+	test("a press on a card never claims the pointer, so its links stay clickable", async ({
+		page,
+	}) => {
+		// Chromium retargets the compatibility click to a capturing ancestor and
+		// computes its target as the common ancestor of mouseup and mousedown — so
+		// capturing on pointerdown makes every link inside a card unclickable.
+		// Component tests cannot see it (they dispatch `click` directly), hence a
+		// real pointer sequence against the built site.
+		const wrapper = page.locator(".canvas-editor-node-wrapper").first();
+		const box = await wrapper.boundingBox();
+		if (!box) throw new Error("canvas card has no bounding box");
+		const x = box.x + 6;
+		const y = box.y + 6;
+
+		const capturedNow = () =>
+			page.evaluate(() => {
+				const element = document.querySelector(".canvas-editor-node-wrapper");
+				return element ? element.hasPointerCapture(1) : null;
+			});
+
+		await page.mouse.move(x, y);
+		await page.mouse.down();
+		expect(await capturedNow()).toBe(false);
+		await page.mouse.up();
+
+		// The press also belongs to a card, not the viewport behind it.
+		await expect(page.locator(".canvas-node-selected")).toHaveCount(1);
+	});
+
+	test("a card inside a group is still clickable to navigate", async ({ page }) => {
+		// The demo's file card sits inside the "Project Overview" group, and groups
+		// paint behind their members — so the card, not the group's box, has to win
+		// the hit test. The component suite dispatches `click` straight at the
+		// element and can never see the overlap.
+		const groupZ = await page
+			.locator(".canvas-editor-node-wrapper:has(.canvas-node-group)")
+			.first()
+			.evaluate((el) => Number(getComputedStyle(el).zIndex));
+		const cardZ = await page
+			.locator(".canvas-editor-node-wrapper:has(.canvas-node-file)")
+			.first()
+			.evaluate((el) => Number(getComputedStyle(el).zIndex));
+		expect(cardZ).toBeGreaterThan(groupZ);
+
+		await page.locator(".canvas-node-file a").first().click();
+		await page.waitForURL(/\/vault\/Welcome/);
 	});
 });
 
 test.describe("Inline canvas embed", () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto("/guide/embed.html");
+		await page.goto("/canvas/guide/embed.html");
+		// The embed is client-rendered, so this selector appearing *is* the
+		// hydration wait.
 		await page.waitForSelector(".canvas-viewport");
-		await page.waitForTimeout(500);
 	});
 
 	test("embed loads and renders canvas viewport", async ({ page }) => {
-		const viewport = page.locator(".canvas-viewport");
+		// The page carries two live embeds — `<CanvasEmbed src>` and the
+		// `![[Demo.canvas]]` wikilink form — so every locator here must pick one.
+		const viewport = page.locator(".canvas-viewport").first();
 		await expect(viewport).toBeVisible();
 	});
 
 	test("embed renders nodes", async ({ page }) => {
-		await expect(page.locator(".canvas-node-text")).toHaveCount(2);
-		await expect(page.locator(".canvas-node-file")).toHaveCount(1);
-		await expect(page.locator(".canvas-node-link")).toHaveCount(1);
-		await expect(page.locator(".canvas-node-group")).toHaveCount(1);
+		for (const type of NODE_TYPES) {
+			await expect(page.locator(`.canvas-node-${type}`).first()).toBeVisible();
+		}
 	});
 
-	test("embed supports keyboard shortcuts", async ({ page }) => {
-		const world = page.locator(".canvas-world");
-		const initialTransform = await world.evaluate((el) => el.style.transform);
+	test("embed zooms on scroll", async ({ page }) => {
+		// The embed's documented controls are "drag to pan, scroll to zoom,
+		// double-click to fit" — there are no keyboard shortcuts outside the
+		// editor, so assert the scroll zoom the embed actually implements.
+		const initialTransform = await worldTransform(page);
 
-		await page.keyboard.press("Control+=");
-		await page.waitForTimeout(200);
+		await page.locator(".canvas-viewport").first().hover();
+		await page.mouse.wheel(0, -100);
 
-		const newTransform = await world.evaluate((el) => el.style.transform);
-		expect(newTransform).not.toBe(initialTransform);
+		await expect.poll(() => worldTransform(page)).not.toBe(initialTransform);
 	});
 });

@@ -1,5 +1,6 @@
 import path from "node:path";
-import { humanizeBaseName, normalizeLookupValue, slugifyHeading } from "./slug.ts";
+import { findCanvasBoard, findCanvasBoardByPath } from "../shared/canvas-routes.js";
+import { humanizeBaseName, normalizeLookupValue, slugifyHeading } from "../shared/slug.js";
 import type {
 	ContentAsset,
 	ContentPage,
@@ -7,14 +8,14 @@ import type {
 	ResolveContext,
 	ResolvedWikiLink,
 	WikiSubpath,
-} from "./types.ts";
+} from "./types.js";
 import {
-	encodeRoutePath,
 	formatAvailableBlocks,
 	formatAvailableHeadings,
 	normalizeFilePathKey,
 	resolveRelativePathKey,
-} from "./utils.ts";
+	routeHref,
+} from "./utils.js";
 /**
  * Resolve a parsed wikilink against the content index, returning a
  * {@link ResolvedWikiLink} with either an `href` + `label` on success or
@@ -24,10 +25,9 @@ import {
  * 1. Exact path match
  * 2. Unique basename match
  * 3. Unique frontmatter title or alias match
- * 4. Case-insensitive path fallback (on by default; disable via
- *    {@link NormalizedPluginOptions.enableCaseInsensitiveLookup})
- * 5. Shortest-suffix fuzzy match (opt-in via
- *    {@link NormalizedPluginOptions.enableFuzzyMatching})
+ * 4. Case-insensitive path fallback (on by default; disable via the
+ *    `enableCaseInsensitiveLookup` option)
+ * 5. Shortest-suffix fuzzy match (opt-in via the `enableFuzzyMatching` option)
  */
 export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext): ResolvedWikiLink {
 	if (parsed.search) {
@@ -98,6 +98,28 @@ export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext)
 	if (exactAsset) {
 		return resolveAgainstAsset(exactAsset, parsed);
 	}
+
+	// Before the basename fan-out, consult the canvas registry directly: a
+	// page whose index does not contain vault files (a docs page resolves
+	// against the docs tree) would otherwise match stray `.canvas` copies in
+	// that tree — checked-in fixtures or previously copied assets — and report
+	// the real board as ambiguous. The registry holds the one board the canvas
+	// feature actually publishes.
+	const canvasBoard = findCanvasBoard(
+		parsed.target,
+		context.options?.enableCaseInsensitiveLookup === true,
+	);
+	if (canvasBoard) {
+		return {
+			status: "ok",
+			href: canvasBoard.routePath,
+			label:
+				parsed.alias ??
+				humanizeBaseName(path.basename(canvasBoard.source).replace(/\.canvas$/i, "")),
+			canvasSrc: canvasBoard.source,
+		};
+	}
+
 	const assetBaseName = path.basename(exactPathKey);
 
 	const assetCandidates = context.index.byAssetBaseName.get(assetBaseName) ?? [];
@@ -231,9 +253,18 @@ function resolveVaultSearch(parsed: ParsedWikiLink, context: ResolveContext): Re
 		};
 	}
 	if (matches.length > 1) {
+		// Obsidian opens a picker of matches here rather than refusing the link,
+		// so the candidates travel with the result and the remark pass renders
+		// them as an inline picker.
 		return {
 			status: "ambiguous-page",
 			message: `Vault search target "${parsed.subpath?.value}" matched multiple ${parsed.search} results.`,
+			candidates: matches.map((match) => ({
+				href: `${routeHref(match.page.routePath, match.page.relativePath)}#${match.fragment}`,
+				label: parsed.alias ?? (parsed.search === "block" ? match.label.slice(1) : match.label),
+				pageLabel: match.page.title ?? match.page.baseName,
+				description: match.description,
+			})),
 		};
 	}
 
@@ -247,7 +278,7 @@ function resolveVaultSearch(parsed: ParsedWikiLink, context: ResolveContext): Re
 
 	return {
 		status: "ok",
-		href: `${encodeRoutePath(match.page.routePath)}#${match.fragment}`,
+		href: `${routeHref(match.page.routePath, match.page.relativePath)}#${match.fragment}`,
 		label: parsed.alias ?? (parsed.search === "block" ? match.label.slice(1) : match.label),
 		description: match.description,
 		targetPage: match.page,
@@ -294,7 +325,7 @@ function resolveAgainstPage(page: ContentPage, parsed: ParsedWikiLink): Resolved
 	if (!parsed.subpath) {
 		return {
 			status: "ok",
-			href: encodeRoutePath(page.routePath),
+			href: routeHref(page.routePath, page.relativePath),
 			label,
 			targetPage: page,
 		};
@@ -321,13 +352,27 @@ function resolveAgainstPage(page: ContentPage, parsed: ParsedWikiLink): Resolved
 
 	return {
 		status: "ok",
-		href: `${encodeRoutePath(page.routePath)}#${resolvedSubpath}`,
+		href: `${routeHref(page.routePath, page.relativePath)}#${resolvedSubpath}`,
 		label,
 		description,
 		targetPage: page,
 	};
 }
 function resolveAgainstAsset(asset: ContentAsset, parsed: ParsedWikiLink): ResolvedWikiLink {
+	// A board the canvas feature published routes to its viewer page instead of
+	// the raw JSON attachment, and carries its vault-relative path for the embed
+	// syntax. A `#heading`/`#^block` subpath is dropped rather than appended: a
+	// `.canvas` has no headings or block ids, and a dead anchor on the viewer
+	// page would be worse than opening the board.
+	const board = findCanvasBoardByPath(asset.absolutePath);
+	if (board) {
+		return {
+			status: "ok",
+			href: board.routePath,
+			label: parsed.alias ?? humanizeBaseName(asset.baseName.replace(/\.canvas$/i, "")),
+			canvasSrc: board.source,
+		};
+	}
 	const fragment = parsed.subpath ? `#${parsed.subpath.value}` : "";
 	return {
 		status: "ok",

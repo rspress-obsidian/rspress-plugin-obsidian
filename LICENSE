@@ -24,7 +24,9 @@ SOFTWARE.
 
 ---
 
-This project merges three originally independent plugins. See also:
-- LICENSE-obsidian-wikilink.txt
-- LICENSE-obsidian-canvas.txt
-- LICENSE-graph-view.txt
+This project merges three previously published MIT-licensed plugins:
+`rspress-plugin-obsidian-wikilink`, `rspress-plugin-obsidian-canvas` and
+`rspress-plugin-graph-view`. All of the merged code was authored by Jacob
+Valor. The copyright lines above are retained verbatim from the notices those
+original releases shipped with, so the full notice travels with every copy of
+this work.

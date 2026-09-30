@@ -10,11 +10,15 @@ import {
 
 type GraphShape = "sequential" | "ring" | "hub" | "clustered";
 
+/** How each synthetic note links onward: the two shapes real vaults come in. */
+type LinkStyle = "wikilink" | "markdown";
+
 interface BenchmarkOptions {
 	pages: number;
 	linksPerPage: number;
 	iterations: number;
 	shape: GraphShape;
+	style: LinkStyle;
 	jsonOutputPath?: string;
 	csvOutputPath?: string;
 }
@@ -34,7 +38,7 @@ interface BenchmarkSummary {
 	avgSerializeMs: number;
 	avgCacheHits: number;
 	avgCacheMisses: number;
-	reuseRate: number;
+	moduleReuseRate: number;
 	nodes: number;
 	links: number;
 }
@@ -68,6 +72,7 @@ async function main(): Promise<void> {
 			options.iterations,
 			options.linksPerPage,
 			options.shape,
+			options.style,
 		);
 
 		const coldSummary = summarizeDiagnostics("cold", options.shape, coldRuns);
@@ -108,47 +113,85 @@ function parseArgs(argv: string[]): BenchmarkOptions {
 		linksPerPage: 6,
 		iterations: 5,
 		shape: "sequential",
+		// Wikilinks are what a vault actually contains, and they take the
+		// extractor's fast path; `--style=markdown` measures the parser path.
+		style: "wikilink",
 	};
 
-	for (const arg of argv) {
-		const [rawKey, rawValue] = arg.split("=");
+	for (const arg of expandArgv(argv)) {
+		const [rawKey, rawValue = ""] = arg.split("=");
 
-		if (rawKey === "--shape" && rawValue && isGraphShape(rawValue)) {
-			options.shape = rawValue;
-			continue;
-		}
-
-		if (rawKey === "--json" && rawValue) {
-			options.jsonOutputPath = rawValue;
-			continue;
-		}
-
-		if (rawKey === "--csv" && rawValue) {
-			options.csvOutputPath = rawValue;
-			continue;
-		}
-
-		const value = Number(rawValue);
-
-		if (!Number.isFinite(value)) {
-			continue;
-		}
-
-		if (rawKey === "--pages") {
-			options.pages = clampInteger(value, 2);
-		}
-
-		if (rawKey === "--links") {
-			options.linksPerPage = clampInteger(value, 1);
-		}
-
-		if (rawKey === "--iterations") {
-			options.iterations = clampInteger(value, 1);
+		switch (rawKey) {
+			case "--shape":
+				if (!isGraphShape(rawValue)) {
+					throw new Error(`Invalid --shape: "${rawValue}"`);
+				}
+				options.shape = rawValue;
+				break;
+			case "--style":
+				if (rawValue !== "wikilink" && rawValue !== "markdown") {
+					throw new Error(`Invalid --style: "${rawValue}" (wikilink | markdown)`);
+				}
+				options.style = rawValue;
+				break;
+			case "--json":
+				options.jsonOutputPath = rawValue;
+				break;
+			case "--csv":
+				options.csvOutputPath = rawValue;
+				break;
+			case "--pages":
+				options.pages = clampInteger(parseFlagNumber(rawKey, rawValue), 2);
+				break;
+			case "--links":
+				options.linksPerPage = clampInteger(parseFlagNumber(rawKey, rawValue), 1);
+				break;
+			case "--iterations":
+				options.iterations = clampInteger(parseFlagNumber(rawKey, rawValue), 1);
+				break;
+			default:
+				throw new Error(`Unknown benchmark flag: "${rawKey}"`);
 		}
 	}
 
 	options.linksPerPage = Math.min(options.linksPerPage, options.pages - 1);
 	return options;
+}
+
+/** Accept `--pages 3000` as well as `--pages=3000`; reject dangling or unknown flags. */
+function expandArgv(argv: string[]): string[] {
+	const expanded: string[] = [];
+
+	for (let index = 0; index < argv.length; index += 1) {
+		const arg = argv[index] ?? "";
+		if (arg.includes("=")) {
+			expanded.push(arg);
+			continue;
+		}
+		if (!arg.startsWith("--")) {
+			throw new Error(`Unexpected benchmark argument: "${arg}"`);
+		}
+
+		const value = argv[index + 1];
+		if (value === undefined || value.startsWith("--")) {
+			throw new Error(`Missing value for ${arg}`);
+		}
+
+		expanded.push(`${arg}=${value}`);
+		index += 1;
+	}
+
+	return expanded;
+}
+
+function parseFlagNumber(key: string, value: string): number {
+	const trimmed = value.trim();
+	const parsed = Number(trimmed);
+	if (trimmed === "" || !Number.isFinite(parsed)) {
+		throw new Error(`Invalid value for ${key}: "${value}"`);
+	}
+
+	return parsed;
 }
 
 function isGraphShape(value: string): value is GraphShape {
@@ -171,6 +214,7 @@ async function createSyntheticDocs(options: BenchmarkOptions): Promise<Synthetic
 			options.linksPerPage,
 			options.shape,
 			0,
+			options.style,
 		);
 
 		await Bun.write(route.absolutePath, content);
@@ -198,12 +242,15 @@ function createSyntheticMarkdown(
 	linksPerPage: number,
 	shape: GraphShape,
 	revision: number,
+	style: LinkStyle,
 ): string {
 	const links = buildSyntheticLinkTargets(pageIndex, pageCount, linksPerPage, shape).map(
-		(targetIndex) => {
-			const targetFile = targetIndex === 0 ? "./index.md" : `./page-${targetIndex}.md`;
-			return `- [Page ${targetIndex}](${targetFile})`;
-		},
+		(targetIndex) =>
+			// The wikilink form must name the file, or every edge is unresolved and
+			// the benchmark measures the unresolved-link report instead of the build.
+			style === "wikilink"
+				? `- [[page-${targetIndex}]]`
+				: `- [Page ${targetIndex}](./page-${targetIndex}.md)`,
 	);
 
 	return [
@@ -364,6 +411,7 @@ async function runIncrementalBuilds(
 	iterations: number,
 	linksPerPage: number,
 	shape: GraphShape,
+	style: LinkStyle,
 ): Promise<GraphBuildDiagnostics[]> {
 	const cache = createGraphBuildCache();
 	await buildGraphModule(routes, cache, benchmarkBuildOptions);
@@ -380,7 +428,14 @@ async function runIncrementalBuilds(
 		await sleep(20);
 		await Bun.write(
 			targetRoute.absolutePath,
-			createSyntheticMarkdown(targetPageIndex, routes.length, linksPerPage, shape, iteration + 1),
+			createSyntheticMarkdown(
+				targetPageIndex,
+				routes.length,
+				linksPerPage,
+				shape,
+				iteration + 1,
+				style,
+			),
 		);
 		const result = await buildGraphModule(routes, cache, benchmarkBuildOptions);
 		diagnostics.push(result.diagnostics);
@@ -410,7 +465,9 @@ function summarizeDiagnostics(
 		avgSerializeMs: average(diagnostics.map((entry) => entry.serializeMs)),
 		avgCacheHits: average(diagnostics.map((entry) => entry.cacheHits)),
 		avgCacheMisses: average(diagnostics.map((entry) => entry.cacheMisses)),
-		reuseRate: average(diagnostics.map((entry) => (entry.reusedModule ? 1 : 0))) * 100,
+		// Share of runs where the whole module was reused (every file a cache hit),
+		// not the per-file hit rate — `cacheHits`/`cacheMisses` report that.
+		moduleReuseRate: average(diagnostics.map((entry) => (entry.reusedModule ? 1 : 0))) * 100,
 		nodes: latest?.routeCount ?? 0,
 		links: latest?.linkCount ?? 0,
 	};
@@ -467,13 +524,13 @@ function toCsv(summaries: BenchmarkSummary[]): string {
 		"links",
 		"shape",
 		"avgTotalMs",
-		"avgStatCpuMs",
+		"avgStatWaitMs",
 		"avgParseCpuMs",
 		"avgResolveMs",
 		"avgSerializeMs",
 		"avgCacheHits",
 		"avgCacheMisses",
-		"reuseRate",
+		"moduleReuseRate",
 	];
 
 	const rows = summaries.map((summary) => [
@@ -488,7 +545,7 @@ function toCsv(summaries: BenchmarkSummary[]): string {
 		summary.avgSerializeMs.toFixed(3),
 		summary.avgCacheHits.toFixed(3),
 		summary.avgCacheMisses.toFixed(3),
-		summary.reuseRate.toFixed(3),
+		summary.moduleReuseRate.toFixed(3),
 	]);
 
 	return `${[header, ...rows].map((row) => row.map(escapeCsvCell).join(",")).join("\n")}\n`;
@@ -518,13 +575,13 @@ function toTableRow(summary: BenchmarkSummary): Record<string, string | number> 
 		nodes: summary.nodes,
 		links: summary.links,
 		totalMs: formatMs(summary.avgTotalMs),
-		statCpuMs: formatMs(summary.avgStatMs),
+		statWaitMs: formatMs(summary.avgStatMs),
 		parseCpuMs: formatMs(summary.avgParseMs),
 		resolveMs: formatMs(summary.avgResolveMs),
 		serializeMs: formatMs(summary.avgSerializeMs),
 		cacheHits: summary.avgCacheHits.toFixed(1),
 		cacheMisses: summary.avgCacheMisses.toFixed(1),
-		reuseRate: `${summary.reuseRate.toFixed(0)}%`,
+		moduleReuseRate: `${summary.moduleReuseRate.toFixed(0)}%`,
 	};
 }
 

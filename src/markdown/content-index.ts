@@ -1,10 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import GithubSlugger from "github-slugger";
-import matter from "gray-matter";
-import { extractDataviewMetadata } from "./dataview.ts";
-import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.ts";
-import { normalizeLookupValue, stripMarkdownFormatting } from "./slug.ts";
+import { getContentLineFlags } from "../shared/content-flags.js";
+import { PAGE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
+import { parseFrontmatter } from "../shared/frontmatter.js";
+import { ATTACHMENT_EXTS, extensionOf } from "../shared/media-exts.js";
+import { normalizeLookupValue, normalizeUnicode, stripMarkdownFormatting } from "../shared/slug.js";
+import { extractDataviewMetadata } from "./dataview.js";
+import { rememberMentionSources, stripMentionText } from "./mentions.js";
+import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
 import type {
 	BacklinkRef,
 	BlockEntry,
@@ -12,17 +16,20 @@ import type {
 	ContentIndex,
 	ContentPage,
 	HeadingEntry,
-} from "./types.ts";
-export type { ContentIndex } from "./types.ts";
-import {
-	backlinkLabel,
-	normalizeFilePathKey,
-	normalizeFsPath,
-	normalizePathKey,
-	resolveRelativePathKey,
-} from "./utils.ts";
+} from "./types.js";
 
-const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx"]);
+export type { ContentIndex } from "./types.js";
+
+import {
+	deriveRoutePath,
+	normalizeFsPath,
+	normalizeRoutePath as normalizePathKey,
+	normalizeRoutePrefix,
+} from "../shared/route-path.js";
+import { backlinkLabel, normalizeFilePathKey, resolveRelativePathKey } from "./utils.js";
+
+/** Longest stripped body retained per page for mention matching. */
+const MAX_MENTION_TEXT = 20_000;
 const INLINE_TAG_PATTERN =
 	/(?<![/\p{L}\p{N}_-])#([\p{L}\p{M}\p{N}\p{Extended_Pictographic}_/-]+)/gu;
 
@@ -44,7 +51,8 @@ interface ParsedFileEntry {
 	mtimeMs: number;
 	size: number;
 	page: ContentPage;
-	rawMarkdown: string;
+	/** Stripped body, kept only while `unlinkedMentions` is on. */
+	mentionText?: string;
 }
 
 interface MarkdownFileEntry {
@@ -62,6 +70,36 @@ const contentIndexCache = new Map<string, CacheEntry>();
 /** Options controlling route and asset URLs for an indexed root. */
 export interface ContentIndexOptions {
 	routePrefix?: string;
+	/**
+	 * Keep a stripped copy of each page's body so `getMentions` can find pages
+	 * that name another page without linking to it. Off by default: it is the only
+	 * thing here that retains page text.
+	 */
+	unlinkedMentions?: boolean;
+}
+
+/**
+ * The URL an attachment is served from, which is not always its path in the
+ * tree it was found in.
+ *
+ * Rspress copies `public/` to the site root and nothing else, so an attachment
+ * under `<root>/public/` is served at `/<path-after-public/>` — not at
+ * `/public/<path>`, which no route serves. Getting this wrong is invisible until
+ * a page embeds the file: the `src` looks reasonable and 404s in the browser.
+ * It is not hypothetical, either. The vault plugin copies vault attachments into
+ * `public/<vaultRoutePrefix>/` during the build, so on the next build the docs
+ * index finds those copies and a `![[media/gradient.png]]` in a docs page
+ * resolved to `/public/vault/media/gradient.png` rather than the
+ * `/vault/media/gradient.png` the file was actually published at.
+ */
+function assetUrlPath(relativePath: string, routePrefix: string): string {
+	const segments = [...routePrefix.split("/"), ...relativePath.split("/")].filter(
+		(segment) => segment !== "",
+	);
+	// Only a leading `public` is stripped: a `public` further down the path is an
+	// ordinary directory name.
+	if (segments[0] === "public") segments.shift();
+	return `/${segments.map((segment) => encodeURIComponent(segment)).join("/")}`;
 }
 
 export async function buildContentIndex(
@@ -71,13 +109,13 @@ export async function buildContentIndex(
 	const absoluteRoot = path.resolve(rootDir);
 	const routePrefix = normalizeRoutePrefix(options.routePrefix);
 	const files = await scanVaultFiles(absoluteRoot);
-	return buildContentIndexFromFiles(absoluteRoot, files, undefined, routePrefix);
-}
-
-function normalizeRoutePrefix(value: string | undefined): string {
-	if (!value) return "";
-	const normalized = `/${value}`.replace(/\/+/g, "/").replace(/\/+$/, "");
-	return normalized === "/" ? "" : normalized;
+	return buildContentIndexFromFiles(
+		absoluteRoot,
+		files,
+		undefined,
+		routePrefix,
+		options.unlinkedMentions ?? false,
+	);
 }
 
 /**
@@ -90,7 +128,9 @@ export async function getCachedContentIndex(
 ): Promise<ContentIndex> {
 	const absoluteRoot = path.resolve(rootDir);
 	const routePrefix = normalizeRoutePrefix(options.routePrefix);
-	const cacheKey = `${absoluteRoot}|${routePrefix}`;
+	// The flag is part of the key: an index built without mention text cannot
+	// answer a request that needs it.
+	const cacheKey = `${absoluteRoot}|${routePrefix}|mentions:${options.unlinkedMentions === true}`;
 	const files = await scanVaultFiles(absoluteRoot);
 	const signature = files
 		.map((file) => `${file.relativePath}:${file.mtimeMs}:${file.size}`)
@@ -104,7 +144,13 @@ export async function getCachedContentIndex(
 	}
 
 	const priorFiles = cached?.files ?? new Map<string, ParsedFileEntry>();
-	const index = await buildContentIndexFromFiles(absoluteRoot, files, priorFiles, routePrefix);
+	const index = await buildContentIndexFromFiles(
+		absoluteRoot,
+		files,
+		priorFiles,
+		routePrefix,
+		options.unlinkedMentions ?? false,
+	);
 	contentIndexCache.set(cacheKey, { signature, index, files: priorFiles });
 
 	// Evict least-recently-used entry (first in insertion order) when over cap.
@@ -123,38 +169,34 @@ async function buildContentIndexFromFiles(
 	files: MarkdownFileEntry[],
 	priorFiles?: Map<string, ParsedFileEntry>,
 	routePrefix = "",
+	collectMentions = false,
 ): Promise<ContentIndex> {
 	const markdownFiles = files.filter((file) =>
-		MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()),
+		PAGE_MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()),
 	);
 	const settled = await Promise.allSettled(
-		markdownFiles.map((file) => buildContentPage(file, priorFiles, routePrefix)),
+		markdownFiles.map((file) => buildContentPage(file, priorFiles, routePrefix, collectMentions)),
 	);
 	const pages: ContentPage[] = [];
-	const rawContentByPath = new Map<string, string>();
 	for (const result of settled) {
 		if (result.status === "fulfilled") {
-			if (result.value.page.publish) {
-				pages.push(result.value.page);
-				rawContentByPath.set(result.value.page.absolutePath, result.value.rawMarkdown);
+			if (result.value.publish) {
+				pages.push(result.value);
 			}
 		} else {
 			console.warn(
-				`[rspress-plugin-obsidian-wikilink] Failed to index file: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+				`[rspress-plugin-obsidian:markdown] Failed to index file: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
 			);
 		}
 	}
 	const assets: ContentAsset[] = files
-		.filter((file) => !MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()))
+		.filter((file) => !PAGE_MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()))
 		.map((file) => ({
 			absolutePath: file.absolutePath,
 			relativePath: file.relativePath,
-			pathKey: normalizePathKey(file.relativePath),
-			baseName: path.basename(file.relativePath),
-			urlPath: `${routePrefix}/${file.relativePath
-				.split("/")
-				.map((segment) => encodeURIComponent(segment))
-				.join("/")}`,
+			pathKey: normalizeUnicode(normalizePathKey(file.relativePath)),
+			baseName: normalizeUnicode(path.basename(file.relativePath)),
+			urlPath: assetUrlPath(file.relativePath, routePrefix),
 		}));
 	const byAbsolutePath = new Map<string, ContentPage>();
 	const byPathKey = new Map<string, ContentPage>();
@@ -234,7 +276,7 @@ async function buildContentIndexFromFiles(
 		}
 	}
 
-	return {
+	const index: ContentIndex = {
 		rootDir,
 		pages,
 		assets,
@@ -252,9 +294,20 @@ async function buildContentIndexFromFiles(
 		byBaseNameCI,
 		byAssetPathCI,
 		byAssetBaseNameCI,
-		rawContentByPath,
 		backlinks,
 	};
+
+	if (collectMentions) {
+		rememberMentionSources(
+			index,
+			pages.map((page) => ({
+				page,
+				text: priorFiles?.get(page.absolutePath)?.mentionText ?? "",
+			})),
+		);
+	}
+
+	return index;
 }
 function resolveBacklinkTarget(
 	byFilePathKey: Map<string, ContentPage>,
@@ -323,7 +376,7 @@ function resolveBacklinkTarget(
 	// whitespace-normalized by normalizeLookupValue. Apply the same fold before
 	// consulting those maps so `[[My Alias]]` records a backlink.
 	if (results.length === 0) {
-		const folded = normalizeLookupValue(normalizedTarget);
+		const folded = normalizeUnicode(normalizeLookupValue(normalizedTarget));
 		for (const page of byTitle.get(folded) ?? []) {
 			addPage(page);
 		}
@@ -345,6 +398,7 @@ function addBacklinkEntry(
 	if (!already) {
 		existing.push({
 			routePath: sourcePage.routePath,
+			relativePath: sourcePage.relativePath,
 			title: backlinkLabel(sourcePage),
 		});
 		backlinks.set(targetRoutePath, existing);
@@ -422,20 +476,18 @@ async function buildContentPage(
 	file: MarkdownFileEntry,
 	priorFiles?: Map<string, ParsedFileEntry>,
 	routePrefix = "",
-): Promise<{
-	page: ContentPage;
-	rawMarkdown: string;
-}> {
+	collectMentions = false,
+): Promise<ContentPage> {
 	const cached = priorFiles?.get(file.absolutePath);
 	if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
-		return { page: cached.page, rawMarkdown: cached.rawMarkdown };
+		return cached.page;
 	}
 	const markdown = await fs.promises.readFile(file.absolutePath, "utf-8");
 	const routePath = deriveRoutePath(file.relativePath, routePrefix);
-	const pathKey = normalizePathKey(file.relativePath);
+	const pathKey = normalizeUnicode(normalizePathKey(file.relativePath));
 	const filePathKey = normalizeFilePathKey(file.relativePath);
 	const baseName = path.basename(filePathKey);
-	const metadata = extractFrontmatterMetadata(markdown);
+	const metadata = extractFrontmatterMetadata(markdown, file.relativePath);
 	const { title, aliases, tags, cssclasses, excerpt, publish } = metadata;
 	const dataview = extractDataviewMetadata(markdown, metadata.frontmatter, file.relativePath);
 
@@ -493,51 +545,20 @@ async function buildContentPage(
 		mtimeMs: file.mtimeMs,
 		size: file.size,
 		page,
-		rawMarkdown: markdown,
 	};
+	if (collectMentions) {
+		// ponytail: 20k chars of stripped body per page while the feature is on —
+		// enough for a mention at the end of a long note; the ceiling is here so a
+		// vault of 10k notes cannot pin hundreds of MB.
+		entry.mentionText = stripMentionText(markdown).slice(0, MAX_MENTION_TEXT);
+	}
 	priorFiles?.set(file.absolutePath, entry);
 
-	return { page, rawMarkdown: markdown };
+	return page;
 }
 
-function deriveRoutePath(relativePath: string, routePrefix = ""): string {
-	const withoutExtension = relativePath.replace(/\.(md|mdx)$/i, "");
-	const routeKey = normalizePathKey(withoutExtension);
-	const pagePath = routeKey.length === 0 ? "/" : `/${routeKey}`;
-	return routePrefix ? `${routePrefix}${pagePath === "/" ? "" : pagePath}` || "/" : pagePath;
-}
-
-export { normalizePathKey } from "./utils.ts";
-
-function getContentLineFlags(lines: string[]): boolean[] {
-	const flags = new Array<boolean>(lines.length).fill(false);
-	let inFence = false;
-	let inFrontmatter = lines[0]?.trim() === "---";
-
-	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index] ?? "";
-
-		if (inFrontmatter) {
-			if (index > 0 && line.trim() === "---") {
-				inFrontmatter = false;
-			}
-			continue;
-		}
-
-		if (/^(```|~~~)/.test(line.trim())) {
-			inFence = !inFence;
-			continue;
-		}
-
-		if (inFence) {
-			continue;
-		}
-
-		flags[index] = true;
-	}
-
-	return flags;
-}
+export { getContentLineFlags } from "../shared/content-flags.js";
+export { deriveRoutePath, normalizeRoutePath as normalizePathKey } from "../shared/route-path.js";
 
 function extractHeadings(lines: string[], isContent: boolean[]): HeadingEntry[] {
 	const slugger = new GithubSlugger();
@@ -653,21 +674,30 @@ function extractWikilinkTargets(lines: string[], isContent: boolean[]): string[]
 		.replace(/(`+)[^`\n]*?\1/g, " ")
 		.replace(/%%[\s\S]*?%%/g, " ");
 
+	// One commit point for every target, whatever syntax produced it, so the
+	// three filters below cannot drift between the loops: drop an attachment,
+	// drop a repeat, keep the normalized path.
+	//
+	// `[[image.png]]` names a file, not a page. It can never resolve to one, so
+	// keeping it bought nothing for backlinks — but it did reach Dataview, where
+	// `file.outlinks` rendered it as a link to a route that does not exist.
+	const addTarget = (path: string) => {
+		if (!path || ATTACHMENT_EXTS.has(extensionOf(path))) return;
+		const normalized = normalizeUnicode(path.replace(/\\/g, "/")).toLowerCase();
+		if (seen.has(normalized)) return;
+		seen.add(normalized);
+		targets.push(normalized);
+	};
+
 	for (const match of findWikilinkMatches(content)) {
 		const parsed = parseWikiLink(match.inner, match.fullMatch);
-		const target = parsed.target;
-		if (target) {
-			const normalized = target.replace(/\\/g, "/").toLowerCase();
-			if (!seen.has(normalized)) {
-				seen.add(normalized);
-				targets.push(normalized);
-			}
-		}
+		if (parsed.target) addTarget(parsed.target);
 	}
 
-	const markdownLinkPattern = /!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^)]*)?\)/g;
-	for (const match of content.matchAll(markdownLinkPattern)) {
-		let target = match[1]?.trim() ?? "";
+	// One normalizer for every Markdown-shaped destination, so an inline link
+	// and a reference definition cannot drift on what counts as internal.
+	const addMarkdownTarget = (raw: string) => {
+		let target = raw.trim();
 		if (target.startsWith("<") && target.endsWith(">")) {
 			target = target.slice(1, -1);
 		}
@@ -677,13 +707,19 @@ function extractWikilinkTargets(lines: string[], isContent: boolean[]): string[]
 			target.startsWith("//") ||
 			target.startsWith("#")
 		) {
-			continue;
+			return;
 		}
-
-		const hashIndex = target.indexOf("#");
-		const pathPart = hashIndex >= 0 ? target.slice(0, hashIndex) : target;
+		// Cut at whichever comes first, `#` or `?`, so `Note.md?from=docs`
+		// resolves like the graph extractor already resolves it
+		// (`cleanLinkTarget`, link-extractor.ts). Splitting at `#` alone left the
+		// query in the path, the `.md` test below failed, and the link was
+		// silently absent from the backlinks.
+		const end = [target.indexOf("#"), target.indexOf("?")]
+			.filter((index) => index >= 0)
+			.reduce((min, index) => (index < min ? index : min), target.length);
+		const pathPart = target.slice(0, end);
 		if (!/\.(md|mdx)$/i.test(pathPart)) {
-			continue;
+			return;
 		}
 
 		let normalized = pathPart.replace(/\.(md|mdx)$/i, "");
@@ -692,11 +728,22 @@ function extractWikilinkTargets(lines: string[], isContent: boolean[]): string[]
 		} catch {
 			// Keep the raw path when a malformed escape appears in a link.
 		}
-		normalized = normalized.replace(/\\/g, "/").toLowerCase();
-		if (!seen.has(normalized)) {
-			seen.add(normalized);
-			targets.push(normalized);
-		}
+		addTarget(normalized);
+	};
+
+	const markdownLinkPattern = /!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^)]*)?\)/g;
+	for (const match of content.matchAll(markdownLinkPattern)) {
+		addMarkdownTarget(match[1] ?? "");
+	}
+
+	// Reference-style definitions (`[ref]: Note.md`) are links the graph
+	// extractor already counts and the resolver already rewrites, so leaving
+	// them out here made the two subsystems disagree about the same vault.
+	// A `^`-prefixed label is a footnote and a `~`-prefixed one a citation;
+	// neither addresses a page, so both are skipped.
+	const definitionPattern = /^\s{0,3}\[([^\]^~][^\]]*)\]:[ \t]*(<[^>]+>|[^\s]+)/gm;
+	for (const match of content.matchAll(definitionPattern)) {
+		addMarkdownTarget(match[2] ?? "");
 	}
 
 	return targets;
@@ -785,7 +832,10 @@ function normalizeStringArray(value: unknown): string[] {
 	return [];
 }
 
-function extractFrontmatterMetadata(markdown: string): {
+function extractFrontmatterMetadata(
+	markdown: string,
+	relativePath: string,
+): {
 	title?: string;
 	aliases: string[];
 	tags: string[];
@@ -795,8 +845,7 @@ function extractFrontmatterMetadata(markdown: string): {
 	frontmatter: Record<string, unknown>;
 } {
 	try {
-		const parsed = matter(markdown);
-		const data = parsed.data || {};
+		const { data } = parseFrontmatter(markdown);
 
 		const title = normalizeStringField(data.title);
 		const excerpt = normalizeStringField(data.excerpt);
@@ -814,7 +863,12 @@ function extractFrontmatterMetadata(markdown: string): {
 			publish,
 			frontmatter: data,
 		};
-	} catch {
+	} catch (error) {
+		// Unreadable frontmatter must not drop the page: publish it without
+		// metadata, but name the file so the failure is not silent.
+		console.warn(
+			`[rspress-plugin-obsidian:markdown] Dropped frontmatter for "${relativePath}": ${error instanceof Error ? error.message : String(error)}`,
+		);
 		return {
 			aliases: [],
 			tags: [],
@@ -826,7 +880,9 @@ function extractFrontmatterMetadata(markdown: string): {
 }
 
 function pushNamedPage(map: Map<string, ContentPage[]>, rawValue: string, page: ContentPage): void {
-	const key = normalizeLookupValue(rawValue);
+	// Title/alias/tag/basename keys all funnel through here; fold to NFC so a
+	// decomposed macOS filename matches a composed frontmatter value.
+	const key = normalizeUnicode(normalizeLookupValue(rawValue));
 	if (!key) {
 		return;
 	}
@@ -849,4 +905,4 @@ function pushNamedAsset(
 	map.set(rawValue, existing);
 }
 
-export { normalizeFsPath } from "./utils.ts";
+export { normalizeFsPath } from "../shared/route-path.js";

@@ -1,5 +1,5 @@
 ---
-description: Live examples of all rspress-plugin-obsidian-wikilink features. See callouts, wikilinks, tags, highlights, footnotes, and transclusion in action.
+description: Live examples of all rspress-plugin-obsidian features. See callouts, wikilinks, tags, highlights, footnotes, and transclusion in action.
 tags:
   - examples
   - demo
@@ -126,6 +126,53 @@ Nested callouts using restored types:
 
 You can ==highlight important text== using double equals signs. This is great for ==drawing attention== to key concepts in your documentation.
 
+## Math
+
+Inline math is written between single dollar signs: $E = mc^2$, and a formula
+like $a^2 + b^2 = c^2$ flows with the text.
+
+Display math uses double dollar signs:
+
+$$
+\int_0^1 x^2 \, dx = \frac{1}{3}
+$$
+
+KaTeX renders both, so the raw `$…$` is never shown. Prices such as $5 and $10
+stay prose — inline math requires no space inside the delimiters.
+
+## Mermaid Diagrams
+
+A ` ```mermaid ` fence becomes a diagram, drawn in the browser with the same
+renderer the canvas feature uses:
+
+```mermaid
+graph TD
+  A[Vault note] --> B[Wikilink]
+  B --> C[Published page]
+  C --> D[Graph view]
+```
+
+## Unresolved Links
+
+A wikilink to a page that does not exist keeps the label a reader expects and
+is marked as unresolved instead of becoming a link: [[not-a-real-page|Missing page]].
+
+## Private Notes
+
+A comment hides everything between its delimiters — paragraphs, lists and
+headings included. A commented-out heading is dropped from the page outline and
+the search index as well, so it is not published anywhere.
+
+Visible text. %%
+
+This paragraph is not published either.
+
+- Neither is this list item.
+
+%%
+
+Still visible.
+
 ## Wikilinks
 
 Link to other pages in your documentation:
@@ -137,13 +184,56 @@ Link to other pages in your documentation:
 Standard markdown links to vault pages resolve through the same rules — Obsidian accepts both syntaxes:
 
 - [Markdown link to the guide](getting-started.md) — the `.md` destination is resolved like a wikilink
-- [Markdown link to the vault root](/markdown) — resolves the section root page, not a relative path
+- [Markdown link to the vault root](/markdown/) — resolves the section root page, not a relative path. The trailing slash is what makes an index page resolve: Rspress rewrites a slash-less route to `/markdown.html`, and the file it published is `markdown/index.html`
 - [Markdown link with an anchor](getting-started.md#Install) — `#anchor` destinations resolve to heading slugs
 
 Current page anchor links:
 
 - [[#Callouts]] — jump to the callouts section
 - [[#Footnotes]] — jump to the footnotes section
+
+## Reference-Style Links
+
+A reference-style definition is a link like any other, and it counts as a
+backlink to whatever it names — the graph view and the backlinks panel read
+the same set, so they cannot disagree about the same vault:
+
+- [the getting started guide by reference][gs]
+- [a section of it by reference][gs-install]
+- [[markdown/guide/advanced]] — the same target the wikilink above resolves to
+
+The demo vault's `create a link.md` page does the same, which is why this page
+appears in its backlinks panel.
+
+A footnote or citation definition *looks* like one of these but addresses
+nothing, so neither becomes a backlink: a note[^ref-not-a-link] and a
+citation[~cite] stay out.
+
+## Dataview Inline Expressions
+
+With `enableDataview` on, a bare `= expression` in prose is evaluated and the
+value is rendered in place. This page's own name resolves:
+
+The file name is = file.name, and its folder is = file.folder.
+
+An expression that resolves to nothing is left exactly as written rather than
+collapsed into an empty span — ordinary prose survives untouched, which is why
+the sentence below still reads as prose and reports no diagnostic:
+
+The speed = value.
+
+## Canvas Cards
+
+The demo board shows the canvas-specific behaviours, including the two a card
+used to get wrong: `==highlights==` render inside a card, and
+`![[Note#Heading]]` embeds one section instead of the whole note. See
+[Canvas](/canvas/guide/getting-started).
+
+[gs]: markdown/guide/getting-started.md
+[gs-install]: markdown/guide/getting-started.md#Install
+[~cite]: markdown/guide/advanced.md
+
+[^ref-not-a-link]: A footnote definition is `[^id]: target` and a citation is `[~id]: target`; neither names a page, so neither is a link.
 
 ## Tags
 
@@ -166,6 +256,11 @@ This entire block
 is a private note
 and will not be published.
 %%
+
+## Media Embeds
+
+Every image, audio, video and PDF format Obsidian accepts, each a real file in
+the demo vault, lives on its own page: [Media Embeds](/markdown/guide/media-embeds).
 
 ## Transclusion Demo
 

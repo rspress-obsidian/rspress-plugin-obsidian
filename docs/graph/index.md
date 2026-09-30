@@ -13,12 +13,12 @@ The graph visualizes the current page's link neighborhood as a force-directed fi
 ### Setup
 
 ```ts
-import { pluginGraphview } from "rspress-plugin-obsidian";
+import { graphview } from "rspress-plugin-obsidian";
 
 export default defineConfig({
   plugins: [
-    pluginGraphview({
-      defaultOpen: false,    // Start with panel open
+    graphview({
+      defaultOpen: false,    // Start with panel closed (true = open)
       colors: {              // Custom colors
         node: "#3b82f6",
         link: "#94a3b8",
@@ -61,17 +61,22 @@ Hover previews show a tooltip with page content when hovering over internal link
 ### Setup
 
 ```ts
-pluginGraphview({
+graphview({
   enableHoverPreviews: true,
 });
 ```
 
 ### Features
 
-- Shows page title and content preview
+- Shows page title and a plain-text content preview — the body is reduced to
+  prose at build time (heading, emphasis, link and code markers stripped), so a
+  preview never ships raw markdown syntax and stays bounded in size
 - Appears after 300ms hover delay
 - Disappears when mouse leaves
-- Works on all internal links (`a[data-route-path]`)
+- Works on any internal link whose `href` resolves to a generated route — plugin
+  wikilinks, tag pages and Rspress's own page links. Ordinary Markdown links are
+  emitted with an `.html` suffix and fragment hrefs carry `#anchor`; both are
+  normalized before the preview lookup.
 
 ### Styling
 
@@ -86,11 +91,12 @@ The preview popup has:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultOpen` | `boolean` | `false` | Start with graph panel open |
+| `defaultOpen` | `boolean` | `false` | Start with the graph panel expanded (a stored visitor preference overrides it) |
 | `profileBuild` | `boolean` | `false` | Log build performance |
 | `colors` | `object` | See below | Custom color scheme |
 | `cacheDir` | `string` | Auto | Cache directory for parsed data |
 | `enableHoverPreviews` | `boolean` | `false` | Enable hover previews |
+| `enableDefaultStyles` | `boolean` | `false` | Inject the bundled panel stylesheet (already included in `rspress-plugin-obsidian/styles.css`) |
 
 ### Default Colors
 

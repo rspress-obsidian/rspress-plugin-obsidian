@@ -1,18 +1,19 @@
 import type { KeyboardEvent, MouseEvent, PointerEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePanZoom } from "../hooks/usePanZoom";
-import type { CanvasData, CanvasEdgeData, CanvasNode } from "../types";
-import { resolveColor } from "../utils/color";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { disposeMermaid, renderMermaidBlocks, retainMermaid } from "../../mermaid/blocks.js";
+import { usePanZoom } from "../hooks/usePanZoom.js";
+import type { CanvasData, CanvasEdgeData, CanvasNode } from "../types.js";
+import { resolveColor } from "../utils/color.js";
 import {
 	createEdge,
 	createFileNode,
 	createGroupNode,
 	createLinkNode,
 	createTextNode,
-} from "../utils/editor";
-import { disposeMermaid, renderMermaidBlocks } from "../utils/mermaid";
-import { CanvasEdge } from "./CanvasEdge";
-import { CanvasNodeComponent } from "./CanvasNode";
+} from "../utils/editor.js";
+import { membersByGroup } from "../utils/group.js";
+import { CanvasEdge } from "./CanvasEdge.js";
+import { CanvasNodeComponent } from "./CanvasNode.js";
 
 interface CanvasRendererProps {
 	data: CanvasData;
@@ -22,8 +23,16 @@ interface CanvasRendererProps {
 	editorTitle?: string;
 	iframeSandbox?: string;
 }
+/** One node's travel within a move action. */
+interface NodeMove {
+	id: string;
+	from: { x: number; y: number };
+	to: { x: number; y: number };
+}
 type EditorAction =
-	| { type: "move"; id: string; from: { x: number; y: number }; to: { x: number; y: number } }
+	// A drag that moves several nodes — a group and the members it holds — is one
+	// action, so undo restores the whole gesture in a single step.
+	| { type: "move"; moves: NodeMove[] }
 	| {
 			type: "resize";
 			id: string;
@@ -41,6 +50,19 @@ interface DragState {
 	id: string;
 	startX: number;
 	startY: number;
+	/**
+	 * Every node this gesture moves: the dragged node alone, or a group together
+	 * with the members it holds. Captured once at pointerdown so a member that
+	 * leaves the group mid-drag still finishes the gesture with it.
+	 */
+	origins: { id: string; x: number; y: number }[];
+}
+
+interface ResizeState {
+	id: string;
+	startX: number;
+	startY: number;
+	/** The node's size at pointerdown, and the origin of the resize delta. */
 	originX: number;
 	originY: number;
 }
@@ -57,6 +79,18 @@ function cloneData(data: CanvasData): CanvasData {
 		notes: data.notes ? { ...data.notes } : undefined,
 	};
 }
+
+/**
+ * Movement, in screen pixels, after which a pointer press on a card becomes a
+ * drag and claims pointer capture.
+ *
+ * Capturing on pointerdown instead would retarget the compatibility click to
+ * the wrapper, and the click target is the common ancestor of the retargeted
+ * mouseup and the mousedown — so every link inside a card (file-card "open
+ * note", link nodes, wikilinks in rendered markdown) would stop navigating.
+ * Capture is only needed once the gesture is known to be a drag.
+ */
+const DRAG_CAPTURE_THRESHOLD = 3;
 
 export function CanvasRenderer({
 	data,
@@ -77,14 +111,31 @@ export function CanvasRenderer({
 	const [draftText, setDraftText] = useState("");
 	const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 	const [edgeSourceId, setEdgeSourceId] = useState<string | null>(null);
+	// Collapsed groups are view state, never canvas data: the `.canvas` format has
+	// nowhere to record them and export must stay byte-faithful to the source.
+	const [collapsedGroupIds, setCollapsedGroupIds] = useState<string[]>([]);
+	const helpButtonRef = useRef<HTMLButtonElement>(null);
+	const helpCloseRef = useRef<HTMLButtonElement>(null);
+	const helpTitleId = useId();
 	const dragRef = useRef<DragState | null>(null);
-	const resizeRef = useRef<DragState | null>(null);
+	const resizeRef = useRef<ResizeState | null>(null);
+	// A press on a card, held until the pointer moves far enough to be a drag.
+	const pendingCaptureRef = useRef<{
+		element: Element;
+		pointerId: number;
+		x: number;
+		y: number;
+	} | null>(null);
 	const mermaidRootRef = useRef<HTMLDivElement>(null);
+	// Set when this visit has no remembered viewport to restore, which is what
+	// the one-off fit on mount waits for.
+	const needsInitialFit = useRef(false);
 
 	const {
 		viewport,
 		setViewport,
 		transform,
+		containerRef,
 		setContainerRef,
 		handlePointerDown,
 		handlePointerMove,
@@ -92,12 +143,49 @@ export function CanvasRenderer({
 		zoomIn,
 		zoomOut,
 		resetZoom,
-	} = usePanZoom();
+	} = usePanZoom(undefined, (restored) => {
+		// A board the reader has already positioned reopens where they left it;
+		// only a first visit (or one whose stored viewport was unusable) fits.
+		if (!restored) needsInitialFit.current = true;
+	});
 
 	const nodeMap = useMemo(
 		() => new Map(canvas.nodes.map((node) => [node.id, node])),
 		[canvas.nodes],
 	);
+	// Which nodes each group holds, by containment. Recomputed whenever the node
+	// geometry changes, so membership follows a drag out of (or into) a group.
+	const groupMembers = useMemo(() => membersByGroup(canvas.nodes), [canvas.nodes]);
+	// Members of collapsed groups, and the edges wholly inside them. Edges with one
+	// visible endpoint stay: the format keeps them, and the line still points at
+	// the group's box.
+	const hiddenNodeIds = useMemo(() => {
+		const hidden = new Set<string>();
+		for (const groupId of collapsedGroupIds) {
+			for (const memberId of groupMembers.get(groupId) ?? []) hidden.add(memberId);
+		}
+		return hidden;
+	}, [collapsedGroupIds, groupMembers]);
+	const visibleEdges = useMemo(
+		() =>
+			hiddenNodeIds.size === 0
+				? canvas.edges
+				: canvas.edges.filter(
+						(edge) => !(hiddenNodeIds.has(edge.fromNode) && hiddenNodeIds.has(edge.toNode)),
+					),
+		[canvas.edges, hiddenNodeIds],
+	);
+	// Groups are containers, so they stack beneath everything else whatever order
+	// the file lists them in: a group appended by the toolbar would otherwise
+	// paint over the cards it was drawn to hold. Rank groups first, then the rest,
+	// keeping each band in canvas order.
+	const zIndexById = useMemo(() => {
+		const ranks = new Map<string, number>();
+		let rank = 0;
+		for (const node of canvas.nodes) if (node.type === "group") ranks.set(node.id, ++rank);
+		for (const node of canvas.nodes) if (node.type !== "group") ranks.set(node.id, ++rank);
+		return ranks;
+	}, [canvas.nodes]);
 	const connectedEdgeIds = useMemo(() => {
 		const activeIds = new Set(selectedNodeIds);
 		if (hoveredNodeId) activeIds.add(hoveredNodeId);
@@ -118,8 +206,10 @@ export function CanvasRenderer({
 		(source: CanvasData, action: EditorAction, reverse = false): CanvasData => {
 			const next = cloneData(source);
 			if (action.type === "move") {
-				const node = next.nodes.find((item) => item.id === action.id);
-				if (node) Object.assign(node, reverse ? action.from : action.to);
+				for (const move of action.moves) {
+					const node = next.nodes.find((item) => item.id === move.id);
+					if (node) Object.assign(node, reverse ? move.from : move.to);
+				}
 			} else if (action.type === "resize") {
 				const node = next.nodes.find((item) => item.id === action.id);
 				if (node) Object.assign(node, reverse ? action.from : action.to);
@@ -189,9 +279,13 @@ export function CanvasRenderer({
 			}),
 			{ minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
 		);
-		const viewport = document.querySelector(".canvas-viewport")?.getBoundingClientRect();
-		const width = viewport?.width || 800;
-		const height = viewport?.height || 500;
+		const viewport = containerRef.current?.getBoundingClientRect();
+		// No measurable box means the canvas is not laid out (unmounted, `display:
+		// none`, or no layout engine). Fitting to a guessed 800x500 there would
+		// place the viewport in coordinates the user never sees.
+		const width = viewport?.width ?? 0;
+		const height = viewport?.height ?? 0;
+		if (width <= 0 || height <= 0) return;
 		const zoom = Math.max(
 			0.15,
 			Math.min(
@@ -207,21 +301,74 @@ export function CanvasRenderer({
 			y: height / 2 - (bounds.minY + (bounds.maxY - bounds.minY) / 2) * zoom,
 			zoom,
 		});
-	}, [canvas.nodes, setViewport]);
+	}, [canvas.nodes, containerRef, setViewport]);
 
+	// Fit once on mount. `fitToView` changes identity with `canvas.nodes`, so
+	// depending on it here re-fitted — and discarded the user's pan/zoom — 100ms
+	// after every drag, add, delete and undo. The ref keeps the latest callback
+	// reachable without re-running the effect.
+	const fitToViewRef = useRef(fitToView);
 	useEffect(() => {
-		const timer = setTimeout(() => requestAnimationFrame(fitToView), 100);
-		return () => clearTimeout(timer);
-	}, [fitToView]);
+		fitToViewRef.current = fitToView;
+	});
+	useEffect(() => {
+		// A restored viewport is the reader's own placement; re-fitting it would
+		// undo the very thing that was remembered.
+		if (!needsInitialFit.current) return;
+		let frame = 0;
+		const timer = setTimeout(() => {
+			frame = requestAnimationFrame(() => fitToViewRef.current());
+		}, 100);
+		return () => {
+			clearTimeout(timer);
+			cancelAnimationFrame(frame);
+		};
+	}, []);
 
-	// Re-inject mermaid diagrams after every commit — internal re-renders
-	// (hover, selection, fit-to-view) re-apply dangerouslySetInnerHTML and wipe
-	// injected SVGs. renderMermaidBlocks is idempotent, so this self-heals.
+	// A collapsed id outlives its group only until the next canvas change. Left in
+	// place it would still be collapsed by the time the toolbar's next group takes
+	// the freed id, and that new group would hide its members on sight.
+	useEffect(() => {
+		setCollapsedGroupIds((current) =>
+			current.some((id) => !nodeMap.has(id)) ? current.filter((id) => nodeMap.has(id)) : current,
+		);
+	}, [nodeMap]);
+
+	// The markdown each card renders, as one string. Mermaid blocks are injected
+	// by renderMermaidBlocks, and the effect below re-scans on exactly this key:
+	// a drag or resize changes coordinates only, so it no longer re-parses every
+	// diagram per frame, while editing a card still re-renders its diagrams.
+	const markdownKey = useMemo(
+		() =>
+			canvas.nodes
+				.map((node) =>
+					node.type === "text" ? node.text : node.type === "file" ? (node.fileContent ?? "") : "",
+				)
+				.filter(Boolean)
+				.join("\u0000"),
+		[canvas.nodes],
+	);
+	// The key is the trigger, not an input: the effect re-scans only when the
+	// rendered markdown changes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scan keyed on the rendered markdown
 	useEffect(() => {
 		if (mermaidRootRef.current) renderMermaidBlocks(mermaidRootRef.current);
-	});
+	}, [markdownKey]);
 
-	useEffect(() => disposeMermaid, []);
+	// Two canvases — or a canvas and a markdown page's diagrams — share one theme
+	// observer; releasing only this canvas' claim keeps the others alive.
+	useEffect(() => {
+		retainMermaid();
+		return () => disposeMermaid();
+	}, []);
+
+	// Move focus into the dialog on open so its own keys work without a pointer,
+	// and hand focus back to the toggle on close.
+	useEffect(() => {
+		if (!showHelp) return;
+		helpCloseRef.current?.focus();
+		return () => helpButtonRef.current?.focus();
+	}, [showHelp]);
 
 	const selectNode = useCallback((nodeId: string, event?: MouseEvent) => {
 		setSelectedNodeIds((current) => {
@@ -233,18 +380,45 @@ export function CanvasRenderer({
 		});
 	}, []);
 
+	// One stable callback for every edge. An inline arrow per edge per render
+	// changed the `onSelect` prop on every commit and defeated `CanvasEdge`'s memo.
+	const selectEdge = useCallback((edgeId: string) => setSelectedEdgeId(edgeId), []);
+
+	// Collapsing is a view toggle: it never touches `canvas`, so export and the
+	// undo history stay exactly as the source had them. A member hidden by the
+	// collapse must also leave the selection, or Delete would remove cards the
+	// user can no longer see.
+	const toggleGroupCollapse = useCallback(
+		(groupId: string) => {
+			if (!collapsedGroupIds.includes(groupId)) {
+				const hidden = new Set(groupMembers.get(groupId) ?? []);
+				setSelectedNodeIds((current) => current.filter((id) => !hidden.has(id)));
+			}
+			setCollapsedGroupIds((current) =>
+				current.includes(groupId) ? current.filter((id) => id !== groupId) : [...current, groupId],
+			);
+		},
+		[collapsedGroupIds, groupMembers],
+	);
+
 	const startNodeDrag = useCallback(
 		(node: CanvasNode, event: PointerEvent) => {
 			if (!editable || event.button !== 0) return;
+			// A group drags the members it holds by the same delta. Membership is
+			// sampled here, at pointerdown, so the set cannot change under the
+			// cursor mid-gesture and leave half a group behind.
+			const members = node.type === "group" ? (groupMembers.get(node.id) ?? []) : [];
+			const dragged = [node, ...members.map((id) => nodeMap.get(id))].filter(
+				(item): item is CanvasNode => item !== undefined,
+			);
 			dragRef.current = {
 				id: node.id,
 				startX: event.clientX,
 				startY: event.clientY,
-				originX: node.x,
-				originY: node.y,
+				origins: dragged.map((item) => ({ id: item.id, x: item.x, y: item.y })),
 			};
 		},
-		[editable],
+		[editable, groupMembers, nodeMap],
 	);
 
 	const finishNodeDrag = useCallback(() => {
@@ -252,19 +426,22 @@ export function CanvasRenderer({
 		const resize = resizeRef.current;
 		dragRef.current = null;
 		resizeRef.current = null;
+		pendingCaptureRef.current = null;
 		if (drag) {
-			const node = canvas.nodes.find((item) => item.id === drag.id);
-			if (node && (node.x !== drag.originX || node.y !== drag.originY)) {
-				commit(
-					{
-						type: "move",
-						id: drag.id,
-						from: { x: drag.originX, y: drag.originY },
-						to: { x: node.x, y: node.y },
-					},
-					canvas,
-				);
-			}
+			const moves = drag.origins
+				.map((origin) => {
+					const node = canvas.nodes.find((item) => item.id === origin.id);
+					return node && (node.x !== origin.x || node.y !== origin.y)
+						? {
+								id: origin.id,
+								from: { x: origin.x, y: origin.y },
+								to: { x: node.x, y: node.y },
+							}
+						: null;
+				})
+				.filter((move): move is NodeMove => move !== null);
+			// One entry for the whole gesture, however many nodes moved with it.
+			if (moves.length) commit({ type: "move", moves }, canvas);
 		}
 		if (resize) {
 			const node = canvas.nodes.find((item) => item.id === resize.id);
@@ -283,28 +460,66 @@ export function CanvasRenderer({
 	}, [canvas, commit]);
 	const updateDraggedNode = useCallback(
 		(event: PointerEvent) => {
+			// A press only becomes a drag once it moves: claim the pointer then, so a
+			// plain click still reaches the links inside the card.
+			const pending = pendingCaptureRef.current;
+			if (
+				pending &&
+				pending.pointerId === event.pointerId &&
+				(Math.abs(event.clientX - pending.x) >= DRAG_CAPTURE_THRESHOLD ||
+					Math.abs(event.clientY - pending.y) >= DRAG_CAPTURE_THRESHOLD)
+			) {
+				pendingCaptureRef.current = null;
+				pending.element.setPointerCapture(event.pointerId);
+			}
+
 			const resize = resizeRef.current;
-			const drag = dragRef.current;
+			// The two gestures are mutually exclusive; a resize wins if both refs are set.
+			const drag = resize ? null : dragRef.current;
 			if (!resize && !drag) return;
 			const zoom = viewport.zoom || 1;
 			setCanvas((current) => {
-				const next = cloneData(current);
-				const node = next.nodes.find((item) => item.id === (resize || drag)?.id);
-				if (!node) return next;
 				if (resize) {
-					node.width = Math.max(
+					const index = current.nodes.findIndex((item) => item.id === resize.id);
+					const node = current.nodes[index];
+					if (!node) return current;
+					const width = Math.max(
 						80,
 						Math.round(resize.originX + (event.clientX - resize.startX) / zoom),
 					);
-					node.height = Math.max(
+					const height = Math.max(
 						60,
 						Math.round(resize.originY + (event.clientY - resize.startY) / zoom),
 					);
-				} else if (drag) {
-					node.x = Math.round(drag.originX + (event.clientX - drag.startX) / zoom);
-					node.y = Math.round(drag.originY + (event.clientY - drag.startY) / zoom);
+					if (width === node.width && height === node.height) return current;
+					const nodes = current.nodes.slice();
+					nodes[index] = { ...node, width, height };
+					return { ...current, nodes };
 				}
-				return next;
+				if (!drag) return current;
+				// Every node in the gesture — a group and the members it holds — moves
+				// by the same pointer delta.
+				const moved: { index: number; node: CanvasNode }[] = [];
+				for (const origin of drag.origins) {
+					const index = current.nodes.findIndex((item) => item.id === origin.id);
+					const node = current.nodes[index];
+					if (!node) continue;
+					const x = Math.round(origin.x + (event.clientX - drag.startX) / zoom);
+					const y = Math.round(origin.y + (event.clientY - drag.startY) / zoom);
+					if (x === node.x && y === node.y) continue;
+					moved.push({ index, node: { ...node, x, y } });
+				}
+				// Sub-pixel movement rounds to the same box: returning the same state
+				// object lets React skip the re-render entirely.
+				if (moved.length === 0) return current;
+				// Only the dragged nodes are new objects, and `edges`/`assets`/`notes`
+				// keep their identity: cloning the whole canvas here re-created every
+				// card and both lookup tables per frame, which broke
+				// `CanvasNodeComponent`'s memo and re-parsed every card's markdown on
+				// every pointermove.
+				const nodes = current.nodes.slice();
+				for (const change of moved) nodes[change.index] = change.node;
+				return { ...current, nodes };
 			});
 		},
 		[viewport.zoom],
@@ -411,6 +626,27 @@ export function CanvasRenderer({
 
 	const handleKeyDown = useCallback(
 		(event: KeyboardEvent) => {
+			// Escape is the one key that must work while editing: it commits the
+			// draft and leaves the editor.
+			if (event.key === "Escape") {
+				setSelectedNodeIds([]);
+				setEditingNodeId(null);
+				setEdgeSourceId(null);
+				setSelectedEdgeId(null);
+				setShowHelp(false);
+				return;
+			}
+			// Keys typed into the inline card editor belong to the text field: without
+			// this, Backspace/Delete deletes the card being edited, `f`/`0`/`+`/`-`
+			// refit or zoom the viewport, and Ctrl+Z undoes a canvas action instead of
+			// the text. The guard sits above every other binding for that reason.
+			const keyTarget = event.target as HTMLElement | null;
+			if (
+				keyTarget?.isContentEditable ||
+				(keyTarget?.tagName && /^(?:input|textarea|select)$/i.test(keyTarget.tagName))
+			) {
+				return;
+			}
 			const modifier = event.ctrlKey || event.metaKey;
 			if (modifier && event.key.toLowerCase() === "z") {
 				event.preventDefault();
@@ -425,13 +661,6 @@ export function CanvasRenderer({
 			if (modifier && event.key.toLowerCase() === "s") {
 				event.preventDefault();
 				exportCanvas();
-				return;
-			}
-			if (event.key === "Escape") {
-				setSelectedNodeIds([]);
-				setEditingNodeId(null);
-				setEdgeSourceId(null);
-				setSelectedEdgeId(null);
 				return;
 			}
 			if (editable && (event.key === "Delete" || event.key === "Backspace")) {
@@ -479,12 +708,27 @@ export function CanvasRenderer({
 				className="canvas-viewport"
 				role="application"
 				aria-label={editable ? "Editable canvas" : "Interactive canvas with nodes and connections"}
+				// Focusable so the viewport's own shortcuts (f/0/+/-/Delete) reach it
+				// without a child having to hold focus first.
+				tabIndex={0}
 				onPointerDown={handlePointerDown}
 				onPointerMove={(event) => {
 					handlePointerMove(event);
 					updateDraggedNode(event);
 				}}
 				onPointerUp={() => {
+					handlePointerUp();
+					finishNodeDrag();
+				}}
+				// A touch takeover, a native drag or an OS-level interruption ends the
+				// gesture with pointercancel and no pointerup. Without these the pan
+				// stayed active and `dragRef`/`resizeRef` stayed armed: the card kept
+				// following the cursor and the move never reached the undo history.
+				onPointerCancel={() => {
+					handlePointerUp();
+					finishNodeDrag();
+				}}
+				onLostPointerCapture={() => {
 					handlePointerUp();
 					finishNodeDrag();
 				}}
@@ -498,9 +742,16 @@ export function CanvasRenderer({
 			>
 				<div className="canvas-world" style={{ transform }}>
 					{showGrid && <div className="canvas-background" aria-hidden="true" />}
-					<svg className="canvas-edges" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+					<svg
+						className="canvas-edges"
+						xmlns="http://www.w3.org/2000/svg"
+						// Editable edges are real buttons: hiding them would leave focusable
+						// controls inside an aria-hidden subtree (an axe violation).
+						aria-hidden={editable ? undefined : true}
+					>
+						<title>Canvas edges</title>
 						<defs>
-							{canvas.edges.map((edge) => {
+							{visibleEdges.map((edge) => {
 								const color = edgeColor(edge.color);
 								return (
 									<g key={edge.id}>
@@ -528,94 +779,134 @@ export function CanvasRenderer({
 								);
 							})}
 						</defs>
-						{canvas.edges.map((edge) => (
+						{visibleEdges.map((edge) => (
 							<CanvasEdge
 								key={edge.id}
 								edge={edge}
 								nodeMap={nodeMap}
 								isHighlighted={connectedEdgeIds.has(edge.id)}
 								isSelected={selectedEdgeId === edge.id}
-								onSelect={editable ? (id) => setSelectedEdgeId(id) : undefined}
+								onSelect={editable ? selectEdge : undefined}
 							/>
 						))}
 					</svg>
-					{canvas.nodes.map((node, index) => (
-						// biome-ignore lint/a11y/noStaticElementInteractions: editor node wrapper owns drag and resize gestures
-						<div
-							key={node.id}
-							onPointerDown={(event) => {
-								event.stopPropagation();
-								selectNode(node.id, event);
-								startNodeDrag(node, event);
-							}}
-							onDoubleClick={() => {
-								if (editable && node.type === "text") {
-									setEditingNodeId(node.id);
-									setDraftText(node.text);
-								}
-							}}
-							className="canvas-editor-node-wrapper"
-							style={{
-								position: "absolute",
-								left: node.x,
-								top: node.y,
-								width: node.width,
-								height: node.height,
-								zIndex: index + 1,
-							}}
-						>
-							<CanvasNodeComponent
-								node={node}
-								assets={canvas.assets}
-								notes={canvas.notes}
-								zIndex={index + 1}
-								isHovered={node.id === hoveredNodeId}
-								isSelected={selectedNodeIds.includes(node.id)}
-								fileRoutePrefix={fileRoutePrefix}
-								linkPreview={linkPreview}
-								iframeSandbox={iframeSandbox}
-								onHover={setHoveredNodeId}
-								onClick={handleNodeClick}
-							/>
-							{editable && selectedNodeIds.includes(node.id) && (
-								<button
-									type="button"
-									className="canvas-resize-handle"
-									aria-label={`Resize ${node.id}`}
-									onPointerDown={(event) => {
-										event.stopPropagation();
-										resizeRef.current = {
-											id: node.id,
-											startX: event.clientX,
-											startY: event.clientY,
-											originX: node.width,
-											originY: node.height,
+					{canvas.nodes
+						.filter((node) => !hiddenNodeIds.has(node.id))
+						.map((node) => (
+							// biome-ignore lint/a11y/noStaticElementInteractions: editor node wrapper owns drag and resize gestures
+							<div
+								key={node.id}
+								onPointerDown={(event) => {
+									event.stopPropagation();
+									// The viewport's own capture never runs — the event is stopped
+									// above — so the drag claims the pointer here, but only once it
+									// moves: capturing now would swallow the click on a link inside
+									// this card (see DRAG_CAPTURE_THRESHOLD). Without the claim a
+									// release outside the viewport is never delivered, so the drag
+									// stays armed and the move never reaches the undo history.
+									selectNode(node.id, event);
+									startNodeDrag(node, event);
+									if (editable && event.button === 0) {
+										pendingCaptureRef.current = {
+											element: event.currentTarget,
+											pointerId: event.pointerId,
+											x: event.clientX,
+											y: event.clientY,
 										};
-									}}
+									}
+								}}
+								onDoubleClick={() => {
+									if (editable && node.type === "text") {
+										setEditingNodeId(node.id);
+										setDraftText(node.text);
+									}
+								}}
+								className="canvas-editor-node-wrapper"
+								style={{
+									position: "absolute",
+									left: node.x,
+									top: node.y,
+									width: node.width,
+									height: node.height,
+									zIndex: zIndexById.get(node.id),
+								}}
+							>
+								<CanvasNodeComponent
+									node={node}
+									assets={canvas.assets}
+									notes={canvas.notes}
+									zIndex={zIndexById.get(node.id)}
+									isHovered={node.id === hoveredNodeId}
+									isSelected={selectedNodeIds.includes(node.id)}
+									fileRoutePrefix={fileRoutePrefix}
+									linkPreview={linkPreview}
+									iframeSandbox={iframeSandbox}
+									onHover={setHoveredNodeId}
+									onClick={handleNodeClick}
 								/>
-							)}
-							{editable && editingNodeId === node.id && node.type === "text" && (
-								<textarea
-									// biome-ignore lint/a11y/noAutofocus: focus is required for immediate text-card editing
-									autoFocus
-									className="canvas-editor-textarea"
-									value={draftText}
-									onChange={(event) => setDraftText(event.target.value)}
-									onBlur={() => {
-										const updated = { ...node, text: draftText } as CanvasNode;
-										commit(
-											{ type: "update", id: node.id, from: node, to: updated },
-											{
-												...cloneData(canvas),
-												nodes: canvas.nodes.map((item) => (item.id === node.id ? updated : item)),
-											},
-										);
-										setEditingNodeId(null);
-									}}
-								/>
-							)}
-						</div>
-					))}
+								{editable && selectedNodeIds.includes(node.id) && (
+									<button
+										type="button"
+										className="canvas-resize-handle"
+										aria-label={`Resize ${node.id}`}
+										onPointerDown={(event) => {
+											event.stopPropagation();
+											event.currentTarget.setPointerCapture(event.pointerId);
+											resizeRef.current = {
+												id: node.id,
+												startX: event.clientX,
+												startY: event.clientY,
+												originX: node.width,
+												originY: node.height,
+											};
+										}}
+									/>
+								)}
+								{node.type === "group" && (groupMembers.get(node.id)?.length ?? 0) > 0 && (
+									// A group with nothing inside has nothing to hide, so it gets
+									// no control. The toggle is a sibling of the group card, not a
+									// child: the card is itself a button and controls may not nest.
+									// ponytail: the wrapper's z-index makes it a stacking context, so
+									// this control paints in the group's band — a member card sitting
+									// over the group's top-right corner covers it. Promote it to a
+									// world-level overlay if that ever matters.
+									<button
+										type="button"
+										className="canvas-group-collapse"
+										aria-label={`${collapsedGroupIds.includes(node.id) ? "Expand" : "Collapse"} group ${node.label || node.id}`}
+										aria-expanded={collapsedGroupIds.includes(node.id)}
+										title={collapsedGroupIds.includes(node.id) ? "Expand group" : "Collapse group"}
+										onPointerDown={(event) => event.stopPropagation()}
+										onClick={(event) => {
+											event.stopPropagation();
+											toggleGroupCollapse(node.id);
+										}}
+									>
+										{collapsedGroupIds.includes(node.id) ? "▸" : "▾"}
+									</button>
+								)}
+								{editable && editingNodeId === node.id && node.type === "text" && (
+									<textarea
+										// biome-ignore lint/a11y/noAutofocus: focus is required for immediate text-card editing
+										autoFocus
+										className="canvas-editor-textarea"
+										value={draftText}
+										onChange={(event) => setDraftText(event.target.value)}
+										onBlur={() => {
+											const updated = { ...node, text: draftText } as CanvasNode;
+											commit(
+												{ type: "update", id: node.id, from: node, to: updated },
+												{
+													...cloneData(canvas),
+													nodes: canvas.nodes.map((item) => (item.id === node.id ? updated : item)),
+												},
+											);
+											setEditingNodeId(null);
+										}}
+									/>
+								)}
+							</div>
+						))}
 				</div>
 			</div>
 			<div className="canvas-toolbar" role="toolbar" aria-label="Canvas controls">
@@ -659,6 +950,7 @@ export function CanvasRenderer({
 						</button>
 						<button
 							type="button"
+							className="canvas-toolbar-btn"
 							onClick={() => {
 								const [sourceId] = selectedNodeIds;
 								if (!sourceId) return;
@@ -759,17 +1051,44 @@ export function CanvasRenderer({
 				<button
 					type="button"
 					className="canvas-toolbar-btn"
+					ref={helpButtonRef}
 					onClick={() => setShowHelp((value) => !value)}
 					aria-label="Help"
+					aria-expanded={showHelp}
+					aria-haspopup="dialog"
 				>
 					?
 				</button>
 			</div>
 			{showHelp && (
-				<div className="canvas-help-modal">
+				<div
+					className="canvas-help-modal"
+					role="dialog"
+					aria-modal="true"
+					aria-labelledby={helpTitleId}
+					onKeyDown={(event) => {
+						if (event.key === "Escape") {
+							event.stopPropagation();
+							setShowHelp(false);
+							return;
+						}
+						// The dialog holds a single focusable control; Tab keeps focus on
+						// it rather than walking back out into the toolbar behind it.
+						if (event.key === "Tab") {
+							event.preventDefault();
+							helpCloseRef.current?.focus();
+						}
+					}}
+				>
 					<div className="canvas-help-header">
-						<h3>Canvas Controls</h3>
-						<button type="button" onClick={() => setShowHelp(false)}>
+						<h3 id={helpTitleId}>Canvas Controls</h3>
+						<button
+							type="button"
+							ref={helpCloseRef}
+							className="canvas-help-close"
+							aria-label="Close help"
+							onClick={() => setShowHelp(false)}
+						>
 							×
 						</button>
 					</div>

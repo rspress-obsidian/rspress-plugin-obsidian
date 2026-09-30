@@ -7,18 +7,22 @@ import {
 	maybeLogGraphBuild,
 	pruneStaleDocuments,
 	type ScannedRouteDocument,
-} from "./cache";
-import { buildGraphData } from "./graph-builder";
-import { extractDisplayTitle, extractMarkdownLinks } from "./link-extractor";
-import type { CollectedRoute, GraphBuildOptions, GraphBuildResult } from "./types";
+} from "./cache.js";
+import { buildGraphData } from "./graph-builder.js";
+import {
+	extractDisplayTitle,
+	extractFrontmatterNames,
+	extractMarkdownLinks,
+} from "./link-extractor.js";
+import type { CollectedRoute, GraphBuildOptions, GraphBuildResult } from "./types.js";
 
-export { createGraphBuildCache, loadDiskCache, saveDiskCache } from "./cache";
+export { createGraphBuildCache, loadDiskCache, saveDiskCache } from "./cache.js";
 export type {
 	CollectedRoute,
 	GraphBuildDiagnostics,
 	GraphBuildOptions,
 	GraphBuildResult,
-} from "./types";
+} from "./types.js";
 
 export async function buildGraphModule(
 	routes: CollectedRoute[],
@@ -63,13 +67,15 @@ export async function buildGraphModule(
 					size: fileStat.size,
 					contentHash: cachedDocument.contentHash,
 					inferredTitle: cachedDocument.inferredTitle,
+					names: cachedDocument.names,
 					rawLinks: cachedDocument.rawLinks,
 				} satisfies ScannedRouteDocument;
 			}
 
-			const parseStart = shouldProfile ? performance.now() : 0;
 			const content = await readFile(route.absolutePath, "utf8");
+			const parseStart = shouldProfile ? performance.now() : 0;
 			const inferredTitle = extractDisplayTitle(content);
+			const names = extractFrontmatterNames(content);
 			const rawLinks = extractMarkdownLinks(content, route.absolutePath);
 			const contentHash = hashContent(content);
 			if (shouldProfile) {
@@ -83,6 +89,7 @@ export async function buildGraphModule(
 				size: fileStat.size,
 				contentHash,
 				inferredTitle,
+				names,
 				rawLinks,
 			} satisfies ScannedRouteDocument;
 
@@ -91,6 +98,7 @@ export async function buildGraphModule(
 				size: fileStat.size,
 				contentHash,
 				inferredTitle,
+				names,
 				rawLinks,
 			});
 
@@ -113,7 +121,7 @@ export async function buildGraphModule(
 	}
 
 	const resolveStart = shouldProfile ? performance.now() : 0;
-	const graphData = buildGraphData(routes, scannedDocuments);
+	const graphData = buildGraphData(routes, scannedDocuments, options.onUnresolvedLink);
 	if (shouldProfile) {
 		diagnostics.resolveMs = performance.now() - resolveStart;
 	}

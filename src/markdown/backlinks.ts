@@ -1,7 +1,9 @@
 import path from "node:path";
-import { normalizeLookupValue } from "./slug.ts";
-import type { BacklinkRef, ContentIndex, ContentPage } from "./types.ts";
-import { backlinkLabel, normalizeFilePathKey, resolveRelativePathKey } from "./utils.ts";
+import { escapeHtmlText } from "../shared/escape.js";
+import { normalizeLookupValue } from "../shared/slug.js";
+import type { MentionRef } from "./mentions.js";
+import type { BacklinkRef, ContentIndex, ContentPage } from "./types.js";
+import { backlinkLabel, normalizeFilePathKey, resolveRelativePathKey, routeHref } from "./utils.js";
 
 export type { BacklinkRef };
 
@@ -36,9 +38,6 @@ export async function getCachedBacklinksIndex(
  * Uses pre-extracted wikilink targets (collected during content indexing) to
  * skip regex scanning entirely — reduces per-page cost to just one Map lookup
  * and a few O(1) resolution calls.
- *
- * Falls back to rawContentByPath for pages indexed before the wikilinkTargets
- * field was added (e.g. during a version upgrade).
  */
 export async function buildBacklinksIndex(
 	index: ContentIndex,
@@ -143,6 +142,7 @@ function addBacklink(
 	if (!already) {
 		existing.push({
 			routePath: sourcePage.routePath,
+			relativePath: sourcePage.relativePath,
 			title: backlinkLabel(sourcePage),
 		});
 		backlinks.set(targetRoutePath, existing);
@@ -155,21 +155,35 @@ function addBacklink(
  * The output is wrapped in `<div class="obsidian-backlinks">` and uses the
  * `.obsidian-backlinks` selectors in the bundled stylesheet.
  */
-export function renderBacklinksHtml(refs: BacklinkRef[]): string {
-	if (refs.length === 0) return "";
-	const items = refs
-		.map(
-			(r) =>
-				`<li><a href="${escapeHtmlAttribute(r.routePath)}">${escapeHtmlText(r.title)}</a></li>`,
-		)
-		.join("\n");
-	return `<div class="obsidian-backlinks">\n<h2>Backlinks</h2>\n<ul>\n${items}\n</ul>\n</div>`;
-}
+export function renderBacklinksHtml(refs: BacklinkRef[], mentions: MentionRef[] = []): string {
+	const sections: string[] = [];
 
-function escapeHtmlText(value: string): string {
-	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+	if (refs.length > 0) {
+		const items = refs
+			.map(
+				(r) =>
+					`<li><a href="${routeHref(r.routePath, r.relativePath ?? "")}">${escapeHtmlText(r.title)}</a></li>`,
+			)
+			.join("\n");
+		sections.push(
+			`<div class="obsidian-backlinks">\n<h2>Backlinks</h2>\n<ul>\n${items}\n</ul>\n</div>`,
+		);
+	}
 
-function escapeHtmlAttribute(value: string): string {
-	return escapeHtmlText(value).replace(/"/g, "&quot;");
+	// Obsidian lists pages that name this one without linking to it next to the
+	// linked ones; the two lists are rendered as separate sections so a reader can
+	// tell a real link from a passing mention.
+	if (mentions.length > 0) {
+		const items = mentions
+			.map(
+				(mention) =>
+					`<li><a href="${routeHref(mention.routePath, mention.relativePath ?? "")}">${escapeHtmlText(mention.title)}</a> <span class="obsidian-mention-context">${escapeHtmlText(mention.snippet)}</span></li>`,
+			)
+			.join("\n");
+		sections.push(
+			`<div class="obsidian-backlinks obsidian-unlinked-mentions">\n<h2>Unlinked mentions</h2>\n<ul>\n${items}\n</ul>\n</div>`,
+		);
+	}
+
+	return sections.join("\n");
 }

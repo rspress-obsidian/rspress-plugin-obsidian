@@ -7,16 +7,20 @@ import type {
 	GraphBuildDiagnostics,
 	GraphBuildOptions,
 	GraphBuildResult,
-} from "./types";
+} from "./types.js";
 
-/** Bump when the cached document schema changes to invalidate old caches. */
-const CACHE_SCHEMA_VERSION = 1;
+// Bump whenever link extraction semantics change: cached rawLinks are reused
+// for files whose mtime and size are unchanged, so an upgrade would otherwise
+// keep serving edges the old extractor produced.
+const CACHE_SCHEMA_VERSION = 3;
 
 interface CachedRouteDocument {
 	mtimeMs: number;
 	size: number;
 	contentHash: string;
 	inferredTitle?: string;
+	/** Frontmatter `title`/`aliases`, the names a wikilink may address this page by. */
+	names: string[];
 	rawLinks: string[];
 }
 
@@ -37,6 +41,7 @@ interface ScannedRouteDocument {
 	size: number;
 	contentHash: string;
 	inferredTitle?: string;
+	names: string[];
 	rawLinks: string[];
 }
 
@@ -136,7 +141,7 @@ export function maybeLogGraphBuild(
 	const writeLog = logger ?? console.info;
 	writeLog(
 		[
-			"[rspress-plugin-graph-view] graph build",
+			"[rspress-plugin-obsidian:graph] graph build",
 			`routes=${diagnostics.routeCount}`,
 			`links=${diagnostics.linkCount}`,
 			`cacheHits=${diagnostics.cacheHits}`,

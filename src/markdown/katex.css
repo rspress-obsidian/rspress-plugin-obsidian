@@ -1,0 +1,3 @@
+/* KaTeX alone, injected as `globalStyles` when `enableMath` is on and the
+ * plugin stylesheet is disabled. Resolved by the consuming site build. */
+@import "katex/dist/katex.min.css";

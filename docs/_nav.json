@@ -1,22 +1,27 @@
 [
   {
-    "text": "Wikilinks",
-    "link": "/wikilinks/getting-started",
-    "activeMatch": "/wikilinks/"
+    "text": "Getting Started",
+    "link": "/getting-started/",
+    "activeMatch": "^/getting-started(/index)?(\\.html?)?$"
   },
   {
-    "text": "Tags & Daily Notes",
-    "link": "/tags-daily-notes/",
-    "activeMatch": "/tags-daily-notes/"
-  },
-  {
-    "text": "Graph Features",
-    "link": "/graph/guide/graph-view",
-    "activeMatch": "/graph/"
+    "text": "Markdown",
+    "link": "/markdown/",
+    "activeMatch": "^/markdown(/|$)"
   },
   {
     "text": "Canvas",
-    "link": "/canvas/guide/getting-started",
-    "activeMatch": "/canvas/"
+    "link": "/canvas/",
+    "activeMatch": "^/canvas(/|$)"
+  },
+  {
+    "text": "Graph Features",
+    "link": "/graph/",
+    "activeMatch": "^/graph(/|$)"
+  },
+  {
+    "text": "Compatibility",
+    "link": "/obsidian-compatibility",
+    "activeMatch": "^/obsidian-compatibility(/index)?(\\.html?)?$"
   }
 ]

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../shared/media-exts";
 import { renderMarkdown } from "./markdown";
 
 test("renders plain text as paragraph", () => {
@@ -65,12 +66,12 @@ test("renders images", () => {
 
 test("renders wiki-links without display text", () => {
 	const html = renderMarkdown("[[My Note]]");
-	expect(html).toContain('<a href="/my-note" class="wiki-link">My Note</a>');
+	expect(html).toContain('<a href="/My Note" class="wiki-link">My Note</a>');
 });
 
 test("renders wiki-links with display text", () => {
 	const html = renderMarkdown("[[My Note|Click Here]]");
-	expect(html).toContain('<a href="/my-note" class="wiki-link">Click Here</a>');
+	expect(html).toContain('<a href="/My Note" class="wiki-link">Click Here</a>');
 });
 
 test("renders horizontal rules", () => {
@@ -183,7 +184,7 @@ test("resolves wiki-link aliases, headings, and prefixes", () => {
 	const html = renderMarkdown("[[Notes/Plan#Next Steps|Read plan]]", {
 		fileRoutePrefix: "/docs",
 	});
-	expect(html).toContain('<a href="/docs/notes/plan#next-steps" class="wiki-link">Read plan</a>');
+	expect(html).toContain('<a href="/docs/Notes/Plan#next-steps" class="wiki-link">Read plan</a>');
 });
 
 test("renders Obsidian media embeds from the asset map", () => {
@@ -193,6 +194,86 @@ test("renders Obsidian media embeds from the asset map", () => {
 	expect(html).toContain(
 		'<img src="data:image/png;base64,AAAA" alt="Assets/clip.png" class="obsidian-embed-image">',
 	);
+});
+
+test("looks up a `..`-relative embed under the key the writer stores", () => {
+	// `canvas/index.ts` folds `notes/../Assets/clip.png` to `assets/clip.png`
+	// when it builds the map; the renderer has to fold the same way or the
+	// asset silently falls back to a route and 404s.
+	const html = renderMarkdown("![[notes/../Assets/clip.png]]", {
+		assets: { "assets/clip.png": "data:image/png;base64,AAAA" },
+	});
+	expect(html).toContain('<img src="data:image/png;base64,AAAA"');
+});
+
+test("embeds every format the shared table lists, for images", () => {
+	// The tables are the source of truth, so this test cannot fall behind them:
+	// adding a format to one is a failing test until a renderer handles it.
+	for (const ext of IMAGE_EXTS) {
+		const html = renderMarkdown(`![[assets/file.${ext}]]`);
+		expect(html).toContain(`<img src="/assets/file.${ext}"`);
+		expect(html).toContain('class="obsidian-embed-image"');
+	}
+});
+
+test("embeds every format the shared table lists, for audio and video", () => {
+	for (const ext of AUDIO_EXTS) {
+		expect(renderMarkdown(`![[assets/file.${ext}]]`)).toContain(
+			`<audio controls src="/assets/file.${ext}"`,
+		);
+	}
+	for (const ext of VIDEO_EXTS) {
+		expect(renderMarkdown(`![[assets/file.${ext}]]`)).toContain(
+			`<video controls src="/assets/file.${ext}"`,
+		);
+	}
+	// A card gets the same figure-with-a-caption-bar a note does, from the same
+	// builder, so the two renderers cannot drift apart again.
+	expect(renderMarkdown(`![[assets/file.${PDF_EXT}]]`)).toContain(
+		`<iframe class="obsidian-pdf-frame" src="/assets/file.${PDF_EXT}" title="file.${PDF_EXT}"`,
+	);
+});
+
+test("inlines an accepted image format supplied as a data URL", () => {
+	// The asset map carries attachments as base64, so a format the data-URL
+	// check does not know is not sanitized away: the embed silently degrades to
+	// a bare filename. Every format the table lists has to survive being inlined.
+	for (const ext of IMAGE_EXTS) {
+		const html = renderMarkdown(`![[assets/file.${ext}]]`, {
+			assets: {
+				[`assets/file.${ext}`]: `data:image/${ext === "svg" ? "svg+xml" : ext};base64,AAAA`,
+			},
+		});
+		expect(html).toContain('<img src="data:image/');
+	}
+});
+
+test("carries a PDF page and height into the frame, like the markdown pipeline", () => {
+	// Obsidian reads both knobs off the subpath. Dropping them silently is how
+	// the canvas renderer came to disagree with the note renderer in the first
+	// place, so they are pinned here.
+	const paged = renderMarkdown("![[assets/doc.pdf#page=3]]");
+	expect(paged).toContain('<iframe class="obsidian-pdf-frame" src="/assets/doc.pdf#page=3"');
+	expect(paged).toContain('width="100%" height="600px"');
+
+	// The default is the note's 600px, not the browser's, which left a card
+	// showing a few pixels of page one.
+	expect(renderMarkdown("![[assets/doc.pdf]]")).toContain('height="600px"');
+
+	const sized = renderMarkdown("![[assets/doc.pdf#height=400]]");
+	// The height is an attribute of the embed, so it must not reach the URL the
+	// frame loads.
+	expect(sized).toContain('<iframe class="obsidian-pdf-frame" src="/assets/doc.pdf"');
+	expect(sized).toContain('height="400px"');
+
+	// A size pipe still wins over the subpath height, the way it does for every
+	// other embed.
+	const piped = renderMarkdown("![[assets/doc.pdf|240]]");
+	expect(piped).toContain('style="width:240px;"');
+
+	// The bar names the file and links out to it.
+	expect(paged).toContain('<span class="obsidian-pdf-name">doc');
+	expect(paged).toContain('href="/assets/doc.pdf#page=3" target="_blank"');
 });
 
 test("renders embed size syntax", () => {
@@ -240,7 +321,55 @@ test("embeds a referenced Markdown note with a recursion limit", () => {
 	});
 	expect(html).toContain("<h1>Welcome</h1>");
 	expect(html).toContain('class="obsidian-embed-note"');
-	expect(html).toContain("/docs/welcome");
+	expect(html).toContain("/docs/Welcome");
+});
+
+test("embeds a note whose title contains a dot", () => {
+	// A prose title like `Chapter 1. Introduction` is a note name, not a file
+	// called `Chapter 1` with an extension of `. introduction` — reading it as
+	// an extension made the lookup miss and the embed degrade to a plain link.
+	const html = renderMarkdown("![[Chapter 1. Introduction]]", {
+		notes: { "chapter 1. introduction.md": "# Chapter 1" },
+		fileRoutePrefix: "/docs",
+	});
+	expect(html).toContain("<h1>Chapter 1</h1>");
+	expect(html).toContain('class="obsidian-embed-note"');
+});
+
+test("embeds only the section a subpath names", () => {
+	// A `![[Note#Heading]]` in a card used to inline the whole note and drop
+	// the fragment; it now slices with the same rules the Markdown plugin's
+	// transclusion pass uses.
+	const notes = {
+		"note.md": [
+			"# Chapter",
+			"",
+			"Intro text.",
+			"",
+			"## Target",
+			"",
+			"Wanted body.",
+			"",
+			"## Other",
+			"",
+			"Not wanted.",
+		].join("\n"),
+	};
+
+	const whole = renderMarkdown("![[Note]]", { notes });
+	expect(whole).toContain("Wanted body.");
+	expect(whole).toContain("Not wanted.");
+
+	const section = renderMarkdown("![[Note#Target]]", { notes });
+	expect(section).toContain("Wanted body.");
+	expect(section).not.toContain("Not wanted.");
+	expect(section).not.toContain("Intro text.");
+
+	// A heading the note does not contain falls back to the whole note rather
+	// than rendering an empty card.
+	const missing = renderMarkdown("![[Note#Nonexistent]]", { notes });
+	expect(missing).toContain("Wanted body.");
+	expect(missing).toContain("Not wanted.");
 });
 
 test("renders Obsidian callouts", () => {
@@ -288,8 +417,76 @@ test("renders footnotes", () => {
 	expect(html).toContain("The note body.");
 });
 
+test("renders inline footnotes whose content holds markdown", () => {
+	const html = renderMarkdown("Text^[with **bold** and [docs](https://example.com) here].");
+
+	expect(html).toContain("canvas-footnote-ref");
+	expect(html).toContain("canvas-footnotes");
+	expect(html).toContain("<strong>bold</strong>");
+	expect(html).toContain('href="https://example.com"');
+	expect(html).toContain("canvas-footnote-backref");
+});
+
+test("numbers inline and label footnotes in one sequence", () => {
+	const html = renderMarkdown("A^[first inline] and B[^1].\n\n[^1]: The label one.");
+
+	expect(html).toContain('id="canvas-fnref-1"><a href="#canvas-fn-1">1</a>');
+	expect(html).toContain('id="canvas-fnref-2"><a href="#canvas-fn-2">2</a>');
+	expect(html).toContain("first inline");
+	expect(html).toContain("The label one.");
+});
+
+test("leaves an unclosed inline footnote as written", () => {
+	expect(renderMarkdown("Text ^[dangling")).toContain("^[dangling");
+});
+
+test("leaves an inline footnote opener inside a code span alone", () => {
+	const html = renderMarkdown("`^[not a footnote]`");
+
+	expect(html).not.toContain("canvas-footnote-ref");
+	expect(html).toContain("^[not a footnote]");
+});
+
 test("emits mermaid placeholder for mermaid fences", () => {
 	const html = renderMarkdown("```mermaid\ngraph TD\nA-->B\n```");
-	expect(html).toContain("canvas-mermaid-block");
+	expect(html).toContain("obsidian-mermaid-block");
 	expect(html).toContain("data-code=");
+});
+
+test("renders Obsidian highlights the way a note page does", () => {
+	// The same pattern and the same `====` exemption as the Markdown plugin, so
+	// a card and a note page cannot disagree about where a span ends.
+	expect(renderMarkdown("==mark==")).toContain("<mark>mark</mark>");
+	expect(renderMarkdown("a ==key=value== b")).toContain("<mark>key=value</mark>");
+	expect(renderMarkdown("====")).toContain("====");
+	expect(renderMarkdown("====")).not.toContain("<mark>");
+	// A span inside inline code stays literal.
+	expect(renderMarkdown("`==code==`")).toContain("<code>==code==</code>");
+	expect(renderMarkdown("`==code==`")).not.toContain("<mark>");
+});
+
+test("embeds only the block a `^id` subpath names", () => {
+	// `extractBlockSection` takes the bare id and prepends the `^` itself, so a
+	// subpath arriving as `#^id` must not carry the caret through — nothing
+	// matched and the embed silently fell back to the whole note.
+	const notes = {
+		"note.md": [
+			"# Note",
+			"",
+			"Intro paragraph.",
+			"",
+			"## Target",
+			"",
+			"The wanted block ^wanted",
+			"",
+			"## Other",
+			"",
+			"Not wanted.",
+		].join("\n"),
+	};
+
+	const block = renderMarkdown("![[Note#^wanted]]", { notes });
+	expect(block).toContain("The wanted block");
+	expect(block).not.toContain("Not wanted.");
+	expect(block).not.toContain("Intro paragraph.");
 });

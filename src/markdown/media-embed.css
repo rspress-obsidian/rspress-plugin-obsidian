@@ -1,0 +1,111 @@
+/* PDF embeds: a caption bar naming the document, and the frame below it.
+ *
+ * Shared by the Markdown pipeline and the canvas renderer, which both emit the
+ * markup in `src/markdown/media-html.ts`, so this file is imported by both
+ * feature stylesheets. Kept in one place because the two renderers drifting
+ * apart is what made the canvas PDF a bare sliver while a note's was a full
+ * frame.
+ *
+ * The bar is the only ornament on the page. Everything else is the site's own
+ * border and radius, so the embed reads as part of the document rather than as
+ * an object pasted into it.
+ */
+
+/* The external-link arrow, drawn once as a mask so it takes `currentColor` and
+ * cannot shift with the reader's font stack the way the ↗ glyph does. */
+:root {
+	--obsidian-pdf-open-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3.2 1h5.8v5.8' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M9 1 3.6 6.4' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.obsidian-pdf {
+	margin: 1.25rem 0;
+	border: 1px solid var(--rp-c-divider, #e2e8f0);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--rp-c-bg, #fff);
+}
+
+.obsidian-pdf-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	/* Room for the text to be selected without the browser's own highlight
+	 * covering the whole bar. */
+	padding: 0.45rem 0.5rem 0.45rem 0.7rem;
+	background: var(--rp-c-bg-soft, #f6f7f9);
+	border-bottom: 1px solid var(--rp-c-divider, #e2e8f0);
+	font-size: 0.8125rem;
+	line-height: 1.5;
+}
+
+.obsidian-pdf-name {
+	color: var(--rp-c-text-1, #1f2937);
+	font-weight: 500;
+	/* Truncate rather than wrap: a long vault path must not push the action out
+	 * of the bar, and `min-width: 0` is what lets the ellipsis engage inside a
+	 * flex row. */
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.obsidian-pdf-ext,
+.obsidian-pdf-page {
+	color: var(--rp-c-text-3, #8a8f98);
+	font-weight: 400;
+}
+
+.obsidian-pdf-page {
+	flex: none;
+	padding-left: 0.1rem;
+}
+
+.obsidian-pdf-open {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25em;
+	flex: none;
+	margin-left: auto;
+	padding: 0.15rem 0.4rem;
+	border-radius: 4px;
+	color: var(--rp-c-brand, #3b82f6);
+	text-decoration: none;
+	transition: background 0.15s;
+}
+
+.obsidian-pdf-open:hover {
+	background: color-mix(in srgb, var(--rp-c-brand, #3b82f6) 12%, transparent);
+	text-decoration: underline;
+}
+
+.obsidian-pdf-open:focus-visible {
+	outline: 2px solid var(--rp-c-brand, #3b82f6);
+	outline-offset: 1px;
+}
+
+.obsidian-pdf-open-icon {
+	flex: none;
+	align-self: center;
+	width: 0.7em;
+	height: 0.7em;
+	background-color: currentColor;
+	opacity: 0.7;
+	-webkit-mask: var(--obsidian-pdf-open-icon) center / contain no-repeat;
+	mask: var(--obsidian-pdf-open-icon) center / contain no-repeat;
+}
+
+.obsidian-pdf-frame {
+	display: block;
+	border: 0;
+	/* Only ever seen where the browser cannot display the PDF, and there it is
+	 * the difference between an empty sheet of paper and a hole in the page. */
+	background: var(--rp-c-bg-soft, #f6f7f9);
+}
+
+/* A canvas card is narrow, and a vault path long enough to need truncating is
+ * the normal case there, so the bar drops to the card's own type size. */
+.canvas-node-text .obsidian-pdf-bar {
+	font-size: 0.75rem;
+	padding: 0.35rem 0.4rem 0.35rem 0.55rem;
+}

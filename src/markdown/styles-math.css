@@ -1,0 +1,6 @@
+/* Plugin stylesheet + KaTeX, injected as `globalStyles` when both
+ * `enableDefaultStyles` and `enableMath` are on. The KaTeX import stays
+ * unresolved here and is resolved by the consuming site build, so the fonts are
+ * served from the installed katex package rather than copied into this one. */
+@import "./styles.css";
+@import "katex/dist/katex.min.css";

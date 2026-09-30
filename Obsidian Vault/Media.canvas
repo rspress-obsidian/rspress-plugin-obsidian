@@ -1,0 +1,14 @@
+{
+	"nodes":[
+		{"id":"group","type":"group","x":-420,"y":-240,"width":1360,"height":760,"color":"5","label":"Media in canvas text cards"},
+		{"id":"card-image","type":"text","text":"## Image, unsized and sized\n\nThe same renderer as a note, from the same table of formats.\n\n![[media/gradient.png]]\n\n![[media/gradient.png|260]]\n\n![[media/diagram.svg|260]]","x":-380,"y":-180,"width":300,"height":420,"color":"4"},
+		{"id":"card-audio","type":"text","text":"## Audio\n\nEvery accepted audio format, each from a real file in the vault.\n\n![[media/tone.wav]]\n\n![[media/tone.mp3]]\n\n![[media/tone.ogg]]\n\n![[media/tone.m4a]]\n\n![[media/tone.flac]]","x":-60,"y":-180,"width":300,"height":420,"color":"3"},
+		{"id":"card-video","type":"text","text":"## Video\n\nH.264 and VP9, one second each.\n\n![[media/clip.mp4]]\n\n![[media/clip.webm|260]]","x":260,"y":-180,"width":300,"height":420,"color":"2"},
+		{"id":"card-pdf","type":"text","text":"## PDF\n\nThe two subpath knobs, read exactly as a note reads them: the page reaches the frame, the height stays on the embed.\n\n![[media/sample.pdf#page=2]]\n\n![[media/sample.pdf#height=220]]","x":580,"y":-180,"width":300,"height":420,"color":"1"}
+	],
+	"edges":[
+		{"id":"edge-1","fromNode":"card-image","fromSide":"right","toNode":"card-audio","toSide":"left"},
+		{"id":"edge-2","fromNode":"card-audio","fromSide":"right","toNode":"card-video","toSide":"left"},
+		{"id":"edge-3","fromNode":"card-video","fromSide":"right","toNode":"card-pdf","toSide":"left"}
+	]
+}

@@ -5,7 +5,7 @@ description: Full JSON Canvas 1.0 spec support — node types, edges, colors, an
 
 # Canvas Format
 
-This plugin parses and renders the JSON Canvas 1.0 structure in read-only mode. It preserves the node array z-order and validates required fields, IDs, geometry, edge references, and enum values.
+This plugin parses and renders the JSON Canvas 1.0 structure in the browser. Boards are read-only by default; the `editable` option adds editing controls. Parsed boards preserve the node array z-order and validate required fields, IDs, geometry, edge references, and enum values.
 
 ## Node Types
 
@@ -52,7 +52,7 @@ Store Markdown content. Standard Markdown and common Obsidian link/embed syntax 
 
 ### File Nodes
 
-Reference notes and attachments within your vault. These render as clickable cards that link to the corresponding Rspress page or as embedded media when the file is available at build time.
+Reference notes and attachments within your vault. These render as embedded media when the file is an image, audio, video, or PDF available at build time; as clickable cards linking to the corresponding Rspress page when the file is a published Markdown note; and as a plain filename card otherwise.
 
 ```json
 {
@@ -68,7 +68,7 @@ Reference notes and attachments within your vault. These render as clickable car
 }
 ```
 
-Markdown files (`.md`, `.mdx`, `.markdown`) are resolved to Rspress routes. Images, audio, video, and PDFs are embedded into generated pages as build-time data URLs. Other files remain link cards.
+Markdown notes (`.md`, `.mdx`) are resolved to Rspress routes; `.markdown` files are read as note text but are never published as a route. Images, audio, video, and PDFs are embedded into generated pages as build-time data URLs. Any other file falls back to a plain filename card.
 
 ### Link Nodes
 
@@ -108,7 +108,7 @@ Visual containers for organizing other nodes.
 }
 ```
 
-Groups are visual containers rendered according to their canvas array z-order, with a dashed border and optional label. Background images support `cover`, `ratio`, and `repeat` styles.
+Groups are visual containers with a dashed border and optional label. They are re-ranked at render time so groups always paint beneath other nodes, regardless of their order in the canvas file. Background images support `cover`, `ratio`, and `repeat` styles.
 
 ## Edges
 
@@ -134,7 +134,7 @@ Edges render as smooth cubic Bézier curves between the requested node sides. Th
 | `toSide` | `top`, `right`, `bottom`, `left` | center of node |
 | `fromEnd` | `none`, `arrow` | `none` |
 | `toEnd` | `none`, `arrow` | `arrow` |
-| `color` | hex or preset `"1"`–`"6"` | `#999999` |
+| `color` | hex or preset `"1"`–`"6"` | theme default (`var(--canvas-edge-color)` — `#94a3b8` light / `#444444` dark) |
 | `label` | any string | none |
 
 Hovering or selecting a node highlights all connected edges. Heading subpaths (`#heading`) and block subpaths (`#^block-id`) are resolved for Markdown file cards.
@@ -153,7 +153,7 @@ The default viewer is read-only. With `editable: true`, cards and edges can be c
 
 ## Graph integration
 
-With `pluginGraphview()` enabled, Canvas references can contribute to the documentation graph:
+With `graphview()` enabled, Canvas references can contribute to the documentation graph:
 
 - Markdown file nodes create edges to the matching published page;
 - wikilinks, Markdown links, and tags inside text nodes are extracted;

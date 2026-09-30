@@ -1,0 +1,22 @@
+[
+  "getting-started",
+  {
+    "type": "dir",
+    "name": "markdown",
+    "label": "Markdown",
+    "collapsed": true
+  },
+  {
+    "type": "dir",
+    "name": "canvas",
+    "label": "Canvas",
+    "collapsed": true
+  },
+  {
+    "type": "dir",
+    "name": "graph",
+    "label": "Graph View",
+    "collapsed": true
+  },
+  "obsidian-compatibility"
+]

@@ -1,10 +1,17 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { slug } from "github-slugger";
-import { parseCanvas } from "./parser";
-import type { CanvasPluginOptions } from "./types";
+import { isRealPathInsideRoot } from "../markdown/utils.js";
+import type { CanvasBoardRoute } from "../shared/canvas-routes.js";
+import { setCanvasRoutes } from "../shared/canvas-routes.js";
+import { NOTE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
+import { stripFrontmatter } from "../shared/frontmatter.js";
+import { normalizeFsPath } from "../shared/route-path.js";
+import { parseCanvas } from "./parser.js";
+import type { CanvasPluginOptions } from "./types.js";
+import { normalizeAssetKey } from "./utils/asset-key.js";
 
 const MIME_TYPES: Record<string, string> = {
 	".avif": "image/avif",
@@ -26,7 +33,6 @@ const MIME_TYPES: Record<string, string> = {
 	".webm": "video/webm",
 	".webp": "image/webp",
 };
-const MARKDOWN_EXTENSIONS = new Set([".md", ".mdx", ".markdown"]);
 
 function normalizeRelativePath(value: string): string {
 	return value
@@ -36,29 +42,27 @@ function normalizeRelativePath(value: string): string {
 		.join("/");
 }
 
-function normalizeAssetKey(value: string): string {
-	const [assetPath] = value.split("#");
-	return normalizeRelativePath(assetPath || "").toLowerCase();
-}
-
 function getSafeVaultPath(vaultRoot: string, relativePath: string): string | null {
 	const root = path.resolve(vaultRoot);
 	const candidate = path.resolve(root, relativePath);
 	if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) return null;
-	return candidate;
-}
-
-function stripFrontmatter(content: string): string {
-	const trimmed = content.trim();
-	if (!trimmed.startsWith("---")) return content;
-	const lines = trimmed.split("\n");
-	const endIndex = lines.findIndex((line, index) => index > 0 && /^---\s*$/.test(line.trim()));
-	return endIndex === -1
-		? content
-		: lines
-				.slice(endIndex + 1)
-				.join("\n")
-				.trim();
+	// Lexical containment is not containment: a symlink inside a shared vault
+	// resolves to a path outside it, and both the read and the data URL published
+	// into `public/__canvases__` would follow it. Re-run the prefix test on the
+	// real paths, and treat an unresolvable path (a broken link, a missing file)
+	// as unsafe rather than reading through it.
+	let realRoot: string;
+	let realCandidate: string;
+	try {
+		realRoot = realpathSync(root);
+		realCandidate = realpathSync(candidate);
+	} catch {
+		return null;
+	}
+	// `realpathSync` can hand back an extended-length path (`\\?\C:\vault`) on
+	// Windows where `root` did not, so compare with the prefix stripped.
+	if (!isRealPathInsideRoot(realCandidate, realRoot)) return null;
+	return realCandidate;
 }
 
 function normalizeHeading(value: string): string {
@@ -101,7 +105,13 @@ function resolveSubpath(content: string, subpath: string): { content: string; er
 function extractAssetTargets(markdown: string): string[] {
 	const targets = new Set<string>();
 	for (const match of markdown.matchAll(/!\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g)) {
-		if (match[1]) targets.add(match[1].trim());
+		// A subpath is a location inside the document, not part of its name, so
+		// `![[media/sample.pdf#page=2]]` is a request for `media/sample.pdf`. Kept
+		// whole, the read looked for a file with a `#` in its name, failed, and the
+		// board shipped without the asset — leaving a PDF card pointing at a URL
+		// that 404s.
+		const target = match[1]?.split("#")[0]?.trim();
+		if (target) targets.add(target);
 	}
 	for (const match of markdown.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g)) {
 		if (match[1] && !/^(?:https?:|data:|\/)/i.test(match[1])) targets.add(match[1]);
@@ -131,12 +141,20 @@ async function createAssetDataUrl(
 }
 
 async function enrichCanvas(canvasJson: string, vaultRoot: string): Promise<string> {
-	const canvasData = JSON.parse(canvasJson) as {
-		nodes?: Array<Record<string, unknown>>;
-		assets?: Record<string, string>;
-		notes?: Record<string, string>;
-	};
-	if (!canvasData || !Array.isArray(canvasData.nodes)) return canvasJson;
+	// One pass, decode and validation together: `parseCanvas` JSON.parses and
+	// checks the shape itself, so the board no longer gets a lenient parse here
+	// and a second `parseCanvas` of the enriched output — which re-parsed every
+	// base64 asset it had just embedded — only to throw that result away.
+	// Rejecting up front also skips the asset work for a board that would fail
+	// validation anyway. Like the old trailing check, a bad board throws and the
+	// caller publishes the original JSON with a logged error.
+	const canvasData = parseCanvas(canvasJson);
+
+	// A dropped node is a silent content loss unless it is reported, so the
+	// tolerance in `parseCanvas` is only safe because this prints what it skipped.
+	for (const problem of canvasData.problems ?? []) {
+		console.warn(`[rspress-plugin-obsidian:canvas] ${problem}`);
+	}
 
 	const assets: Record<string, string> = { ...(canvasData.assets || {}) };
 	const notes: Record<string, string> = { ...(canvasData.notes || {}) };
@@ -149,23 +167,26 @@ async function enrichCanvas(canvasJson: string, vaultRoot: string): Promise<stri
 	for (const node of canvasData.nodes) {
 		if (node.type === "file" && typeof node.file === "string") {
 			const extension = path.extname(node.file).toLowerCase();
-			if (MARKDOWN_EXTENSIONS.has(extension)) {
+			if (NOTE_MARKDOWN_EXTENSIONS.has(extension)) {
 				const safePath = getSafeVaultPath(vaultRoot, node.file);
-				if (safePath) {
-					try {
-						let content = stripFrontmatter(await readFile(safePath, "utf-8"));
-						notes[normalizeAssetKey(node.file)] = content;
-						if (typeof node.subpath === "string" && node.subpath.startsWith("#")) {
-							const resolved = resolveSubpath(content, node.subpath);
-							content = resolved.content;
-							if (resolved.error) node.isError = true;
-						}
-						node.fileContent = content;
-					} catch {
-						console.warn(
-							`[rspress-plugin-obsidian-canvas] Could not load vault file: ${node.file}`,
-						);
+				let content: string | null = null;
+				try {
+					// A rejected path (missing, or a symlink resolving outside the vault)
+					// is skipped exactly like an unreadable file.
+					if (safePath) content = stripFrontmatter(await readFile(safePath, "utf-8"));
+				} catch {
+					content = null;
+				}
+				if (content === null) {
+					console.warn(`[rspress-plugin-obsidian:canvas] Could not load vault file: ${node.file}`);
+				} else {
+					notes[normalizeAssetKey(node.file)] = content;
+					if (typeof node.subpath === "string" && node.subpath.startsWith("#")) {
+						const resolved = resolveSubpath(content, node.subpath);
+						content = resolved.content;
+						if (resolved.error) node.isError = true;
 					}
+					node.fileContent = content;
 				}
 			} else {
 				const asset = await registerAsset(node.file);
@@ -187,19 +208,18 @@ async function enrichCanvas(canvasJson: string, vaultRoot: string): Promise<stri
 		}
 	}
 
-	const markdownSources = canvasData.nodes
-		.filter((node) => node.type === "text" || typeof node.fileContent === "string")
-		.map((node) => (node.type === "text" ? node.text : node.fileContent))
-		.filter((value): value is string => typeof value === "string");
+	const markdownSources = canvasData.nodes.flatMap((node) => {
+		if (node.type === "text") return [node.text];
+		if (node.type === "file" && typeof node.fileContent === "string") return [node.fileContent];
+		return [];
+	});
 	for (const source of markdownSources) {
 		for (const target of extractAssetTargets(source)) await registerAsset(target);
 	}
 
 	if (Object.keys(assets).length > 0) canvasData.assets = assets;
 	if (Object.keys(notes).length > 0) canvasData.notes = notes;
-	const enrichedJson = JSON.stringify(canvasData);
-	parseCanvas(enrichedJson);
-	return enrichedJson;
+	return JSON.stringify(canvasData);
 }
 
 function resolveCanvasRoute(filePath: string, vaultRoot: string, routePrefix: string): string {
@@ -215,7 +235,7 @@ function resolveCanvasRoute(filePath: string, vaultRoot: string, routePrefix: st
 	return `${prefix}/${routeParts.join("/")}`.replace(/\/{2,}/g, "/");
 }
 
-export { CanvasParseError, parseCanvas } from "./parser";
+export { CanvasParseError, parseCanvas } from "./parser.js";
 export type {
 	BackgroundStyle,
 	CanvasColor,
@@ -231,22 +251,83 @@ export type {
 	EdgeEnd,
 	NodeSide,
 	NodeType,
-} from "./types";
-export { renderMarkdown, sanitizeUrl } from "./utils/markdown";
-export { resolveFileRoute } from "./utils/resolver";
+} from "./types.js";
+export { renderMarkdown, sanitizeUrl } from "./utils/markdown.js";
+export { resolveFileRoute } from "./utils/resolver.js";
 
-export function pluginObsidianCanvas(options?: CanvasPluginOptions): RspressPlugin {
+/**
+ * Skipped no matter what `exclude` says. The default `include`
+ * (`**\/*.canvas`) walks the whole tree, so without these a dependency
+ * install, a build output or VCS metadata inside the vault costs glob time at
+ * best and publishes a stray canvas from `node_modules` at worst. User
+ * entries are appended to this list, so `exclude` adds patterns rather than
+ * replacing them.
+ */
+const DEFAULT_EXCLUDES = [
+	"**/node_modules/**",
+	"**/dist/**",
+	"**/.git/**",
+	"**/doc_build/**",
+	"**/coverage/**",
+];
+
+/**
+ * `canvasFiles.map(...)` under `Promise.all` starts a read, a base64 encode and
+ * a markdown render for every board at once; a vault with hundreds of canvases
+ * spikes open descriptors and memory together. Eight in flight keeps the disk
+ * busy without the cliff, results keep input order, and the per-route collision
+ * check still runs synchronously before each worker's first `await`.
+ */
+async function mapWithLimit<T, R>(
+	items: readonly T[],
+	limit: number,
+	worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let next = 0;
+	const runners = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+		for (;;) {
+			const index = next;
+			next += 1;
+			if (index >= items.length) return;
+			results[index] = await worker(items[index] as T);
+		}
+	});
+	await Promise.all(runners);
+	return results;
+}
+
+/**
+ * Canvas feature: publishes every `.canvas` board under `routePrefix`, with
+ * assets and note content inlined into the board JSON at build time.
+ *
+ * @param options - Vault location, route and scan filters, viewer behaviour;
+ *   all fields optional. See {@link CanvasPluginOptions} for details.
+ * @returns An {@link RspressPlugin} ready to append to `plugins:`.
+ */
+export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 	const resolvedOptions = {
-		vaultRoot: options?.vaultRoot || process.cwd(),
+		// Deferred to `addPages`: the plugin factory runs while the config is
+		// being assembled, before Rspress's content root is known. See the
+		// `vaultRoot` fallback there.
+		vaultRoot: options?.vaultRoot,
 		routePrefix: options?.routePrefix || "/canvas",
 		include: options?.include || ["**/*.canvas"],
-		exclude: options?.exclude || [],
+		exclude: [...DEFAULT_EXCLUDES, ...(options?.exclude ?? [])],
 		fileRoutePrefix: options?.fileRoutePrefix,
 		linkPreview: options?.linkPreview || false,
 		editable: options?.editable || false,
 		editorTitle: options?.editorTitle || "Canvas editor",
 		iframeSandbox: options?.iframeSandbox || "allow-scripts allow-same-origin allow-popups",
+		// Defaults to true: the canvas stylesheet has always been injected, so the
+		// opt-out is additive and existing sites keep their styling.
+		enableDefaultStyles: options?.enableDefaultStyles ?? true,
 	};
+	if (options?.vaultRoot && !options.fileRoutePrefix) {
+		console.warn(
+			"[rspress-plugin-obsidian:canvas] `vaultRoot` is set without `fileRoutePrefix`: canvas file cards link to `/Note`-style routes while the markdown plugin publishes vault pages under its own prefix (e.g. `/vault/Note`). Set `fileRoutePrefix` to that prefix to avoid broken links.",
+		);
+	}
 	const baseDir = import.meta.dirname || __dirname;
 	// Published (from dist/canvas.js / dist/canvas.cjs): chunks live at
 	// dist/canvas/components/*.js. Dev (src/canvas/index.ts): sibling
@@ -268,70 +349,89 @@ export function pluginObsidianCanvas(options?: CanvasPluginOptions): RspressPlug
 	}
 
 	return {
-		name: "rspress-plugin-obsidian-canvas",
-		globalStyles: stylePath,
+		name: "rspress-plugin-obsidian:canvas",
+		...(resolvedOptions.enableDefaultStyles && { globalStyles: stylePath }),
 		async addPages(config, _isProd) {
+			// The vault defaults to the Rspress content root — the same
+			// `config.root` rule `rootDir` uses below. `process.cwd()` was the
+			// old default, but that is usually the project root one level above
+			// the content, so an out-of-the-box `canvas()` found nothing.
+			const vaultRoot =
+				resolvedOptions.vaultRoot ?? path.resolve(process.cwd(), config.root ?? "docs");
 			// Runtime loading keeps fast-glob server-only in the published package.
 			const { default: glob } = await import("fast-glob");
 			const canvasFiles = await glob(resolvedOptions.include, {
 				ignore: resolvedOptions.exclude,
 				absolute: true,
-				cwd: resolvedOptions.vaultRoot,
+				cwd: vaultRoot,
+				// A symlinked canvas (or symlinked directory of them) inside the vault
+				// would otherwise be published from outside it. The path guard in
+				// `enrichCanvas` covers the files a canvas references; this covers the
+				// canvases themselves.
+				followSymbolicLinks: false,
 			});
 			const routeOwners = new Map<string, string>();
+			// Board → published route, handed to the shared registry the markdown
+			// plugin and the graph read (see src/shared/canvas-routes.ts).
+			const routeEntries: CanvasBoardRoute[] = [];
 
 			// Resolve the docs root for writing embed JSON into the public dir.
-			const rootDir =
-				config && typeof config === "object" && "root" in config
-					? String((config as Record<string, unknown>).root)
-					: path.join(process.cwd(), "docs");
+			// Same rule as the markdown hook: resolve Rspress's `root` against the
+			// working directory, falling back to `docs/`. Reading it via
+			// `"root" in config` used to stringify an explicitly-undefined root
+			// into the literal directory `undefined/public/__canvases__`.
+			const rootDir = path.resolve(process.cwd(), config.root ?? "docs");
 			const publicCanvasesDir = path.join(rootDir, "public", "__canvases__");
 
-			const pages = await Promise.all(
-				canvasFiles.map(async (filePath) => {
-					const routePath = resolveCanvasRoute(
-						filePath,
-						resolvedOptions.vaultRoot,
-						resolvedOptions.routePrefix,
+			const pages = await mapWithLimit(canvasFiles, 8, async (filePath) => {
+				const routePath = resolveCanvasRoute(filePath, vaultRoot, resolvedOptions.routePrefix);
+				const previousOwner = routeOwners.get(routePath);
+				if (previousOwner) {
+					throw new Error(
+						`[rspress-plugin-obsidian:canvas] Canvas route collision: ${routePath} is generated by both ${previousOwner} and ${filePath}`,
 					);
-					const previousOwner = routeOwners.get(routePath);
-					if (previousOwner) {
-						throw new Error(
-							`[rspress-plugin-obsidian-canvas] Canvas route collision: ${routePath} is generated by both ${previousOwner} and ${filePath}`,
-						);
-					}
-					routeOwners.set(routePath, filePath);
-					const canvasJson = await readFile(filePath, "utf-8");
-					let enrichedCanvasJson = canvasJson;
-					try {
-						enrichedCanvasJson = await enrichCanvas(canvasJson, resolvedOptions.vaultRoot);
-					} catch (error) {
-						console.error(
-							`[rspress-plugin-obsidian-canvas] Failed to process canvas file: ${filePath}`,
-							error,
-						);
-					}
+				}
+				routeOwners.set(routePath, filePath);
+				routeEntries.push({
+					absolutePath: filePath,
+					routePath,
+					source: normalizeFsPath(path.relative(vaultRoot, filePath)),
+				});
+				const canvasJson = await readFile(filePath, "utf-8");
+				let enrichedCanvasJson = canvasJson;
+				try {
+					enrichedCanvasJson = await enrichCanvas(canvasJson, vaultRoot);
+				} catch (error) {
+					console.error(
+						`[rspress-plugin-obsidian:canvas] Failed to process canvas file: ${filePath}`,
+						error,
+					);
+				}
 
-					// Write enriched JSON so `<CanvasEmbed src="X.canvas" />` can fetch it.
-					const relPath = path.relative(resolvedOptions.vaultRoot, filePath);
-					const jsonName = relPath.replace(/\.canvas$/i, ".json");
-					const outFilePath = path.join(publicCanvasesDir, jsonName);
-					try {
-						await mkdir(path.dirname(outFilePath), { recursive: true });
-						await writeFile(outFilePath, enrichedCanvasJson, "utf-8");
-					} catch (writeErr) {
-						console.error(
-							`[rspress-plugin-obsidian-canvas] Failed to write embed JSON: ${outFilePath}`,
-							writeErr,
-						);
-					}
+				// Write enriched JSON so `<CanvasEmbed src="X.canvas" />` can fetch it.
+				const relPath = path.relative(vaultRoot, filePath);
+				const jsonName = relPath.replace(/\.canvas$/i, ".json");
+				const outFilePath = path.join(publicCanvasesDir, jsonName);
+				try {
+					await mkdir(path.dirname(outFilePath), { recursive: true });
+					await writeFile(outFilePath, enrichedCanvasJson, "utf-8");
+				} catch (writeErr) {
+					console.error(
+						`[rspress-plugin-obsidian:canvas] Failed to write embed JSON: ${outFilePath}`,
+						writeErr,
+					);
+				}
 
-					return {
-						routePath,
-						content: `<CanvasViewer canvasJson={${JSON.stringify(enrichedCanvasJson)}} fileRoutePrefix={${JSON.stringify(resolvedOptions.fileRoutePrefix)}} linkPreview={${JSON.stringify(resolvedOptions.linkPreview)}} editable={${JSON.stringify(resolvedOptions.editable)}} editorTitle={${JSON.stringify(resolvedOptions.editorTitle)}} iframeSandbox={${JSON.stringify(resolvedOptions.iframeSandbox)}} />`,
-					};
-				}),
-			);
+				return {
+					routePath,
+					content: `<CanvasViewer canvasJson={${JSON.stringify(enrichedCanvasJson)}} fileRoutePrefix={${JSON.stringify(resolvedOptions.fileRoutePrefix)}} linkPreview={${JSON.stringify(resolvedOptions.linkPreview)}} editable={${JSON.stringify(resolvedOptions.editable)}} editorTitle={${JSON.stringify(resolvedOptions.editorTitle)}} iframeSandbox={${JSON.stringify(resolvedOptions.iframeSandbox)}} />`,
+				};
+			});
+			// Publish the route table before returning: `addPages` completes before
+			// any page compiles, so by the time a `[[Board.canvas]]` resolves the
+			// registry is populated (and a scan that found no boards correctly
+			// leaves it empty, disabling canvas-aware resolution).
+			setCanvasRoutes(routeEntries);
 			return pages;
 		},
 		markdown: { globalComponents: [componentPath, embedComponentPath] },

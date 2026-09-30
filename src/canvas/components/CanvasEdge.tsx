@@ -1,6 +1,6 @@
 import { memo } from "react";
-import type { CanvasEdgeData, CanvasNode } from "../types";
-import { resolveColor } from "../utils/color";
+import type { CanvasEdgeData, CanvasNode } from "../types.js";
+import { resolveColor } from "../utils/color.js";
 
 interface Point {
 	x: number;
@@ -114,6 +114,17 @@ export const CanvasEdge = memo(function CanvasEdge({
 		<g
 			className={isHighlighted ? "canvas-edge-highlighted" : "canvas-edge"}
 			role={onSelect ? "button" : undefined}
+			// SVG elements take no focus by default, so a mouse-free user could not
+			// reach an edge to select or delete it.
+			tabIndex={onSelect ? 0 : undefined}
+			aria-label={onSelect ? (edge.label ?? "Canvas edge") : undefined}
+			onKeyDown={(event) => {
+				if (!onSelect) return;
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					onSelect(edge.id);
+				}
+			}}
 			onClick={(event) => {
 				if (onSelect) {
 					event.stopPropagation();

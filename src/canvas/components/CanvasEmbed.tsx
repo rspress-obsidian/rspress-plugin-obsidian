@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { CanvasData } from "../types";
-import { CanvasRenderer } from "./CanvasRenderer";
+import type { CanvasData } from "../types.js";
+import { CanvasRenderer } from "./CanvasRenderer.js";
 
 interface CanvasEmbedProps {
 	src: string;
@@ -64,13 +64,16 @@ export default function CanvasEmbed({
 }: CanvasEmbedProps) {
 	const [data, setData] = useState<CanvasData | null>(null);
 	const [status, setStatus] = useState<"loading" | "error" | "loaded">("loading");
+	// Resolved during render so the fetch and the renderer's remount key share one
+	// value: switching `src` (or the base path) has to remount the renderer, which
+	// seeds its editor state from `data` once.
+	const url = resolveCanvasJsonUrl(src, basePath);
 
 	useEffect(() => {
 		let cancelled = false;
 
 		const loadCanvas = async () => {
 			setStatus("loading");
-			const url = resolveCanvasJsonUrl(src, basePath);
 
 			try {
 				const res = await fetch(url);
@@ -95,7 +98,7 @@ export default function CanvasEmbed({
 		return () => {
 			cancelled = true;
 		};
-	}, [src, basePath]);
+	}, [url, src]);
 
 	if (status === "loading") {
 		return (
@@ -136,6 +139,9 @@ export default function CanvasEmbed({
 
 	return (
 		<CanvasRenderer
+			// Same reason as CanvasViewer: the renderer seeds state from `data` once,
+			// so a different canvas has to remount it or the old one stays on screen.
+			key={url}
 			data={data}
 			fileRoutePrefix={fileRoutePrefix}
 			linkPreview={linkPreview}

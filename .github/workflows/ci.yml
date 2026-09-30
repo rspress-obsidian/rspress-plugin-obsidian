@@ -6,20 +6,52 @@ on:
   pull_request:
     branches: [main, master]
 
+# Every job here only reads the checkout; the release workflow carries the
+# write scopes it needs.
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The package claims Windows, macOS and Linux, so the whole pipeline runs on
+    # all three: path handling, line endings and shell quoting are exactly where
+    # a Linux-only matrix stays green while the package is broken elsewhere.
+    runs-on: ${{ matrix.os }}
     strategy:
+      # One platform failing must not cancel the other two — the failure report
+      # is the point of the matrix.
+      fail-fast: false
       matrix:
-        bun-version: [1.3.x, 1.4.x]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        bun-version: [1.3.x]
+        include:
+          # Bun's own runtime differences are platform-independent, so the
+          # second runtime is exercised on one OS instead of tripling the job
+          # count.
+          - os: ubuntu-latest
+            bun-version: 1.4.x
+    defaults:
+      run:
+        # Git Bash ships with all three runners and is the one shell whose
+        # `test -f`, `cmd && cmd` and `VAR=1 cmd` behave everywhere. What this
+        # matrix is proving is the behaviour of `bun.exe` / `node.exe` on each
+        # platform, not PowerShell's quoting rules.
+        shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ matrix.bun-version }}
+
+      # The publish test packs the tarball with `npm`, and the runner images
+      # differ in whether npm is on PATH (and at which version) by default.
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -33,7 +65,18 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Type check the documented configs
+        # Runs after the build because it resolves `rspress-plugin-obsidian`
+        # through the package's own `types` entry — a config that names a
+        # removed export, a misspelled option, or a plugin shape Rspress rejects
+        # is a string in a fenced code block, so no other check here sees it.
+        run: bun run test:doc-examples
+
       - name: Verify dist output
+        # The job-level `defaults.run.shell: bash` above already covers this;
+        # the step names it too because `test -f` and `&&`-chaining are
+        # POSIX-shell syntax and the step must stay portable if it moves.
+        shell: bash
         run: |
           test -f dist/index.js
           test -f dist/index.cjs
@@ -41,16 +84,129 @@ jobs:
           test -f dist/markdown/index.d.ts
           test -f dist/canvas/index.d.ts
           test -f dist/graph/index.d.ts
+          test -f dist/graph/runtime/GraphPanel.d.ts
           test -f dist/styles.css
           bun run test:publish
 
-  lint:
+      # The exports map and the declaration files it points at are exactly what
+      # these check: `publint` for exports/`files`/types-form mismatches, and
+      # `attw --pack` for what Node16, bundler and `nodenext` consumers actually
+      # resolve through the packed tarball. Declarations that only typecheck
+      # inside this repo (extensionless relative specifiers, `.ts` suffixes)
+      # are what these two exist to catch.
+      #
+      # Two attw rules are ignored, deliberately:
+      #   - `no-resolution`: `node10` (legacy TS `moduleResolution: "node"`)
+      #     has no way to reach a subpath without root-level proxy files, and
+      #     attw resolves the `.css` subpaths as if they were TypeScript
+      #     modules. Neither is a supported consumption path.
+      #   - `cjs-resolves-to-esm`: the two graph runtime components are
+      #     browser-only and ship ESM alone; the `default` condition keeps
+      #     `require.resolve` working (see test/publish/dist.test.ts), and
+      #     `require(esm)` loads them on every Node version we support
+      #     (engines: node >=22.14.0).
+      # `-f ascii` because the table/auto formatters crash on this machine's
+      # hoisted `ansi-regex` v6 (`ansiRegex is not a function`).
+      - name: Public API checks
+        shell: bash
+        run: bun run test:types
+
+      # scripts/check-coverage.ts holds both floors for the shipped source: 0.85
+      # per src/ module (with documented exceptions) and 97% overall. bunfig's
+      # coverageThreshold is only a backstop — Bun applies it per file and has no
+      # exception mechanism, so it cannot express either floor.
+      - name: Coverage gate
+        run: |
+          bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
+          bun scripts/check-coverage.ts 0.97
+
+      # The gate consumes `coverage/lcov.info` and then leaves it on the
+      # runner's disk. Upload it per matrix leg so a coverage regression can be
+      # diffed (and the numbers read) without reproducing the whole matrix
+      # locally — `always()` because a *failing* gate is exactly when the
+      # report is wanted. Legs that never reached the step upload nothing.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ matrix.os }}-bun-${{ matrix.bun-version }}
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # `docs:build` runs the plugin through Rspress' real build pipeline — the
+      # closest thing to a consumer build this repo has — and the integration
+      # suite then asserts what that build emitted. Both were Linux-only, which
+      # is how a plugin can pass every unit test and still fail to build a site
+      # on Windows.
+      - name: Build docs site
+        run: bun run docs:build
+
+      - name: Run rspress build integration tests
+        run: bun test test/markdown/integration.test.ts
+        env:
+          RUN_DOCS_BUILD_TESTS: "1"
+
+      # Wall-clock budgets are runner-dependent, so the benchmark suite asserts
+      # them only under RUN_BENCH_TESTS=1, and even then it is advisory: one slow
+      # 2-vCPU runner must not take the result above down with it. Only the
+      # Linux leg contributes a number.
+      - name: Benchmarks (advisory)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        run: RUN_BENCH_TESTS=1 bun test test/markdown/benchmark.test.ts
+
+  node:
+    # `engines` promises Node >= 22.14, but every other job runs Bun. Load both
+    # published entry formats under Node so a bundler-only regression (the CJS
+    # `import.meta.dirname` crash and the ESM dynamic-require failure both
+    # shipped once) cannot pass unnoticed. Bundler output is platform-neutral,
+    # so one OS covers it.
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22.x, 24.x]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.x
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Load every published entry under Node
+        # POSIX shell syntax (`for … done`, single-quoted `node -e` scripts) and
+        # multi-command fail-fast; named explicitly so this job can pick up
+        # another OS without the step silently turning into a no-op.
+        shell: bash
+        run: |
+          node -e 'const m = require("./dist/index.cjs"); if (typeof m.wikilink !== "function") process.exit(1)'
+          node --input-type=module -e 'const m = await import("./dist/index.js"); if (typeof m.wikilink !== "function") process.exit(1)'
+          for entry in markdown canvas graph; do
+            node -e "const m = require(\"./dist/$entry.cjs\"); if (Object.keys(m).length === 0) process.exit(1)"
+            node --input-type=module -e "const m = await import(\"./dist/$entry.js\"); if (Object.keys(m).length === 0) process.exit(1)"
+          done
+
+  lint:
+    # Biome's findings are source-level, not platform-level.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.x
 
@@ -61,24 +217,53 @@ jobs:
         run: bun run lint
 
   e2e:
-    runs-on: ubuntu-latest
+    # Chromium on Linux and macOS. Both installs are a download plus an
+    # unzip; the Windows image pulls a browser-dependency SDK chain that has
+    # nothing to do with this package.
     needs: [test, lint]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.x
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # `--with-deps` shells out to apt-get, which only exists on Linux; macOS
+      # ships the system libraries Chromium links against.
       - name: Install Playwright browsers
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium ${{ runner.os == 'Linux' && '--with-deps' || '' }}
 
+      # `playwright.config.ts` refuses to run against a `doc_build` older than
+      # its inputs, and the rspress build integration suite runs in the `test`
+      # matrix immediately after the same build.
       - name: Build docs site
         run: bun run docs:build
 
       - name: Run e2e tests
-        run: bunx playwright test --config test/e2e/playwright.config.ts
+        run: bun run test:e2e
+
+      # `trace: "on-first-retry"` plus `retries: 2` means a flaky or failing
+      # test leaves a trace under `test-results/`, and the CI reporter above
+      # writes the HTML report under `playwright-report/`. Both are gitignored
+      # and local-only unless uploaded — and a failure is exactly when they are
+      # needed, so this runs on failure and ignores legs where nothing was
+      # produced (e.g. the suite never started).
+      - name: Upload Playwright artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore

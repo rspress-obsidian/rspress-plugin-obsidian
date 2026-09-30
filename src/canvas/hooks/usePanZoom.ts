@@ -6,8 +6,73 @@ export interface Viewport {
 	zoom: number;
 }
 
-export function usePanZoom() {
-	const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+/** `localStorage` key prefix for a canvas viewport, one per board route. */
+export const VIEWPORT_KEY_PREFIX = "rspress-canvas-viewport:";
+
+/** Read a stored viewport, ignoring anything that is not a usable triple. */
+export function readStoredViewport(key: string | undefined): Viewport | undefined {
+	if (!key) return undefined;
+	try {
+		const raw = localStorage.getItem(key);
+		if (!raw) return undefined;
+		const parsed: unknown = JSON.parse(raw);
+		if (typeof parsed !== "object" || parsed === null) return undefined;
+		const { x, y, zoom } = parsed as Partial<Viewport>;
+		if (typeof x !== "number" || typeof y !== "number" || typeof zoom !== "number") {
+			return undefined;
+		}
+		// A stored zoom outside the hook's own range would restore a viewport the
+		// user cannot pan or zoom back out of.
+		if (!(zoom >= 0.1 && zoom <= 5)) return undefined;
+		if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+		return { x, y, zoom };
+	} catch {
+		// Storage disabled, or a value another version wrote.
+		return undefined;
+	}
+}
+
+function writeStoredViewport(key: string | undefined, viewport: Viewport): void {
+	if (!key) return;
+	try {
+		localStorage.setItem(key, JSON.stringify(viewport));
+	} catch {
+		// Private mode or a full quota: the canvas still works, it just re-fits.
+	}
+}
+
+/**
+ * The storage key for the board on the current route.
+ *
+ * The board is identified by the route it is published at: the `.canvas` format
+ * carries no view state, and Obsidian keeps the viewport in its own workspace
+ * file rather than in the board. Returns `undefined` where there is no document
+ * (SSR), so nothing is read or written there.
+ */
+export function viewportStorageKey(): string | undefined {
+	if (typeof window === "undefined") return undefined;
+	return `${VIEWPORT_KEY_PREFIX}${window.location.pathname}`;
+}
+
+/**
+ * Pan and zoom for a canvas, remembering the last position.
+ *
+ * The last viewport is stored per board, so a reopened canvas appears where the
+ * reader left it — the way Obsidian restores a canvas viewport. `onRestore`
+ * reports whether a stored viewport was adopted, so the caller can skip its
+ * one-off fit.
+ */
+export function usePanZoom(storageKey?: string, onRestore?: (restored: boolean) => void) {
+	const key = storageKey ?? viewportStorageKey();
+	const [viewport, setViewport] = useState<Viewport>(
+		() =>
+			readStoredViewport(key) ?? {
+				x: 0,
+				y: 0,
+				zoom: 1,
+			},
+	);
+	const restoredRef = useRef(false);
 	const isPanning = useRef(false);
 	const isSpacePressed = useRef(false);
 	const lastPointer = useRef({ x: 0, y: 0 });
@@ -24,7 +89,8 @@ export function usePanZoom() {
 			while (target && target !== el) {
 				const style = getComputedStyle(target);
 				const overflowY = style.overflowY;
-				const _overflowX = style.overflowX;
+				// Only the vertical axis is consulted: this handler zooms on deltaY, so
+				// a wide code block that scrolls horizontally must not swallow zoom.
 				const isScrollable =
 					(overflowY === "auto" || overflowY === "scroll") &&
 					target.scrollHeight > target.clientHeight;
@@ -114,6 +180,17 @@ export function usePanZoom() {
 		isPanning.current = false;
 	}, []);
 
+	// Report the stored viewport exactly once, before the caller's fit effect
+	// runs, so a reopened board is not immediately re-fitted.
+	// `onRestore` is a notification, not an input: re-running on identity changes
+	// would re-report, so only the storage key is a dependency.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: notify once per key
+	useEffect(() => {
+		if (restoredRef.current) return;
+		restoredRef.current = true;
+		onRestore?.(readStoredViewport(key) !== undefined);
+	}, [key]);
+
 	const transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`;
 
 	const zoomIn = useCallback(
@@ -126,10 +203,16 @@ export function usePanZoom() {
 	);
 	const resetZoom = useCallback(() => setViewport((p) => ({ ...p, zoom: 1, x: 0, y: 0 })), []);
 
+	useEffect(() => {
+		if (!restoredRef.current) return;
+		writeStoredViewport(key, viewport);
+	}, [viewport, key]);
+
 	return {
 		viewport,
 		setViewport,
 		transform,
+		containerRef,
 		setContainerRef,
 		handlePointerDown,
 		handlePointerMove,

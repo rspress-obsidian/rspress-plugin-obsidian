@@ -11,5 +11,14 @@
 		"ignoreDeprecations": "6.0"
 	},
 	"include": ["src/**/*.ts", "src/**/*.tsx"],
-	"exclude": ["dist", "node_modules", "test", "scripts", "doc_build"]
+	"exclude": [
+		"dist",
+		"node_modules",
+		"test",
+		"scripts",
+		"doc_build",
+		"src/**/*.test.ts",
+		"src/**/*.test.tsx",
+		"src/**/__tests__"
+	]
 }

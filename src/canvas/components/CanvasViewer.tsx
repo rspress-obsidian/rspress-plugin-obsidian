@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { parseCanvas } from "../parser";
-import { CanvasRenderer } from "./CanvasRenderer";
+import { parseCanvas } from "../parser.js";
+import { CanvasRenderer } from "./CanvasRenderer.js";
 
 interface CanvasViewerProps {
 	canvasJson: string;
@@ -34,6 +34,9 @@ export default function CanvasViewer({
 
 	return (
 		<CanvasRenderer
+			// The renderer seeds its editor state from `data` once, so a new canvas must
+			// remount it: without the key a swapped-in canvas would show the old cards.
+			key={canvasJson}
 			data={data}
 			fileRoutePrefix={fileRoutePrefix}
 			linkPreview={linkPreview}

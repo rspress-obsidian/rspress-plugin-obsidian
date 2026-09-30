@@ -12,22 +12,26 @@ import {
 	useState,
 } from "react";
 import { graphData } from "virtual-graph-data";
+import type { GraphViewGroup } from "../types.js";
+import {
+	createGraphIndex,
+	deriveGraphViewData,
+	type ForceGraphLink,
+	type ForceGraphNode,
+	type GraphViewFilters,
+	normalizeClientRoutePath,
+} from "./deriveGraphViewData.js";
+import { matchesGraphQuery, parseGraphQuery } from "./graph-query.js";
 import {
 	DARK_COLORS,
 	FONT_STACK,
 	type GraphViewColors,
 	LIGHT_COLORS,
 	mergeColors,
-} from "./canvas/colors";
-import {
-	createGraphIndex,
-	deriveGraphViewData,
-	type ForceGraphLink,
-	type ForceGraphNode,
-	normalizeClientRoutePath,
-} from "./deriveGraphViewData";
+} from "./palette/colors.js";
 
-export type { GraphViewColors } from "./canvas/colors";
+export type { GraphViewFilters } from "./deriveGraphViewData.js";
+export type { GraphViewColors } from "./palette/colors.js";
 
 interface GraphViewProps {
 	width: number;
@@ -35,6 +39,10 @@ interface GraphViewProps {
 	onNodeClick?: (routePath: string) => void;
 	onNodeHoverChange?: (label: string | null, x: number, y: number) => void;
 	colors?: GraphViewColors;
+	/** Which nodes to show: search text, depth, tag/orphan toggles. */
+	filters?: GraphViewFilters;
+	/** Colour groups; a node renders in the first group whose query matches. */
+	groups?: readonly GraphViewGroup[];
 }
 
 interface D3ForceHandle {
@@ -64,9 +72,13 @@ function isDarkMode(): boolean {
 }
 
 function useTheme(): boolean {
-	const [dark, setDark] = useState(() => isDarkMode());
+	// Seed `false` so the first client render matches the server output (where
+	// `document` does not exist). The effect reads the real theme after mount and
+	// the observer keeps it in sync, so hydration never mismatches in dark mode.
+	const [dark, setDark] = useState(false);
 
 	useEffect(() => {
+		setDark(isDarkMode());
 		const observer = new MutationObserver(() => {
 			setDark(isDarkMode());
 		});
@@ -137,9 +149,18 @@ export function GraphFallback({
 				<line x1="12" y1="8" x2="12" y2="12" />
 				<line x1="12" y1="16" x2="12.01" y2="16" />
 			</svg>
-			<span>Graph view unavailable</span>
+			<span>Graph view unavailable — install react-force-graph-2d</span>
 		</div>
 	);
+}
+
+export interface GraphViewStats {
+	nodes: number;
+	links: number;
+	neighborCount: number;
+	neighborTotal: number;
+	/** Nodes the render cap left out, so the panel can say the view is partial. */
+	truncatedCount: number;
 }
 
 export interface GraphViewHandle {
@@ -148,7 +169,7 @@ export interface GraphViewHandle {
 	zoomReset: () => void;
 	zoomToFit: () => void;
 	centerOnCurrent: () => void;
-	getStats: () => { nodes: number; links: number };
+	getStats: () => GraphViewStats;
 }
 
 /**
@@ -158,8 +179,21 @@ export interface GraphViewHandle {
  */
 const NODE_HIT_RADIUS = 5;
 
+/**
+ * Accept a group colour only if the runtime can actually paint it: an
+ * invalid `fillStyle` is silently ignored by canvas, which would bleed the
+ * previous node's colour into this one.
+ */
+function safeColor(value: string): string | undefined {
+	if (typeof value !== "string" || value.trim() === "") return undefined;
+	if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
+		return CSS.supports("color", value) ? value : undefined;
+	}
+	return value;
+}
+
 export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
-	{ width, height, onNodeClick, onNodeHoverChange, colors: customColors },
+	{ width, height, onNodeClick, onNodeHoverChange, colors: customColors, filters, groups },
 	ref,
 ) {
 	const { pathname } = useLocation();
@@ -172,7 +206,13 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 	const connectedSetRef = useRef<Set<string>>(new Set());
 	const hoveredLinkRef = useRef<ForceGraphLink | null>(null);
 	const forceRef = useRef<ForceGraphHandleRef | null>(null);
-	const statsRef = useRef({ nodes: 0, links: 0 });
+	const statsRef = useRef<GraphViewStats>({
+		nodes: 0,
+		links: 0,
+		neighborCount: 0,
+		neighborTotal: 0,
+		truncatedCount: 0,
+	});
 
 	const currentRoutePath = useMemo(() => normalizeClientRoutePath(pathname), [pathname]);
 
@@ -180,16 +220,64 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 	currentRoutePathRef.current = currentRoutePath;
 
 	const graphIndex = useMemo(() => createGraphIndex(graphData), []);
+
+	const filterQuery = filters?.query;
+	const filterDepth = filters?.depth;
+	const filterShowTags = filters?.showTags;
+	const filterShowOrphans = filters?.showOrphans;
+	const filterScope = filters?.scope;
+
 	const {
 		nodes: fgNodes,
 		links: fgLinks,
 		isLargeGraph,
 		isEmpty,
 	} = useMemo(() => {
-		const derived = deriveGraphViewData(graphIndex, currentRoutePath);
-		statsRef.current = { nodes: derived.nodes.length, links: derived.links.length };
+		const derived = deriveGraphViewData(graphIndex, currentRoutePath, {
+			query: filterQuery,
+			depth: filterDepth,
+			showTags: filterShowTags,
+			showOrphans: filterShowOrphans,
+			scope: filterScope,
+		});
+		statsRef.current = {
+			nodes: derived.nodes.length,
+			links: derived.links.length,
+			neighborCount: derived.neighborCount,
+			neighborTotal: derived.neighborTotal,
+			truncatedCount: derived.truncatedCount,
+		};
 		return derived;
-	}, [graphIndex, currentRoutePath]);
+	}, [
+		graphIndex,
+		currentRoutePath,
+		filterQuery,
+		filterDepth,
+		filterShowTags,
+		filterShowOrphans,
+		filterScope,
+	]);
+
+	// First matching group wins; the current page keeps its dedicated colour
+	// so "you are here" never hides behind a group.
+	const groupColorByNode = useMemo(() => {
+		const colorByNode = new Map<string, string>();
+		if (!groups?.length || fgNodes.length === 0) return colorByNode;
+		const compiled = groups.map((group) => ({
+			query: parseGraphQuery(group.query),
+			color: safeColor(group.color),
+		}));
+		for (const node of fgNodes) {
+			if (node.isCurrent) continue;
+			for (const group of compiled) {
+				if (group.color && matchesGraphQuery(node, group.query)) {
+					colorByNode.set(node.id, group.color);
+					break;
+				}
+			}
+		}
+		return colorByNode;
+	}, [fgNodes, groups]);
 
 	useImperativeHandle(
 		ref,
@@ -245,7 +333,7 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		};
 	}, []);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: isEmpty is a stable boolean; only route changes should re-center
+	// biome-ignore lint/correctness/useExhaustiveDependencies: currentRoutePath re-centers on route change
 	useEffect(() => {
 		const timer = setTimeout(() => {
 			const fg = forceRef.current;
@@ -354,10 +442,11 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 	);
 
 	const nodeColor = useCallback(
-		(node: { isCurrent?: boolean }) => {
-			return node.isCurrent ? colors.currentNode : colors.node;
+		(node: { isCurrent?: boolean; id?: string }) => {
+			if (node.isCurrent) return colors.currentNode;
+			return (node.id ? groupColorByNode.get(node.id) : undefined) ?? colors.node;
 		},
-		[colors.currentNode, colors.node],
+		[colors.currentNode, colors.node, groupColorByNode],
 	);
 
 	const drawBackground = useCallback((_ctx: CanvasRenderingContext2D, _globalScale: number) => {
@@ -378,16 +467,23 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 			const ny = node.y || 0;
 
 			const isHovered = hoveredNodeRef.current === node.id;
+			// With a node hovered, everything outside its neighbourhood fades back
+			// so the focused subgraph reads at a glance.
+			const isDimmed = hoveredNodeRef.current !== null && !connectedSetRef.current.has(node.id);
 
-			// Flat node dot — plain fill, no rings or glow
+			// Flat node dot — plain fill, no rings or glow. Hover focus wins over
+			// the group colour so the neighbourhood reads while a node is hovered,
+			// and dimming wins too — a faded group is still a group.
 			ctx.beginPath();
 			ctx.arc(nx, ny, radius, 0, Math.PI * 2);
 			if (node.isCurrent) {
 				ctx.fillStyle = colors.currentNode;
 			} else if (isHovered) {
 				ctx.fillStyle = colors.nodeHover;
+			} else if (isDimmed) {
+				ctx.fillStyle = colors.nodeDimmed;
 			} else {
-				ctx.fillStyle = colors.node;
+				ctx.fillStyle = groupColorByNode.get(node.id) ?? colors.node;
 			}
 			ctx.fill();
 
@@ -416,7 +512,7 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 				ctx.fillText(label, nx, labelY);
 			}
 		},
-		[colors, isLargeGraph],
+		[colors, isLargeGraph, groupColorByNode],
 	);
 
 	const linkColor = useCallback(

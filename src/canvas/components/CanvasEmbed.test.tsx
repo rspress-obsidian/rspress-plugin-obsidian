@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import CanvasEmbed, { resolveCanvasJsonUrl } from "./CanvasEmbed";
 
 const mockCanvasJson = JSON.stringify({
@@ -64,6 +64,32 @@ test("accepts fileRoutePrefix and linkPreview props", () => {
 test("renders with .json extension", () => {
 	const { container } = render(<CanvasEmbed src="subfolder/map.json" />);
 	expect(container.querySelector(".canvas-embed-loading")).toBeTruthy();
+});
+
+test("shows a swapped-in canvas when src changes", async () => {
+	globalThis.fetch = ((input: RequestInfo | URL) => {
+		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+		const text = url.includes("Second") ? "Second" : "First";
+		return Promise.resolve(
+			new Response(
+				JSON.stringify({
+					nodes: [{ id: "n1", type: "text", text, x: 0, y: 0, width: 200, height: 100 }],
+					edges: [],
+				}),
+				{ status: 200 },
+			),
+		);
+	}) as typeof fetch;
+
+	const { container, rerender } = render(<CanvasEmbed src="First.canvas" />);
+	await waitFor(() => expect(container.textContent).toContain("First"));
+
+	// The renderer seeds its state from `data` once, so the new canvas has to
+	// remount it or the first one stays on screen.
+	rerender(<CanvasEmbed src="Second.canvas" />);
+
+	await waitFor(() => expect(container.textContent).toContain("Second"));
+	expect(container.textContent).not.toContain("First");
 });
 
 test("renders without canvas extension", () => {

@@ -37,6 +37,7 @@ function makeScannedDocument(routePath: string, mtimeMs = 1000, size = 100) {
 		size,
 		contentHash: "abc123",
 		inferredTitle: undefined,
+		names: [],
 		rawLinks: [],
 	};
 }
@@ -48,12 +49,14 @@ describe("pruneStaleDocuments", () => {
 			mtimeMs: 1000,
 			size: 100,
 			contentHash: "a",
+			names: [],
 			rawLinks: [],
 		});
 		cache.documents.set("/docs/kept.md", {
 			mtimeMs: 1000,
 			size: 100,
 			contentHash: "b",
+			names: [],
 			rawLinks: [],
 		});
 
@@ -78,6 +81,7 @@ describe("pruneStaleDocuments", () => {
 			mtimeMs: 1000,
 			size: 100,
 			contentHash: "c",
+			names: [],
 			rawLinks: [],
 		});
 
@@ -97,8 +101,20 @@ describe("pruneStaleDocuments", () => {
 
 	test("clears entire cache when route list is empty", () => {
 		const cache = createGraphBuildCache();
-		cache.documents.set("/docs/a.md", { mtimeMs: 1000, size: 100, contentHash: "d", rawLinks: [] });
-		cache.documents.set("/docs/b.md", { mtimeMs: 1000, size: 100, contentHash: "e", rawLinks: [] });
+		cache.documents.set("/docs/a.md", {
+			mtimeMs: 1000,
+			size: 100,
+			contentHash: "d",
+			names: [],
+			rawLinks: [],
+		});
+		cache.documents.set("/docs/b.md", {
+			mtimeMs: 1000,
+			size: 100,
+			contentHash: "e",
+			names: [],
+			rawLinks: [],
+		});
 
 		pruneStaleDocuments(cache, []);
 
@@ -168,6 +184,7 @@ describe("disk cache round-trip", () => {
 			size: 100,
 			contentHash: "hash-a",
 			inferredTitle: "Page A",
+			names: ["Page A", "Alias A"],
 			rawLinks: ["./b.md", "./c.md"],
 		});
 
@@ -191,7 +208,9 @@ describe("disk cache round-trip", () => {
 			join(cacheDir, "cache.json"),
 			JSON.stringify({
 				version: 999,
-				documents: { "/docs/x.md": { mtimeMs: 1, size: 1, contentHash: "x", rawLinks: [] } },
+				documents: {
+					"/docs/x.md": { mtimeMs: 1, size: 1, contentHash: "x", names: [], rawLinks: [] },
+				},
 			}),
 		);
 

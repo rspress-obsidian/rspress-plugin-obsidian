@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pageContentData } from "virtual-page-content-data";
+import { PREVIEW_CONTENT_LENGTH } from "../build/preview-content.js";
+import { normalizeClientRoutePath } from "./deriveGraphViewData.js";
 
 interface PagePreview {
 	routePath: string;
@@ -17,15 +19,20 @@ const POPUP_WIDTH = 320;
 const POPUP_HEIGHT = 240;
 const HOVER_DELAY = 300;
 
-function getPreview(routePath: string): PagePreview | null {
-	const page = pageContentData.find((p) => p.routePath === routePath);
-	return page ?? null;
-}
+// The mouseover listener is document-level, so index the pages once instead of
+// scanning every route on every hover.
+const previewByRoutePath = new Map(pageContentData.map((page) => [page.routePath, page]));
 
 export default function HoverPreview() {
 	const [popup, setPopup] = useState<PopupState | null>(null);
+	// The clamp depends on the viewport, so track it in state: reading
+	// `window.innerWidth` during render leaves a popup stranded off-screen after
+	// a resize.
+	const [viewport, setViewport] = useState(() => ({
+		width: typeof window === "undefined" ? 0 : window.innerWidth,
+		height: typeof window === "undefined" ? 0 : window.innerHeight,
+	}));
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const popupRef = useRef<HTMLDivElement>(null);
 
 	const clearHoverTimer = useCallback(() => {
 		if (hoverTimer.current) {
@@ -41,9 +48,11 @@ export default function HoverPreview() {
 			if (!link) return;
 
 			const href = link.getAttribute("href");
-			if (!href || href.startsWith("http")) return;
+			if (!href || href.startsWith("#") || href.startsWith("http")) return;
 
-			const preview = getPreview(href);
+			// Rspress rewrites markdown links to `.html` and appends fragments and
+			// queries; reduce all of that to the graph's route path.
+			const preview = previewByRoutePath.get(normalizeClientRoutePath(href.split(/[?#]/)[0] ?? ""));
 			if (!preview) return;
 
 			clearHoverTimer();
@@ -69,19 +78,33 @@ export default function HoverPreview() {
 		return () => {
 			document.removeEventListener("mouseover", handleMouseEnter);
 			document.removeEventListener("mouseout", handleMouseLeave);
+			// A pending hover timer must not fire after the component unmounts.
+			clearHoverTimer();
 		};
-	}, [handleMouseEnter, handleMouseLeave]);
+	}, [handleMouseEnter, handleMouseLeave, clearHoverTimer]);
+
+	useEffect(() => {
+		const updateViewport = () =>
+			setViewport({ width: window.innerWidth, height: window.innerHeight });
+		window.addEventListener("resize", updateViewport);
+		return () => window.removeEventListener("resize", updateViewport);
+	}, []);
 
 	if (!popup) return null;
 
+	// The build ships one character past the budget when it truncated the note.
+	const previewContent =
+		popup.preview.content.length > PREVIEW_CONTENT_LENGTH
+			? `${popup.preview.content.slice(0, PREVIEW_CONTENT_LENGTH)}…`
+			: popup.preview.content;
+
 	return (
 		<div
-			ref={popupRef}
 			className="obsidian-hover-preview"
 			style={{
 				position: "fixed",
-				left: Math.min(popup.x + 16, window.innerWidth - POPUP_WIDTH - 16),
-				top: Math.min(popup.y + 16, window.innerHeight - POPUP_HEIGHT - 16),
+				left: Math.min(popup.x + 16, viewport.width - POPUP_WIDTH - 16),
+				top: Math.min(popup.y + 16, viewport.height - POPUP_HEIGHT - 16),
 				width: POPUP_WIDTH,
 				maxHeight: POPUP_HEIGHT,
 				overflow: "auto",
@@ -108,7 +131,7 @@ export default function HoverPreview() {
 					whiteSpace: "pre-wrap",
 				}}
 			>
-				{popup.preview.content.slice(0, 300) + (popup.preview.content.length > 300 ? "…" : "")}
+				{previewContent}
 			</div>
 		</div>
 	);

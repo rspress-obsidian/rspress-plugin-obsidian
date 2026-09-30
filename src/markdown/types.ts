@@ -1,15 +1,23 @@
+import type { Root as MDASTRoot } from "mdast";
+import type { Plugin } from "unified";
+import type { MathEngine } from "../math.js";
+import type { MermaidSecurityLevel } from "../mermaid/classes.js";
+
+/**
+ * A remark plugin factory: called with its options, returns a unified plugin
+ * operating on an mdast tree. Declared locally so the package does not depend
+ * on the devkit helper package this replaces.
+ */
+export type RemarkPluginFactory<PluginOptions = unknown> = Plugin<[PluginOptions], MDASTRoot>;
+
 /**
  * How diagnostic events are surfaced to the Rspress build.
- * - `"error"` — calls {@link import("vfile").VFile.fail}, failing the build.
- * - `"warn"` — calls {@link import("vfile").VFile.message}, emitting a warning.
+ * - `"error"` — calls VFile's `fail()`, failing the build.
+ * - `"warn"` — calls VFile's `message()`, emitting a warning.
  */
 export type DiagnosticMode = "error" | "warn";
 
-/**
- * Plugin options accepted by {@link import("./index.ts").pluginObsidianWikiLink}.
- * All fields are optional; the normalized defaults are conservative (most
- * opt-in features disabled).
- */
+/** Options for the daily-notes navigation feature (`enableDailyNotes`). */
 export interface DailyNotesOptions {
 	/** Vault-relative folder containing date-formatted daily notes. */
 	folder?: string;
@@ -17,9 +25,49 @@ export interface DailyNotesOptions {
 	dateFormat?: string;
 	/** Add previous/current/next links to published daily notes. Default: `true`. */
 	navigation?: boolean;
+	/**
+	 * Vault-relative path of a note used as the body of a daily note that is
+	 * still empty, the way Obsidian's daily-notes core fills a new note from a
+	 * template. `{{date}}`, `{{date:FORMAT}}`, `{{date±Nd/w/m/y}}` and
+	 * `{{title}}` expand; a note that already has content is never touched.
+	 * Default: none.
+	 */
+	template?: string;
+	/**
+	 * Route of a generated calendar page listing every daily note, grouped by
+	 * month — the published equivalent of Obsidian's daily-notes calendar view.
+	 * Set it to a path such as `/daily`. Default: none.
+	 */
+	calendar?: string;
 }
 
-export interface RspressPluginObsidianWikiLinkOptions {
+/**
+ * Plugin options accepted by the {@link markdown} factory (the package's
+ * `rspress-plugin-obsidian/markdown` entry). All fields are optional and the
+ * normalized defaults are conservative — most opt-in features are disabled.
+ *
+ * The fields fall into four groups, in this order:
+ *
+ * - **Where content comes from** — `vaultRoot`, `vaultRoutePrefix`, and
+ *   `enableMarkdownLinks` / `enableCaseInsensitiveLookup` / `enableFuzzyMatching`,
+ *   which decide what a link is allowed to name.
+ * - **What renders** — the `enable*` toggles: `enableCallouts`,
+ *   `enableTransclusion`, `enableMediaEmbeds`, `enableBacklinks`,
+ *   `enableUnlinkedMentions`, `enableTagLinking`, `enableTagPages`,
+ *   `enableDailyNotes` (+ `dailyNotes`), `enableDataview`, `enableMath`
+ *   (+ `mathEngine`), `enableMermaid`, `enableDefaultStyles`.
+ * - **What counts as a link** — the resolution options above feed
+ *   `wikilinkTargets`, which is what the backlinks panel and the graph read.
+ * - **What happens when it does not work** — `onBrokenLink`,
+ *   `onAmbiguousLink`, `onDataviewError`, `onUnsupportedBlock`, and
+ *   `mermaidSecurityLevel`. The first two default to `"error"`: an
+ *   unresolvable `[[wikilink]]` fails the build rather than shipping dead.
+ *
+ * Note that the renderers emit markup, not rules: `enableCallouts`,
+ * `enableBacklinks` and `enableTagPages` need `enableDefaultStyles` (or the
+ * stylesheet imported by hand) before any of it is visible.
+ */
+export interface RspressPluginMarkdownOptions {
 	/**
 	 * Absolute path to an external Obsidian vault to publish alongside the
 	 * Rspress docs directory. When set, every routable `.md`/`.mdx` file in
@@ -34,7 +82,9 @@ export interface RspressPluginObsidianWikiLinkOptions {
 	vaultRoot?: string;
 	/**
 	 * Route prefix for published vault pages. Default: `"/vault"`. Vault
-	 * `Notes/Setup.md` publishes at `{vaultRoutePrefix}/notes/setup`.
+	 * `Notes/Setup.md` publishes at `{vaultRoutePrefix}/Notes/Setup` — routes
+	 * preserve the file's case and spacing, with `index` and the extension
+	 * dropped.
 	 */
 	vaultRoutePrefix?: string;
 	/** How to report unresolvable wikilinks. Default: `"error"`. */
@@ -65,6 +115,13 @@ export interface RspressPluginObsidianWikiLinkOptions {
 	 */
 	onDataviewError?: DiagnosticMode;
 	/**
+	 * How fenced blocks belonging to an Obsidian plugin runtime this plugin
+	 * cannot execute (`tasks`, `excalidraw`, `base`, and Dataview while
+	 * `enableDataview` is off) are reported. They stay in the page as code.
+	 * Default: `"warn"`.
+	 */
+	onUnsupportedBlock?: DiagnosticMode;
+	/**
 	 * Evaluate static Dataview DQL blocks and inline expressions at build time.
 	 * DataviewJS is never executed. Default: `false`.
 	 */
@@ -89,6 +146,15 @@ export interface RspressPluginObsidianWikiLinkOptions {
 	 */
 	enableBacklinks?: boolean;
 	/**
+	 * Also list pages that name the current page without linking to it, with a
+	 * context snippet — Obsidian's "unlinked mentions". Implies
+	 * {@link RspressPluginMarkdownOptions.enableBacklinks}, because
+	 * that panel is where they appear, and keeps
+	 * a stripped copy of each page body (capped) for the duration of the index.
+	 * Default: `false`.
+	 */
+	enableUnlinkedMentions?: boolean;
+	/**
 	 * Inline the target of `![[Page]]` / `![[Page#Heading]]` / `![[Page#^block]]`.
 	 * Default: `false`.
 	 */
@@ -104,6 +170,41 @@ export interface RspressPluginObsidianWikiLinkOptions {
 	 * these pages. Default: `false`.
 	 */
 	enableTagPages?: boolean;
+	/**
+	 * Render Obsidian math — `$inline$` and `$$display$$` — to KaTeX HTML
+	 * during the remark pass. Enabling this also loads KaTeX's stylesheet:
+	 * alongside the plugin's own stylesheet when `enableDefaultStyles` is set,
+	 * on its own otherwise. Default: `false`.
+	 */
+	enableMath?: boolean;
+	/**
+	 * Which engine renders the math `enableMath` turns on. `"katex"` (the
+	 * default) is fast and small; `"mathjax"` is the engine Obsidian itself
+	 * uses, and covers the TeX KaTeX does not implement. MathJax is an optional
+	 * dependency — install `mathjax-full` to use it — and its generated
+	 * stylesheet is emitted inline with the page. Default: `"katex"`.
+	 */
+	mathEngine?: MathEngine;
+	/**
+	 * Render ` ```mermaid ` fences in notes as diagrams. Placeholders are
+	 * emitted at build time and drawn by a client component registered through
+	 * `globalUIComponents` (Mermaid needs the DOM), using the same
+	 * `securityLevel: "strict"` renderer as the canvas feature. Default: `false`.
+	 */
+	enableMermaid?: boolean;
+	/**
+	 * Mermaid's `securityLevel` for client-rendered diagrams. `"strict"`
+	 * (the default) runs mermaid's sanitising pass, which strips unsafe link
+	 * URLs: a `click` directive with a `javascript:` URL is removed instead of
+	 * rendered as a live anchor. The looser levels allow markup and handlers a
+	 * strict build refuses, so they match Obsidian's more permissive rendering
+	 * at the cost of trusting every diagram in the vault.
+	 *
+	 * Applies to note diagrams; canvas text nodes are emitted by the canvas
+	 * feature and keep the strict default unless a note on the page has set the
+	 * level. Default: `"strict"`.
+	 */
+	mermaidSecurityLevel?: MermaidSecurityLevel;
 	/**
 	 * Inject the bundled `.obsidian-*` and `.callout-*` stylesheet via the
 	 * Rspress `globalStyles` hook. Default: `false`.
@@ -121,15 +222,21 @@ export interface NormalizedPluginOptions {
 	enableCaseInsensitiveLookup: boolean;
 	enableMarkdownLinks: boolean;
 	onDataviewError: DiagnosticMode;
+	onUnsupportedBlock: DiagnosticMode;
 	enableDataview: boolean;
 	enableDailyNotes: boolean;
 	dailyNotes: Required<DailyNotesOptions>;
 	enableTagLinking: boolean;
 	enableCallouts: boolean;
 	enableBacklinks: boolean;
+	enableUnlinkedMentions: boolean;
 	enableTransclusion: boolean;
 	enableMediaEmbeds: boolean;
 	enableTagPages: boolean;
+	enableMath: boolean;
+	mathEngine: MathEngine;
+	enableMermaid: boolean;
+	mermaidSecurityLevel: MermaidSecurityLevel;
 	enableDefaultStyles: boolean;
 }
 
@@ -247,8 +354,7 @@ export interface ContentPage {
 
 /**
  * The pre-computed lookup tables used by the resolver. Produced by
- * {@link import("./content-index.ts").buildContentIndex} or
- * {@link import("./content-index.ts").getCachedContentIndex}.
+ * `buildContentIndex()` or its memoized sibling `getCachedContentIndex()`.
  */
 export interface ContentIndex {
 	rootDir: string;
@@ -275,8 +381,6 @@ export interface ContentIndex {
 	byAssetPathCI: Map<string, ContentAsset[]>;
 	/** Case-insensitive attachment basename → assets lookup. */
 	byAssetBaseNameCI: Map<string, ContentAsset[]>;
-	/** Raw markdown content keyed by absolute path, used by transclusion during the remark pass. */
-	rawContentByPath: Map<string, string>;
 	/**
 	 * Pre-built backlinks map, constructed during content indexing.
 	 * Maps each page's routePath to the pages that link to it.
@@ -291,6 +395,8 @@ export interface ContentIndex {
  */
 export interface BacklinkRef {
 	routePath: string;
+	/** Vault-relative source path; absent on hand-built refs, which then get no index-page trailing slash. */
+	relativePath?: string;
 	title: string;
 }
 
@@ -310,9 +416,35 @@ export interface ResolvedWikiLink {
 	message?: string;
 	/** Plain-text preview of the heading section content, for tooltips. */
 	description?: string;
+	/**
+	 * Vault-relative path of the `.canvas` file when the target is a board the
+	 * canvas feature has published (set together with `href` pointing at that
+	 * board's route). The embed syntax uses it as the `<CanvasEmbed src>` value;
+	 * its presence also marks "canvas feature active for this file".
+	 */
+	canvasSrc?: string;
+	/**
+	 * Every target a vault search (`[[##query]]`) matched, when more than one did.
+	 *
+	 * The remark pass turns this into a `<WikiPicker>`: Obsidian opens a list of
+	 * matches for an ambiguous vault search, and a build-time-only pipeline has
+	 * nowhere else to put them. A single match resolves to a plain link instead
+	 * and never sets this.
+	 */
+	candidates?: WikiLinkCandidate[];
 }
 
-/** Input required by {@link import("./resolve-wikilink.ts").resolveWikiLink}. */
+/** One entry of a vault-search picker. */
+export interface WikiLinkCandidate {
+	href: string;
+	label: string;
+	/** Page the match lives on, shown next to the label in the picker. */
+	pageLabel: string;
+	/** Plain-text preview of the section, when the heading carries one. */
+	description?: string;
+}
+
+/** Input required by `resolveWikiLink()`. */
 export interface ResolveContext {
 	currentPage: ContentPage;
 	index: ContentIndex;

@@ -6,37 +6,56 @@ import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { type RemarkPluginFactory, unistVisit } from "rspress-plugin-devkit";
 import { unified } from "unified";
 import type { Parent } from "unist";
+import { visit } from "unist-util-visit";
 import type { VFile } from "vfile";
-import { getCachedBacklinksIndex, renderBacklinksHtml } from "./backlinks.ts";
-import { getCachedContentIndex } from "./content-index.ts";
 import {
-	expandDailyTemplateText,
+	type MathEngine,
+	mathEngineStylesheet,
+	prepareMathEngine,
+	renderMathHtml,
+} from "../math.js";
+import { MERMAID_BLOCK_CLASS, MERMAID_SECURITY_ATTRIBUTE } from "../mermaid/classes.js";
+import { escapeHtmlAttribute, escapeHtmlText } from "../shared/escape.js";
+import { parseFrontmatter, stripFrontmatter } from "../shared/frontmatter.js";
+import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
+import { pdfEmbedHtml } from "../shared/media-html.js";
+import { humanizeBaseName } from "../shared/slug.js";
+import { extractBlockSection, extractHeadingSection } from "../shared/transclusion.js";
+import { getCachedBacklinksIndex, renderBacklinksHtml } from "./backlinks.js";
+import { stripComments } from "./comments.js";
+import { getCachedContentIndex } from "./content-index.js";
+import {
+	expandDailyTemplateTokens,
+	isEmptyDailyNoteBody,
 	parseDailyNoteDate,
 	renderDailyNavigation,
-} from "./daily-notes.ts";
-import { renderDataviewInline, renderDataviewQuery } from "./dataview.ts";
-import { renderDataviewJs } from "./dataview-js.ts";
-import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.ts";
-import { resolveHeadingSlug, resolveWikiLink } from "./resolve-wikilink.ts";
-import { humanizeBaseName, slugifyHeading } from "./slug.ts";
-import { encodeTagPathSegment } from "./tag-pages.ts";
+} from "./daily-notes.js";
+import { renderDataviewInline, renderDataviewQuery } from "./dataview.js";
+import { renderDataviewJs } from "./dataview-js.js";
+import { extractInlineFootnotes } from "./inline-footnotes.js";
+import { getMentions } from "./mentions.js";
+import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
+import { resolveHeadingSlug, resolveWikiLink } from "./resolve-wikilink.js";
+import { encodeTagPathSegment } from "./tag-pages.js";
 import type {
 	ContentIndex,
 	ContentPage,
 	NormalizedPluginOptions,
 	ParsedWikiLink,
+	RemarkPluginFactory,
 	RemarkWikiLinkPluginOptions,
 	ResolvedWikiLink,
-} from "./types.ts";
+	WikiLinkCandidate,
+} from "./types.js";
 import {
 	formatAvailableBlocks,
 	formatAvailableHeadings,
+	isPathInsideRoot,
 	normalizeFilePathKey,
 	normalizeFsPath,
-} from "./utils.ts";
+} from "./utils.js";
 
 // Obsidian tags accept letters, numbers, symbols, emojis, hyphens, and
 // nested-slash segments, but must contain at least one non-numeric character.
@@ -45,24 +64,87 @@ const TAG_PATTERN = /(?<![/\p{L}\p{N}_-])#([\p{L}\p{M}\p{N}\p{Extended_Pictograp
 const CALLOUT_HEADER_PATTERN = /^\[!(\w+)\]([-+])?\s*(.*)$/;
 // Obsidian inline and block comments: %% ... %%
 const COMMENT_PATTERN = /%%[\s\S]*?%%/g;
-// Obsidian text highlighting: ==text==
-const HIGHLIGHT_PATTERN = /==([^=]+)==/g;
+// Obsidian text highlighting: ==text==. A single `=` may appear inside
+// (`==a=b==`); `====` never matches empty content.
+const HIGHLIGHT_PATTERN = /==([^=]+(?:=[^=]+)*)==/g;
 // Obsidian footnotes: [^1] reference, [^1]: definition, and ^[inline text]
 const FOOTNOTE_REF_PATTERN = /(?<!\[)\[\^([^\]]+)\](?!:)/g;
 const FOOTNOTE_DEF_PATTERN = /^\[\^([^\]]+)\]:[ \t]*(.*(?:\n[ \t]{2,}.*)*)$/gm;
-const INLINE_FOOTNOTE_PATTERN = /\^\[([^\]]+)\]/g;
+
+// Obsidian math. Display (`$$…$$`) is matched first so its delimiters are not
+// read as two inline spans. Inline (`$…$`) follows Obsidian's rule: no space
+// directly inside the delimiters, no newline — so prose such as `$5 and $10`
+// stays prose.
+const MATH_PATTERN = /\$\$([\s\S]+?)\$\$|\$(?!\s)([^$\n]+?)(?<!\s)\$/g;
 
 const MAX_TRANSCLUSION_DEPTH = 5;
+
+/**
+ * Rendered transclusion HTML, per plugin options object and build generation.
+ *
+ * The key is the options object itself (one per `markdown()` call), so two
+ * processors in the same process never share renders; the generation counter
+ * drops stale renders when a dev recompile re-indexes. Within a generation the
+ * memo is keyed by target page, section, depth and visited chain — everything
+ * the render depends on — so a page embedded twice in one file is read and
+ * parsed once instead of once per embed.
+ */
+const transclusionRenders = new WeakMap<
+	NormalizedPluginOptions,
+	{ generation: number; renders: Map<string, string> }
+>();
+let transclusionGeneration = 0;
+
+/** Drop memoized transclusion renders. Called wherever the index memo is dropped. */
+export function clearTransclusionCache(): void {
+	transclusionGeneration += 1;
+}
+
+function transclusionCacheFor(options: NormalizedPluginOptions): Map<string, string> {
+	const cached = transclusionRenders.get(options);
+	if (cached && cached.generation === transclusionGeneration) {
+		return cached.renders;
+	}
+	const renders = new Map<string, string>();
+	transclusionRenders.set(options, { generation: transclusionGeneration, renders });
+	return renders;
+}
 
 // Files that produced an "error"-mode diagnostic (broken/ambiguous link).
 // Failure is deferred to the end of the top-level pass so one bad link does
 // not abort resolution of the remaining wikilinks in the document.
 const pendingFailures = new WeakSet<VFile>();
 
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "avif"]);
-const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "flac"]);
-const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv"]);
-const PDF_EXT = "pdf";
+/**
+ * Record one plugin diagnostic.
+ *
+ * Rspress never reads `file.messages`, so a warn-level diagnostic recorded
+ * only there is invisible; print it to the console as well. Failing
+ * diagnostics keep the vfile message that becomes the build failure and are
+ * not printed — the build error already carries them.
+ *
+ * `mode` picks where failure lands: `"fail"` throws immediately (the
+ * option-driven error modes), `"defer"` marks the file so the top-level pass
+ * can fail it once every link has been resolved.
+ */
+function reportPluginDiagnostic(
+	file: VFile,
+	scope: string,
+	message: string,
+	mode: "warn" | "defer" | "fail" = "warn",
+): void {
+	const text = `[rspress-plugin-obsidian:markdown${scope ? `:${scope}` : ""}] ${message}`;
+	if (mode === "fail") {
+		file.fail(text);
+		return;
+	}
+	file.message(text);
+	if (mode === "defer") {
+		pendingFailures.add(file);
+		return;
+	}
+	console.warn(text);
+}
 
 // Maps Obsidian callout type aliases to their canonical CSS class.
 const CALLOUT_TYPE_ALIASES: Record<string, string> = {
@@ -84,6 +166,17 @@ const CALLOUT_TYPE_ALIASES: Record<string, string> = {
 	cite: "quote",
 };
 
+/** Node types whose children are phrasing content, where an inline footnote can sit. */
+const PHRASING_CONTAINER_TYPES = new Set([
+	"paragraph",
+	"heading",
+	"tableCell",
+	"emphasis",
+	"strong",
+	"delete",
+	"link",
+]);
+
 const SKIP_PARENT_TYPES = new Set([
 	"link",
 	"linkReference",
@@ -96,6 +189,28 @@ const SKIP_PARENT_TYPES = new Set([
 	"mdxFlowExpression",
 	"mdxTextExpression",
 ]);
+
+/**
+ * Run `transform` over every container whose children are phrasing content.
+ *
+ * An inline footnote is a phrasing construct, so it can appear in a paragraph,
+ * a heading, a table cell or a blockquote paragraph. `transform` returns the
+ * replacement children, or nothing to leave the container alone.
+ */
+function visitPhrasingContainers(
+	tree: Root,
+	transform: (children: PhrasingContent[]) => PhrasingContent[] | undefined,
+): void {
+	visit(tree, (node) => {
+		if (PHRASING_CONTAINER_TYPES.has(node.type)) {
+			const children = (node as Parent & { children: PhrasingContent[] }).children;
+			if (!Array.isArray(children)) return;
+			const replaced = transform(children);
+			if (replaced) (node as Parent & { children: PhrasingContent[] }).children = replaced;
+		}
+		// Descend regardless: a link or emphasis can itself hold one.
+	});
+}
 
 /**
  * Resolve all wikilink tokens in `tree` by replacing them with `link` or
@@ -112,13 +227,16 @@ function resolveWikilinksInAst(
 	index: ContentIndex,
 	options: NormalizedPluginOptions,
 	file?: VFile,
+	// Only the tree MDX itself compiles can carry a component; a transcluded note
+	// is stringified to HTML, where a JSX node would vanish.
+	depth = 0,
 ): void {
 	const resolveOptions = {
 		enableFuzzyMatching: options.enableFuzzyMatching,
 		enableCaseInsensitiveLookup: options.enableCaseInsensitiveLookup,
 	};
 
-	unistVisit(tree, "text", (node, position, parent) => {
+	visit(tree, "text", (node, position, parent) => {
 		if (!parent || typeof position !== "number") {
 			return;
 		}
@@ -158,19 +276,19 @@ function resolveWikilinksInAst(
 							: createLinkNode(href, label, resolved.description),
 					);
 				} else {
-					replacementNodes.push(createTextNode(parsed.raw));
-				}
-			} else {
-				if (file) {
-					reportDiagnostic(
-						file,
-						parsed.raw,
-						resolved.message ?? "Unable to resolve wikilink.",
-						resolved.status,
-						options,
+					replacementNodes.push(
+						createUnresolvedNode(parsed, "Link target has no published route."),
 					);
 				}
-				replacementNodes.push(createTextNode(parsed.raw));
+			} else if (depth === 0 && parsed.search && resolved.candidates?.length) {
+				// Obsidian opens a picker of matches for an ambiguous vault search.
+				replacementNodes.push(createWikiPickerNode(parsed, resolved.candidates));
+			} else {
+				const reason = resolved.message ?? "Unable to resolve wikilink.";
+				if (file) {
+					reportDiagnostic(file, parsed.raw, reason, resolved.status, options);
+				}
+				replacementNodes.push(createUnresolvedNode(parsed, reason));
 			}
 
 			cursor = match.end;
@@ -194,7 +312,7 @@ function processDataviewNodes(
 	file: VFile,
 	options: NormalizedPluginOptions,
 ): void {
-	unistVisit(tree, "code", (node) => {
+	visit(tree, "code", (node) => {
 		const language = node.lang?.toLowerCase();
 		if (language === "dataviewjs") {
 			const result = renderDataviewJs(node.value, currentPage, index, options.dailyNotes);
@@ -221,7 +339,7 @@ function processDataviewNodes(
 		htmlNode.value = result.html;
 	});
 
-	unistVisit(tree, "text", (node, position, parent) => {
+	visit(tree, "text", (node, position, parent) => {
 		if (!parent || typeof position !== "number") return;
 		if (SKIP_PARENT_TYPES.has(parent.type)) return;
 		const visibleFields = node.value.replace(
@@ -232,36 +350,162 @@ function processDataviewNodes(
 		if (visibleFields !== node.value) node.value = visibleFields;
 		if (!node.value.includes("=")) return;
 		const matches = [
-			...node.value.matchAll(/(^|[\s(])=\s*([A-Za-z_][A-Za-z0-9_.]*(?:\([^()\n]*\))?)/g),
+			// A dot only continues the identifier when a name follows it, so a
+			// sentence-final `.` is not swallowed: `its folder is = file.folder.`
+			// resolved the field `file.folder.` and matched nothing.
+			...node.value.matchAll(
+				/(^|[\s(])=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*(?:\([^()\n]*\))?)/g,
+			),
 		].filter((match) => !isInsideWikilink(node.value, match.index ?? 0));
 		if (matches.length === 0) return;
 
 		const replacementNodes: PhrasingContent[] = [];
 		let cursor = 0;
+		let substituted = false;
 		for (const match of matches) {
-			const expressionStart = (match.index ?? 0) + (match[1]?.length ?? 0);
-			const expression = match[2] ?? "";
-			const fullStart = match.index ?? 0;
-			if (fullStart > cursor) {
-				replacementNodes.push(createTextNode(node.value.slice(cursor, expressionStart)));
+			// Group 1 is the delimiter before the `=` (whitespace or `(`), so the
+			// `=` sits one past it and the expression past that. Deriving both
+			// ends from `match[0]` rather than from the expression length is what
+			// keeps the source intact: the old offsets pointed at the `=` and
+			// under-advanced the cursor, re-emitting the tail of the expression
+			// as literal text.
+			const matchStart = match.index ?? 0;
+			const matchEnd = matchStart + match[0].length;
+			const equalsAt = matchStart + (match[1]?.length ?? 0);
+			if (equalsAt > cursor) {
+				replacementNodes.push(createTextNode(node.value.slice(cursor, equalsAt)));
 			}
-			const result = renderDataviewInline(expression, currentPage, index, options.dailyNotes);
-			if (result.error || !result.html) {
-				reportDataviewDiagnostic(
-					file,
-					options,
-					result.error ?? "Inline expression returned no value.",
-				);
-				replacementNodes.push(
-					createTextNode(node.value.slice(fullStart, expressionStart + expression.length)),
-				);
-			} else {
+			const result = renderDataviewInline(match[2] ?? "", currentPage, index, options.dailyNotes);
+			if (result.html) {
+				substituted = true;
 				replacementNodes.push({ type: "html", value: result.html });
+			} else {
+				// No value to show: leave the `= expr` exactly as written.
+				replacementNodes.push(createTextNode(node.value.slice(equalsAt, matchEnd)));
 			}
-			cursor = expressionStart + expression.length;
+			if (result.error) {
+				reportDataviewDiagnostic(file, options, result.error);
+			}
+			cursor = matchEnd;
 		}
 		if (cursor < node.value.length) {
 			replacementNodes.push(createTextNode(node.value.slice(cursor)));
+		}
+
+		// Nothing resolved, so nothing changed: leave the node whole. Splitting it
+		// anyway broke every later inline pass that needs its neighbours — `$E =
+		// mc^2$` lost its math because the run was cut in two around the `=`.
+		if (!substituted) return;
+
+		(parent as Parent & { children: unknown[] }).children.splice(position, 1, ...replacementNodes);
+	});
+}
+
+/**
+ * Turn ` ```mermaid ` fences into client-rendered placeholders.
+ *
+ * Mermaid needs a DOM, so the diagram is drawn by the client renderer
+ * (`src/mermaid/blocks.ts`) that the markdown plugin registers as a global UI
+ * component — the same placeholder contract the canvas feature uses.
+ */
+function processMermaidNodes(tree: Root, options: NormalizedPluginOptions): void {
+	visit(tree, "code", (node) => {
+		if (node.lang?.toLowerCase() !== "mermaid") return;
+		// The source lands in an attribute as well as in the text, so quotes must
+		// be escaped too — otherwise a diagram containing `"` breaks out of
+		// `data-code` and can inject attributes.
+		const attributeValue = escapeHtmlAttribute(node.value);
+		const htmlNode = node as unknown as HTML;
+		htmlNode.type = "html";
+		// The configured security level travels with the placeholder: mermaid's
+		// configuration is global, so the client applies the stamped level once
+		// for every diagram it renders.
+		htmlNode.value = `<pre class="${MERMAID_BLOCK_CLASS}" ${MERMAID_SECURITY_ATTRIBUTE}="${options.mermaidSecurityLevel}" data-code="${attributeValue}">${escapeHtmlText(node.value)}</pre>\n`;
+	});
+}
+
+// Fenced blocks written by an Obsidian plugin runtime this plugin cannot
+// execute or render. Publishing such a fence as a code block with no signal
+// shows the reader raw query syntax that they will assume ran.
+const UNSUPPORTED_PLUGIN_FENCES: Record<string, string> = {
+	tasks: "Tasks query blocks are not executed by this plugin; the block is rendered as code.",
+	excalidraw: "Excalidraw drawings are not rendered by this plugin; the block is rendered as code.",
+	base: "Bases views are not executed by this plugin; the block is rendered as code.",
+	kanban: "Kanban boards are not rendered by this plugin; the block is rendered as code.",
+	dataview: "Dataview query blocks are not executed by this plugin; the block is rendered as code.",
+	dataviewjs: "DataviewJS blocks are never executed by this plugin; the block is rendered as code.",
+};
+
+/**
+ * Report fences that belong to an Obsidian plugin runtime this plugin cannot
+ * execute. `mermaid` is rendered by its own pass, ordinary language fences
+ * (`js`, `bash`, …) are the author's own code and stay silent, and `dataview`
+ * / `dataviewjs` are only unknown while Dataview is disabled.
+ */
+function processUnsupportedBlockNodes(
+	tree: Root,
+	file: VFile,
+	options: NormalizedPluginOptions,
+): void {
+	visit(tree, "code", (node) => {
+		const language = node.lang?.toLowerCase();
+		if (!language) return;
+		const message = UNSUPPORTED_PLUGIN_FENCES[language];
+		if (!message) return;
+		if (options.enableDataview && (language === "dataview" || language === "dataviewjs")) {
+			return;
+		}
+		reportPluginDiagnostic(
+			file,
+			"unsupported-block",
+			`[!${language}] ${message}`,
+			options.onUnsupportedBlock === "error" ? "fail" : "warn",
+		);
+	});
+}
+
+/**
+ * Render `$inline$` and `$$display$$` math with KaTeX.
+ *
+ * Only `text` nodes are visited, so code fences, inline code and raw HTML are
+ * untouched. KaTeX is called with `throwOnError: false`, so malformed input
+ * renders as KaTeX's own inline error rather than breaking the build; the
+ * `null` branch is a safety net for inputs KaTeX rejects outright, which stay
+ * as written.
+ */
+function processMathNodes(tree: Root, engine: MathEngine): void {
+	visit(tree, "text", (node, position, parent) => {
+		if (!parent || typeof position !== "number") return;
+		if (SKIP_PARENT_TYPES.has(parent.type)) return;
+		const text = node.value;
+		if (!text.includes("$")) return;
+
+		const replacementNodes: PhrasingContent[] = [];
+		let cursor = 0;
+
+		for (const match of text.matchAll(MATH_PATTERN)) {
+			const displayMode = match[1] !== undefined;
+			const tex = (match[1] ?? match[2] ?? "").trim();
+			const html = tex ? renderMathHtml(tex, displayMode, engine) : null;
+			// Unrenderable math stays literal text, so `cursor` must not advance.
+			if (!html) continue;
+
+			const start = match.index ?? 0;
+			if (start > cursor) {
+				replacementNodes.push(createTextNode(text.slice(cursor, start)));
+			}
+			// KaTeX emits inline-level markup; the wrapper stays inline so a
+			// display block can live inside the paragraph it was written in.
+			replacementNodes.push({
+				type: "html",
+				value: `<span class="${displayMode ? "obsidian-math-display" : "obsidian-math"}">${html}</span>`,
+			});
+			cursor = start + match[0].length;
+		}
+
+		if (replacementNodes.length === 0) return;
+		if (cursor < text.length) {
+			replacementNodes.push(createTextNode(text.slice(cursor)));
 		}
 		(parent as Parent & { children: PhrasingContent[] }).children.splice(
 			position,
@@ -271,20 +515,120 @@ function processDataviewNodes(
 	});
 }
 
+/** Parse a Markdown fragment into the block nodes the rest of the pass expects. */
+function parseMarkdownNodes(markdown: string): Root["children"] {
+	const processor = unified().use(remarkParse);
+	return (processor.parse(markdown) as Root).children;
+}
+
+/**
+ * Read the configured daily-note template, if it exists.
+ *
+ * The path is relative to the root the page came from, so a vault template works
+ * for vault pages and a docs template for docs pages. A missing file is not an
+ * error: the option is a convenience, and a template that has not been written
+ * yet should not fail the build.
+ */
+function readDailyNoteTemplate(template: string, docsRoot: string): string | undefined {
+	const relative =
+		template.endsWith(".md") || template.endsWith(".mdx") ? template : `${template}.md`;
+	const absolute = path.join(docsRoot, relative);
+	try {
+		if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return undefined;
+		return stripFrontmatter(fs.readFileSync(absolute, "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A stand-in page for a file the plugin generated, or `undefined` when the file
+ * is a real one that the content index should have had.
+ *
+ * Rspress compiles a generated page from a temp file outside every content root
+ * (`node_modules/.rspress/runtime/temp-NN.mdx`), so there is no indexed page to
+ * look up. The pass still needs *a* page to work from: the fields a generated
+ * page legitimately has — its frontmatter title, its own path — are filled in,
+ * and the rest are empty, because a generated page has no headings, tags, blocks
+ * or backlinks of its own.
+ *
+ * The route is the temp path rather than the published one, because the remark
+ * pass is only told the file it is compiling. That is enough here: a generated
+ * page resolves *other* pages against the real index, and has no headings for a
+ * `[[#self-reference]]` to resolve against.
+ */
+function generatedPageFor(
+	absolutePath: string,
+	docsRoot: string,
+	source: string,
+): ContentPage | undefined {
+	if (isPathInsideRoot(absolutePath, docsRoot)) return undefined;
+
+	const withoutExtension = absolutePath.replace(/\.(md|mdx)$/i, "");
+	const relativePath = normalizeFsPath(withoutExtension);
+	const baseName = relativePath.split("/").pop() ?? relativePath;
+	let title: string | undefined;
+	try {
+		const { data } = parseFrontmatter(source);
+		if (typeof data.title === "string" && data.title.trim() !== "") title = data.title;
+	} catch {
+		// Malformed frontmatter on a generated page: the title is a nicety here,
+		// and the frontmatter pass reports the problem where it always has.
+	}
+
+	return {
+		absolutePath,
+		relativePath,
+		routePath: `/${relativePath}`,
+		pathKey: relativePath,
+		filePathKey: relativePath,
+		baseName,
+		title,
+		aliases: [],
+		tags: [],
+		cssclasses: [],
+		publish: true,
+		fileCtimeMs: 0,
+		fileMtimeMs: 0,
+		fileSizeBytes: 0,
+		headings: [],
+		wikilinkTargets: [],
+		headingBySlug: new Map(),
+		headingByText: new Map(),
+		blocks: [],
+		dataviewFields: {},
+		dataviewTasks: [],
+		dataviewLists: [],
+	};
+}
+
 function processDailyNoteNodes(
 	tree: Root,
 	currentPage: ContentPage,
 	index: ContentIndex,
 	options: NormalizedPluginOptions,
 	includePageDecorations: boolean,
+	docsRoot: string,
+	source: string,
 ): void {
 	const date = parseDailyNoteDate(currentPage.relativePath, options.dailyNotes);
 	if (!date) return;
 
-	unistVisit(tree, "text", (node, position, parent) => {
+	// Obsidian's daily-notes core fills a new note from a template. A static
+	// build has no cursor to insert at, so the rule is the useful one instead:
+	// only a note whose body is still empty takes the template's content.
+	if (options.dailyNotes.template && isEmptyDailyNoteBody(stripFrontmatter(source))) {
+		const template = readDailyNoteTemplate(options.dailyNotes.template, docsRoot);
+		if (template) {
+			tree.children = parseMarkdownNodes(template);
+		}
+	}
+
+	const title = currentPage.title ?? currentPage.baseName;
+	visit(tree, "text", (node, position, parent) => {
 		if (!parent || typeof position !== "number") return;
 		if (SKIP_PARENT_TYPES.has(parent.type)) return;
-		node.value = expandDailyTemplateText(node.value, date);
+		node.value = expandDailyTemplateTokens(node.value, date, title);
 	});
 
 	if (includePageDecorations && options.dailyNotes.navigation) {
@@ -300,12 +644,12 @@ function reportDataviewDiagnostic(
 	options: NormalizedPluginOptions,
 	message: string,
 ): void {
-	const fullMessage = `[rspress-plugin-obsidian-wikilink:dataview] ${message}`;
-	if (options.onDataviewError === "error") {
-		file.fail(fullMessage);
-		return;
-	}
-	file.message(fullMessage);
+	reportPluginDiagnostic(
+		file,
+		"dataview",
+		message,
+		options.onDataviewError === "error" ? "fail" : "warn",
+	);
 }
 export const remarkWikilink: RemarkPluginFactory<RemarkWikiLinkPluginOptions> =
 	({ getDocsRoot, getContentIndex, options }) =>
@@ -335,64 +679,66 @@ export const remarkWikilink: RemarkPluginFactory<RemarkWikiLinkPluginOptions> =
 				throw error;
 			}
 
-			file.message(
-				`[rspress-plugin-obsidian-wikilink] Unexpected error processing ${file.path ?? "unknown file"}: ${error instanceof Error ? error.message : String(error)}`,
+			reportPluginDiagnostic(
+				file,
+				"",
+				`Unexpected error processing ${file.path ?? "unknown file"}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	};
 
-async function remarkWikilinkInner(
-	tree: Root,
-	file: VFile,
-	getDocsRoot: (filePath?: string) => string,
-	options: NormalizedPluginOptions,
-	currentFilePathOverride?: string,
-	includePageDecorations = true,
-	visitedOverride?: Set<string>,
-	depth = 0,
-	sourceContent?: string,
-	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
-): Promise<void> {
-	const currentFilePath = currentFilePathOverride ?? getCurrentFilePath(file);
-	const docsRoot = getDocsRoot(currentFilePath);
-	const index = getContentIndex && currentFilePath
-		? await getContentIndex(currentFilePath)
-		: await getCachedContentIndex(docsRoot);
+/**
+ * Fold CRLF (and lone CR) out of every value that reaches the output.
+ *
+ * micromark parses the source without rewriting it, so a document edited on
+ * Windows keeps `\r\n` inside text, code and raw-HTML node values. Browsers
+ * normalise those away, but they make the emitted HTML byte-different from the
+ * same vault on Linux — and byte-identical output is what lets a Windows CI leg
+ * compare artifacts instead of merely smoke-testing them. Only `value` changes:
+ * `position` still indexes the raw CRLF source, so the source-slice passes
+ * (comment ranges, callout restoration) keep matching.
+ */
+function normalizeLineEndingsInTree(tree: Root): void {
+	visit(tree, (node) => {
+		switch (node.type) {
+			case "text":
+			case "code":
+			case "inlineCode":
+			case "html": {
+				if (node.value.includes("\r")) {
+					node.value = node.value.replace(/\r\n?/g, "\n");
+				}
+				return;
+			}
+			default:
+				return;
+		}
+	});
+}
 
-	if (!currentFilePath) {
-		return;
-	}
+/** What a raw-source scan of `[^id]: …` lines finds, for the footnote stages. */
+interface FootnoteSourceMetadata {
+	definitions: Map<string, string>;
+	continuationLineNumbers: Set<number>;
+}
 
-	const currentPage = index.byAbsolutePath.get(currentFilePath);
-	if (!currentPage) {
-		file.message(
-			`[rspress-plugin-obsidian-wikilink] File "${currentFilePath}" not found in content index — wikilink processing skipped.`,
-		);
-		return;
-	}
-	if (options.enableDailyNotes) {
-		processDailyNoteNodes(tree, currentPage, index, options, includePageDecorations);
-	}
+// --- pipeline stages -------------------------------------------------------
+// Extracted verbatim, in pipeline order, and named so the orchestrator reads as
+// the ordered list it is. Some pairs are order-dependent — a stage that runs
+// after a source-rebuilding one sees different nodes, because rebuilding
+// produces nodes with no source positions, and the comment-value pass below
+// exists only to catch callout content for that reason. Others are not
+// observable from the outside; do not assume every neighbour is coupled.
+// `pipeline ordering` in remark-wikilink.test.ts holds the composed behaviour.
 
-	if (options.enableDataview) {
-		processDataviewNodes(tree, currentPage, index, file, options);
-	}
-	const footnoteSourceMetadata = extractFootnoteSourceMetadata(sourceContent ?? String(file));
-	const source = sourceContent ?? String(file);
-
-	// Callouts run before every text-level transform: their content paragraphs
-	// are rebuilt from raw source (so markdown titles split the AST without
-	// truncating it), and the passes below then apply to the rebuilt nodes
-	// exactly as they do to the rest of the document. First, any callouts
-	// already claimed by Rspress's built-in alert transform are restored from
-	// source so they get full Obsidian semantics here too.
-	if (options.enableCallouts) {
-		restoreHijackedCallouts(tree, source);
-		processCallouts(tree, currentPage, index, options, source);
-	}
-
-	// Strip Obsidian comments (%% ... %%) before all other transforms.
-	unistVisit(tree, "text", (node, position, parent) => {
+/**
+ * Strip `%%` comments from node *values*.
+ *
+ * `stripComments` above works from source ranges and so cannot see nodes this
+ * plugin rebuilt from source (callout content), which carry no positions.
+ */
+function processCommentValues(tree: Root): void {
+	visit(tree, "text", (node, position, parent) => {
 		if (!node.value.includes("%%")) return;
 		const stripped = node.value.replace(COMMENT_PATTERN, "");
 		if (stripped === node.value) return;
@@ -405,9 +751,13 @@ async function remarkWikilinkInner(
 
 		node.value = stripped;
 	});
+}
 
-	// Transform Obsidian text highlighting ==text== to <mark> tags
-	unistVisit(tree, "text", (node, position, parent) => {
+/**
+ * Turn Obsidian `==highlights==` into `<mark>` nodes.
+ */
+function processHighlights(tree: Root): void {
+	visit(tree, "text", (node, position, parent) => {
 		if (!parent || typeof position !== "number") {
 			return;
 		}
@@ -453,13 +803,30 @@ async function remarkWikilinkInner(
 		};
 		parentWithChildren.children.splice(position, 1, ...replacementNodes);
 	});
+}
 
-	// Transform Obsidian footnotes — two-pass approach.
+/**
+ * Render Obsidian footnotes — `[^id]`, `[^id]: …`, and inline `^[…]`.
+ *
+ * Six stages over one shared tree, kept together on purpose: they thread the
+ * same collected state (`footnoteDefs`, `inlineFnDefs`) through each other, and
+ * a stage that runs after a source-rebuilding one sees different nodes than it
+ * would otherwise. That ordering is load-bearing, and the stage comments below
+ * say which pairs depend on it.
+ */
+function processFootnotes(
+	tree: Root,
+	currentPage: ContentPage,
+	index: ContentIndex,
+	options: NormalizedPluginOptions,
+	file: VFile,
+	footnoteSourceMetadata: FootnoteSourceMetadata,
+): void {
 	// Pass 1 (read-only): collect all label-based definitions across the whole tree
 	// so that title attributes are correct even when defs appear after their refs.
 	const footnoteDefs = new Map<string, string>();
 	const footnoteDupeLabels = new Set<string>();
-	unistVisit(tree, "text", (node) => {
+	visit(tree, "text", (node) => {
 		if (!node.value.includes("[^")) return;
 		for (const m of node.value.matchAll(FOOTNOTE_DEF_PATTERN)) {
 			const label = m[1] ?? "";
@@ -479,8 +846,28 @@ async function remarkWikilinkInner(
 		}
 	}
 
+	// Strip whole definition paragraphs. Inline markdown inside a definition
+	// (`[^1]: see **note**`) splits the paragraph into several nodes, so
+	// removing only the matched marker text would leak the rest of the
+	// definition into the body; the collected content (favouring the raw
+	// source above) is what the footnotes block renders.
+	visit(tree, "paragraph", (node, position, parent) => {
+		if (!parent || typeof position !== "number") return;
+		const first = node.children[0];
+		if (first?.type !== "text" || !/^\[\^[^\]]+\]:/.test(first.value)) return;
+		// Unindented lines after the marker are lazy continuations, not part of
+		// the definition — leave paragraphs that still carry such content.
+		const rest = node.children
+			.map((child) => (child.type === "text" ? child.value : ""))
+			.join("")
+			.replace(/^\[\^[^\]]+\]:[ \t]*/, "");
+		const lines = rest.split("\n");
+		if (lines.slice(1).some((line) => line !== "" && !/^[ \t]{2,}/.test(line))) return;
+		(parent as Parent & { children: unknown[] }).children.splice(position, 1);
+	});
+
 	if (footnoteSourceMetadata.continuationLineNumbers.size > 0) {
-		unistVisit(tree, "text", (node, position, parent) => {
+		visit(tree, "text", (node, position, parent) => {
 			if (!parent || typeof position !== "number") return;
 			if (parent.type !== "paragraph") return;
 			const lineNumber = node.position?.start.line;
@@ -494,26 +881,41 @@ async function remarkWikilinkInner(
 	}
 
 	if (footnoteDupeLabels.size > 0) {
-		file.message(
-			`[rspress-plugin-obsidian-wikilink:footnote] Duplicate footnote label${footnoteDupeLabels.size > 1 ? "s" : ""}: ${[...footnoteDupeLabels].join(", ")}. Later definitions overwrite earlier ones.`,
+		reportPluginDiagnostic(
+			file,
+			"footnote",
+			`Duplicate footnote label${footnoteDupeLabels.size > 1 ? "s" : ""}: ${[...footnoteDupeLabels].join(", ")}. Later definitions overwrite earlier ones.`,
 		);
 	}
 
-	// Pass 2: strip definition lines, transform label refs, transform inline fns.
+	// Inline `^[…]` footnotes are found at the phrasing level, before the pass
+	// below: remark splits their content at every markdown construct inside it,
+	// so `^[with **bold** here]` never presents the closing bracket in the same
+	// text node as the opener. The definitions land in the shared counter and
+	// list the footnotes block renders.
 	let inlineFnCounter = 0;
 	const inlineFnDefs: Array<{ id: string; content: string }> = [];
+	visitPhrasingContainers(tree, (children) => {
+		const extracted = extractInlineFootnotes(children, inlineFnCounter);
+		if (extracted.defs.length === 0) return;
+		inlineFnCounter += extracted.defs.length;
+		inlineFnDefs.push(...extracted.defs);
+		return extracted.children;
+	});
 
-	unistVisit(tree, "text", (node, position, parent) => {
+	// Pass 2: strip definition lines, transform label refs.
+
+	visit(tree, "text", (node, position, parent) => {
 		if (!parent || typeof position !== "number") return;
 		if (SKIP_PARENT_TYPES.has(parent.type)) return;
 
 		const text = node.value;
-		const hasLabelFn = text.includes("[^");
-		const hasInlineFn = text.includes("^[");
-		if (!hasLabelFn && !hasInlineFn) return;
+		// Inline `^[…]` footnotes are handled by the phrasing-level pass above;
+		// only label refs and defs remain here.
+		if (!text.includes("[^")) return;
 
 		interface FnMatch {
-			kind: "ref" | "def" | "inline";
+			kind: "ref" | "def";
 			start: number;
 			end: number;
 			label: string;
@@ -521,38 +923,23 @@ async function remarkWikilinkInner(
 		}
 
 		const allMatches: FnMatch[] = [];
-
-		if (hasLabelFn) {
-			for (const m of text.matchAll(FOOTNOTE_DEF_PATTERN)) {
-				allMatches.push({
-					kind: "def",
-					start: m.index ?? 0,
-					end: (m.index ?? 0) + m[0].length,
-					label: m[1] ?? "",
-					content: normalizeFootnoteContent(m[2] ?? ""),
-				});
-			}
-			for (const m of text.matchAll(FOOTNOTE_REF_PATTERN)) {
-				allMatches.push({
-					kind: "ref",
-					start: m.index ?? 0,
-					end: (m.index ?? 0) + m[0].length,
-					label: m[1] ?? "",
-					content: "",
-				});
-			}
+		for (const m of text.matchAll(FOOTNOTE_DEF_PATTERN)) {
+			allMatches.push({
+				kind: "def",
+				start: m.index ?? 0,
+				end: (m.index ?? 0) + m[0].length,
+				label: m[1] ?? "",
+				content: normalizeFootnoteContent(m[2] ?? ""),
+			});
 		}
-
-		if (hasInlineFn) {
-			for (const m of text.matchAll(INLINE_FOOTNOTE_PATTERN)) {
-				allMatches.push({
-					kind: "inline",
-					start: m.index ?? 0,
-					end: (m.index ?? 0) + m[0].length,
-					label: "",
-					content: m[1] ?? "",
-				});
-			}
+		for (const m of text.matchAll(FOOTNOTE_REF_PATTERN)) {
+			allMatches.push({
+				kind: "ref",
+				start: m.index ?? 0,
+				end: (m.index ?? 0) + m[0].length,
+				label: m[1] ?? "",
+				content: "",
+			});
 		}
 
 		if (allMatches.length === 0) return;
@@ -575,15 +962,6 @@ async function remarkWikilinkInner(
 				replacementNodes.push({
 					type: "html",
 					value: `<sup class="footnote-ref" id="fnref-${escapeHtmlAttribute(match.label)}"><a href="#fn-${escapeHtmlAttribute(match.label)}"${title}>${escapeHtmlText(match.label)}</a></sup>`,
-				});
-			} else {
-				// inline footnote: ^[text]
-				inlineFnCounter++;
-				const id = `inline-${inlineFnCounter}`;
-				inlineFnDefs.push({ id, content: match.content });
-				replacementNodes.push({
-					type: "html",
-					value: `<sup class="footnote-ref" id="fnref-${id}"><a href="#fn-${id}" title="${escapeHtmlAttribute(match.content)}">${inlineFnCounter}</a></sup>`,
 				});
 			}
 
@@ -610,68 +988,225 @@ async function remarkWikilinkInner(
 		parentWithChildren.children.splice(position, 1, ...replacementNodes);
 	});
 
+	// Rspress registers `remark-gfm` before this plugin, so micromark has
+	// already turned `[^1]` into a `footnoteReference` node and `[^1]:` into a
+	// `footnoteDefinition` — the text patterns above never see them. Left alone
+	// that produced a second, gfm-rendered footnotes section *and* left the
+	// back-links above pointing at ids nothing ever emitted. Claim both node
+	// types instead: harvest the definitions (the raw-source scan above is
+	// still the richer source, so this only fills gaps), drop them so gfm has
+	// nothing left to render, and emit the `<sup>` the back-links target.
+	visit(tree, "footnoteDefinition", (node, position, parent) => {
+		if (!parent || typeof position !== "number") return;
+		const label = String(node.identifier ?? "").trim();
+		const content = normalizeFootnoteContent(flattenMdastText(node.children));
+		if (label && content && !footnoteDefs.has(label)) {
+			footnoteDefs.set(label, content);
+		}
+		(parent as Parent & { children: unknown[] }).children.splice(position, 1);
+	});
+	visit(tree, "footnoteReference", (node, position, parent) => {
+		if (!parent || typeof position !== "number") return;
+		if (SKIP_PARENT_TYPES.has(parent.type)) return;
+		const label = String(node.identifier ?? "").trim();
+		if (!label) return;
+		const def = footnoteDefs.get(label);
+		const title = def ? ` title="${escapeHtmlAttribute(def)}"` : "";
+		(parent as Parent & { children: unknown[] }).children.splice(position, 1, {
+			type: "html",
+			value: `<sup class="footnote-ref" id="fnref-${escapeHtmlAttribute(label)}"><a href="#fn-${escapeHtmlAttribute(label)}"${title}>${escapeHtmlText(label)}</a></sup>`,
+		});
+	});
+
 	// Render all footnotes (label-based + inline) at the end of the document.
+	// Definitions render like callout titles: inline Markdown plus resolved
+	// wikilinks, so `**bold**` and `[[page]]` inside a footnote are real markup.
 	if (footnoteDefs.size > 0 || inlineFnDefs.length > 0) {
-		const footnotesHtml = renderAllFootnotesHtml(footnoteDefs, inlineFnDefs);
+		const footnotesHtml = renderAllFootnotesHtml(footnoteDefs, inlineFnDefs, (content) =>
+			renderCalloutTitleHtml(content, currentPage, index, options),
+		);
 		if (footnotesHtml) {
 			tree.children.push({ type: "html", value: footnotesHtml });
 		}
 	}
+}
+
+/**
+ * Rewrite inline `#tag` into a link to its generated tag page.
+ */
+function processTagLinks(tree: Root): void {
+	visit(tree, "text", (node, position, parent) => {
+		if (!parent || typeof position !== "number") {
+			return;
+		}
+
+		if (SKIP_PARENT_TYPES.has(parent.type)) {
+			return;
+		}
+
+		const text = node.value;
+		if (!text.includes("#")) {
+			return;
+		}
+
+		const tags = [...text.matchAll(TAG_PATTERN)].filter(
+			(match) => !isInsideWikilink(text, match.index ?? 0),
+		);
+		if (tags.length === 0) {
+			return;
+		}
+
+		const replacementNodes: PhrasingContent[] = [];
+		let cursor = 0;
+
+		for (const tag of tags) {
+			const start = tag.index ?? 0;
+			const fullMatch = tag[0] ?? "";
+			// Trim any trailing slashes that may appear on malformed nested tags.
+			const tagName = (tag[1] ?? "").replace(/\/+$/, "");
+
+			if (start > cursor) {
+				replacementNodes.push(createTextNode(text.slice(cursor, start)));
+			}
+
+			if (tagName && !/^[\p{N}/-]+$/u.test(tagName)) {
+				replacementNodes.push(
+					createLinkNode(`/tags/${encodeTagPathSegment(tagName)}`, `#${tagName}`),
+				);
+			} else {
+				replacementNodes.push(createTextNode(fullMatch));
+			}
+			cursor = start + fullMatch.length;
+		}
+
+		if (cursor < text.length) {
+			replacementNodes.push(createTextNode(text.slice(cursor)));
+		}
+
+		const parentWithChildren = parent as Parent & {
+			children: PhrasingContent[];
+		};
+		parentWithChildren.children.splice(position, 1, ...replacementNodes);
+	});
+}
+
+/**
+ * Drop paragraphs emptied by earlier transforms, and unwrap paragraphs left
+ * holding only block-level HTML or a JSX embed.
+ */
+function cleanupParagraphs(tree: Root): void {
+	visit(tree, "paragraph", (node, position, parent) => {
+		if (!parent || typeof position !== "number") return;
+		if (
+			node.children.length === 0 ||
+			node.children.every((child) => {
+				// `mdxJsxFlowElement` is not part of the phrasing union (a flow
+				// element cannot appear inside a paragraph as far as mdast is
+				// concerned), but this pass creates exactly that combination when
+				// it splices an embed into a paragraph — hence the widened read.
+				const type = (child as { type: string }).type;
+				return type === "html" || type === "mdxJsxFlowElement";
+			})
+		) {
+			(parent as Parent & { children: unknown[] }).children.splice(position, 1, ...node.children);
+		}
+	});
+}
+
+async function remarkWikilinkInner(
+	tree: Root,
+	file: VFile,
+	getDocsRoot: (filePath?: string) => string,
+	options: NormalizedPluginOptions,
+	currentFilePathOverride?: string,
+	includePageDecorations = true,
+	visitedOverride?: Set<string>,
+	depth = 0,
+	sourceContent?: string,
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
+): Promise<void> {
+	const currentFilePath = currentFilePathOverride ?? getCurrentFilePath(file);
+	const docsRoot = getDocsRoot(currentFilePath);
+	const index =
+		getContentIndex && currentFilePath
+			? await getContentIndex(currentFilePath)
+			: await getCachedContentIndex(docsRoot);
+
+	if (!currentFilePath) {
+		return;
+	}
+
+	const indexedPage = index.byAbsolutePath.get(currentFilePath);
+	// A page this plugin generated is absent from the index by design: Rspress
+	// writes `addPages` content to `node_modules/.rspress/runtime/temp-NN.mdx`,
+	// outside every content root, and compiles that. A stand-in page lets the
+	// pass run on it, so a generator that emits a wikilink, a formula or a callout
+	// gets the same treatment as a note — and there is nothing for the reader to
+	// fix, so no diagnostic. A file *inside* a content root that the index does not
+	// know is a real problem and keeps its warning.
+	const currentPage = indexedPage ?? generatedPageFor(currentFilePath, docsRoot, String(file));
+	if (!currentPage) {
+		reportPluginDiagnostic(
+			file,
+			"",
+			`File "${currentFilePath}" not found in content index — wikilink processing skipped.`,
+		);
+		return;
+	}
+	// Page decorations (daily-note navigation, the backlinks panel, `cssclasses`)
+	// describe a page the reader can navigate to. They are already no-ops for an
+	// unindexed page, but stating it keeps a generated page from ever growing one.
+	const decoratePage = includePageDecorations && indexedPage !== undefined;
+	if (options.enableDailyNotes) {
+		processDailyNoteNodes(
+			tree,
+			currentPage,
+			index,
+			options,
+			decoratePage,
+			docsRoot,
+			sourceContent ?? String(file),
+		);
+	}
+
+	if (options.enableDataview) {
+		processDataviewNodes(tree, currentPage, index, file, options);
+	}
+	// After the Dataview pass, so a rendered `dataview` fence is no longer a
+	// code node and only fences this plugin truly cannot run are reported.
+	processUnsupportedBlockNodes(tree, file, options);
+	if (options.enableMermaid) {
+		processMermaidNodes(tree, options);
+	}
+	const footnoteSourceMetadata = extractFootnoteSourceMetadata(sourceContent ?? String(file));
+	const source = sourceContent ?? String(file);
+
+	// Callouts run before every text-level transform: their content paragraphs
+	// are rebuilt from raw source (so markdown titles split the AST without
+	// truncating it), and the passes below then apply to the rebuilt nodes
+	// exactly as they do to the rest of the document. First, any callouts
+	// already claimed by Rspress's built-in alert transform are restored from
+	// source so they get full Obsidian semantics here too.
+	if (options.enableCallouts) {
+		restoreHijackedCallouts(tree, source);
+		processCallouts(tree, currentPage, index, options, source);
+	}
+
+	// Strip Obsidian comments (%% ... %%) before all other transforms. The
+	// source-range pass handles comments that span paragraphs and headings; the
+	// value pass below still catches nodes this plugin rebuilt from source
+	// (callouts), which carry no source positions.
+	stripComments(tree, source);
+	processCommentValues(tree);
+
+	// Transform Obsidian text highlighting ==text== to <mark> tags
+	processHighlights(tree);
+
+	// Transform Obsidian footnotes — two-pass approach.
+	processFootnotes(tree, currentPage, index, options, file, footnoteSourceMetadata);
 
 	if (options.enableTagLinking) {
-		unistVisit(tree, "text", (node, position, parent) => {
-			if (!parent || typeof position !== "number") {
-				return;
-			}
-
-			if (SKIP_PARENT_TYPES.has(parent.type)) {
-				return;
-			}
-
-			const text = node.value;
-			if (!text.includes("#")) {
-				return;
-			}
-
-			const tags = [...text.matchAll(TAG_PATTERN)].filter(
-				(match) => !isInsideWikilink(text, match.index ?? 0),
-			);
-			if (tags.length === 0) {
-				return;
-			}
-
-			const replacementNodes: PhrasingContent[] = [];
-			let cursor = 0;
-
-			for (const tag of tags) {
-				const start = tag.index ?? 0;
-				const fullMatch = tag[0] ?? "";
-				// Trim any trailing slashes that may appear on malformed nested tags.
-				const tagName = (tag[1] ?? "").replace(/\/+$/, "");
-
-				if (start > cursor) {
-					replacementNodes.push(createTextNode(text.slice(cursor, start)));
-				}
-
-				if (tagName && !/^[\p{N}/-]+$/u.test(tagName)) {
-					replacementNodes.push(
-						createLinkNode(`/tags/${encodeTagPathSegment(tagName)}`, `#${tagName}`),
-					);
-				} else {
-					replacementNodes.push(createTextNode(fullMatch));
-				}
-				cursor = start + fullMatch.length;
-			}
-
-			if (cursor < text.length) {
-				replacementNodes.push(createTextNode(text.slice(cursor)));
-			}
-
-			const parentWithChildren = parent as Parent & {
-				children: PhrasingContent[];
-			};
-			parentWithChildren.children.splice(position, 1, ...replacementNodes);
-		});
+		processTagLinks(tree);
 	}
 
 	if (options.enableMediaEmbeds || options.enableTransclusion) {
@@ -685,10 +1220,15 @@ async function remarkWikilinkInner(
 			currentFilePath,
 			visitedOverride ?? new Set([currentPage.absolutePath]),
 			depth,
+			getContentIndex,
 		);
 	}
 
-	if (options.enableMarkdownLinks) {
+	// Sized markdown images are media, not note transclusion, so they are
+	// gathered here for their own sake: behind `enableMarkdownLinks` they were
+	// off unless markdown-link support happened to be on too, which has nothing
+	// to do with `enableMediaEmbeds`.
+	if (options.enableMarkdownLinks || options.enableMediaEmbeds) {
 		await processMarkdownEmbeds(
 			tree,
 			currentPage,
@@ -702,41 +1242,54 @@ async function remarkWikilinkInner(
 		);
 	}
 
-	resolveWikilinksInAst(tree, currentPage, index, options, file);
+	resolveWikilinksInAst(tree, currentPage, index, options, file, depth);
 	if (options.enableMarkdownLinks) {
 		processMarkdownLinks(tree, currentPage, index, options, file);
+	}
+	// Math runs last among the text transforms: wikilinks, highlights and tags
+	// have already claimed their syntax, so `$` is the only thing left to read.
+	if (options.enableMath) {
+		// The engine has to be loaded before the first formula is rendered, and
+		// rendering itself is synchronous, so the async half runs first. A
+		// MathJax install that is missing or broken is reported through the
+		// build rather than silently falling back to KaTeX.
+		await prepareMathEngine(options.mathEngine);
+		processMathNodes(tree, options.mathEngine);
+		const stylesheet = mathEngineStylesheet(options.mathEngine);
+		if (stylesheet) {
+			tree.children.unshift({ type: "html", value: `<style>${stylesheet}</style>\n` });
+		}
 	}
 	emitBlockAnchors(tree, currentPage);
 
 	// Final cleanup: drop paragraphs emptied by earlier transforms (comments,
 	// footnote definitions) and unwrap paragraphs that now contain only raw
-	// block-level HTML nodes (embeds, block anchors). Both would otherwise
-	// serialize with stray empty <p> wrappers around block-level HTML.
-	unistVisit(tree, "paragraph", (node, position, parent) => {
-		if (!parent || typeof position !== "number") return;
-		if (node.children.length === 0 || node.children.every((child) => child.type === "html")) {
-			(parent as Parent & { children: unknown[] }).children.splice(position, 1, ...node.children);
-		}
-	});
+	// block-level HTML nodes (embeds, block anchors) or a JSX embed
+	// (`CanvasEmbed`, a flow element in MDX). All would otherwise serialize
+	// with stray empty <p> wrappers around block-level content.
+	cleanupParagraphs(tree);
 
 	// Only the top-level pass (depth 0) may fail the file: a broken link must
 	// not abort resolution of the remaining wikilinks, so failure is raised
 	// once the whole document has been processed.
 	if (depth === 0 && pendingFailures.has(file)) {
 		file.fail(
-			`[rspress-plugin-obsidian-wikilink] One or more wikilinks failed to resolve (see messages above).`,
+			`[rspress-plugin-obsidian:markdown] One or more wikilinks failed to resolve (see messages above).`,
 		);
 	}
-	if (includePageDecorations && options.enableBacklinks) {
+	if (decoratePage && options.enableBacklinks) {
 		const backlinksMap = await getCachedBacklinksIndex(index);
 		const refs = backlinksMap.get(currentPage.routePath) ?? [];
-		const html = renderBacklinksHtml(refs);
+		const mentions = options.enableUnlinkedMentions
+			? (getMentions(index).get(currentPage.routePath) ?? [])
+			: [];
+		const html = renderBacklinksHtml(refs, mentions);
 		if (html) {
 			tree.children.push({ type: "html", value: html });
 		}
 	}
 
-	if (includePageDecorations && currentPage.cssclasses.length > 0) {
+	if (decoratePage && currentPage.cssclasses.length > 0) {
 		const classes = currentPage.cssclasses.map(escapeHtmlAttribute).join(" ");
 		tree.children.unshift({
 			type: "html",
@@ -744,6 +1297,11 @@ async function remarkWikilinkInner(
 		});
 		tree.children.push({ type: "html", value: "</div>" });
 	}
+
+	// Last, and at every depth: values rebuilt from source slices during the pass
+	// (callout content, transcluded subtrees) are CRLF on a Windows-authored
+	// vault, so folding here is what catches everything that reaches the output.
+	normalizeLineEndingsInTree(tree);
 }
 
 async function renderTranscludedHtml(
@@ -806,14 +1364,18 @@ async function renderPageEmbed(
 	}
 
 	if (ctx.visited.has(targetPage.absolutePath)) {
-		ctx.file.message(
-			`[rspress-plugin-obsidian-wikilink:transclusion] Circular transclusion detected: ${parsedEmbed.raw} in "${ctx.currentPage.relativePath}".`,
+		reportPluginDiagnostic(
+			ctx.file,
+			"transclusion",
+			`Circular transclusion detected: ${parsedEmbed.raw} in "${ctx.currentPage.relativePath}".`,
 		);
 		return createTextNode(parsedEmbed.raw);
 	}
 	if (ctx.depth >= MAX_TRANSCLUSION_DEPTH) {
-		ctx.file.message(
-			`[rspress-plugin-obsidian-wikilink:transclusion] Max transclusion depth (${MAX_TRANSCLUSION_DEPTH}) reached for ${parsedEmbed.raw} in "${ctx.currentPage.relativePath}".`,
+		reportPluginDiagnostic(
+			ctx.file,
+			"transclusion",
+			`Max transclusion depth (${MAX_TRANSCLUSION_DEPTH}) reached for ${parsedEmbed.raw} in "${ctx.currentPage.relativePath}".`,
 		);
 		return createTextNode(parsedEmbed.raw);
 	}
@@ -837,8 +1399,10 @@ async function renderPageEmbed(
 					parsedEmbed.subpath.kind === "heading"
 						? formatAvailableHeadings(targetPage)
 						: formatAvailableBlocks(targetPage);
-				ctx.file.message(
-					`[rspress-plugin-obsidian-wikilink:transclusion] ${parsedEmbed.subpath.kind === "heading" ? "Heading" : "Block"} "${parsedEmbed.subpath.value}" not found in "${targetPage.relativePath}" for ${parsedEmbed.raw};${suffix} rendering as a link to the page.`,
+				reportPluginDiagnostic(
+					ctx.file,
+					"transclusion",
+					`${parsedEmbed.subpath.kind === "heading" ? "Heading" : "Block"} "${parsedEmbed.subpath.value}" not found in "${targetPage.relativePath}" for ${parsedEmbed.raw};${suffix} rendering as a link to the page.`,
 				);
 				return createEmbedNode(
 					targetPage.routePath,
@@ -851,23 +1415,36 @@ async function renderPageEmbed(
 			transcludedContent = stripFrontmatter(content);
 		}
 
-		const transcludedHtml = await renderTranscludedHtml(
-			transcludedContent,
-			ctx.options,
-			ctx.file,
-			ctx.docsRoot,
+		const renders = transclusionCacheFor(ctx.options);
+		const renderKey = [
 			targetPage.absolutePath,
-			new Set([...ctx.visited, targetPage.absolutePath]),
-			ctx.depth + 1,
-			ctx.getContentIndex,
-		);
+			parsedEmbed.subpath ? `${parsedEmbed.subpath.kind}:${parsedEmbed.subpath.value}` : "",
+			String(ctx.depth),
+			[...ctx.visited].sort().join("|"),
+		].join("\u0000");
+		let transcludedHtml = renders.get(renderKey);
+		if (transcludedHtml === undefined) {
+			transcludedHtml = await renderTranscludedHtml(
+				transcludedContent,
+				ctx.options,
+				ctx.file,
+				ctx.docsRoot,
+				targetPage.absolutePath,
+				new Set([...ctx.visited, targetPage.absolutePath]),
+				ctx.depth + 1,
+				ctx.getContentIndex,
+			);
+			renders.set(renderKey, transcludedHtml);
+		}
 		return {
 			type: "html",
 			value: `<div class="obsidian-transclusion" data-src="${escapeHtmlAttribute(resolved.href ?? "")}">\n${transcludedHtml}\n</div>`,
 		};
 	} catch (error) {
-		ctx.file.message(
-			`[rspress-plugin-obsidian-wikilink:transclusion] Failed to read "${targetPage.relativePath}" for ${parsedEmbed.raw}: ${error instanceof Error ? error.message : String(error)}`,
+		reportPluginDiagnostic(
+			ctx.file,
+			"transclusion",
+			`Failed to read "${targetPage.relativePath}" for ${parsedEmbed.raw}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 		return createTextNode(parsedEmbed.raw);
 	}
@@ -878,18 +1455,14 @@ function isExternalUrl(url: string): boolean {
 }
 
 /**
- * Build a {@link ParsedWikiLink} from a standard markdown link destination.
+ * Split a markdown link destination into its decoded path and anchor.
  *
- * Only `.md` / `.mdx` file references are considered — Obsidian's
- * autocomplete emits that form, and anything else (external URLs, pure
- * `#anchors`, extensionless routes) belongs to Rspress's own link handling.
- * Percent-encoded destinations are decoded before resolution.
+ * Returns `undefined` for anything this plugin does not own: external URLs,
+ * pure `#anchors`, and destinations that are not `.md`/`.mdx` files (those
+ * belong to Rspress's own link handling). Percent-encoded destinations are
+ * decoded before the file-extension test.
  */
-function parseMarkdownLinkUrl(
-	url: string,
-	raw: string,
-	isEmbed: boolean,
-): ParsedWikiLink | undefined {
+function parseMarkdownDestination(url: string): { pathPart: string; anchor?: string } | undefined {
 	if (!url || isExternalUrl(url) || url.startsWith("#")) {
 		return undefined;
 	}
@@ -907,7 +1480,124 @@ function parseMarkdownLinkUrl(
 		return undefined;
 	}
 
-	const anchor = hashIndex >= 0 ? decoded.slice(hashIndex + 1).trim() : undefined;
+	return {
+		pathPart,
+		anchor: hashIndex >= 0 ? decoded.slice(hashIndex + 1).trim() : undefined,
+	};
+}
+
+/**
+ * An `obsidian://` destination, parsed into the note it names — or the reason
+ * it cannot be served.
+ */
+type ObsidianUriTarget = { parsed: ParsedWikiLink } | { unsupported: string };
+
+/**
+ * Parse an `obsidian://` link into the vault note it names, so the link pass
+ * can resolve it like any other link instead of shipping an `obsidian://` href
+ * that is dead on the web (the scheme looks external, so nothing else reports
+ * it either).
+ *
+ * Only the `open` action addresses a note. `search`, `new`, and
+ * `hook-get-address` cannot be served by a static site, so they — like a URI
+ * that cannot be parsed or names no note — come back as an `unsupported`
+ * reason for the caller to report.
+ *
+ * The `vault` parameter is ignored: one docs root publishes one vault, so the
+ * file resolves against the index this pass already holds.
+ */
+function parseObsidianUriTarget(url: string, raw: string): ObsidianUriTarget | undefined {
+	if (!url.toLowerCase().startsWith("obsidian://")) {
+		return undefined;
+	}
+
+	let uri: URL;
+	try {
+		uri = new URL(url);
+	} catch {
+		return { unsupported: "the URI cannot be parsed; the link is left as written." };
+	}
+
+	// The action is the URI's host: `obsidian://open?…`.
+	const action = uri.hostname.toLowerCase();
+	if (action !== "open") {
+		return {
+			unsupported: action
+				? `the "obsidian://${action}" action cannot be served by a published site; the link is left as written.`
+				: "the URI names no action; the link is left as written.",
+		};
+	}
+
+	// `file` is the current parameter and `path` the legacy one; `URLSearchParams`
+	// decodes both. A heading arrives percent-encoded inside the value
+	// (`file=Note%23Heading`) or as the URI's own fragment (`file=Note#Heading`).
+	let target = uri.searchParams.get("file") ?? uri.searchParams.get("path") ?? "";
+	let subpathValue = uri.searchParams.get("subpath") ?? "";
+	const hashIndex = target.indexOf("#");
+	if (hashIndex >= 0) {
+		subpathValue = target.slice(hashIndex + 1);
+		target = target.slice(0, hashIndex);
+	}
+	if (!subpathValue && uri.hash.length > 1) {
+		const fragment = uri.hash.slice(1);
+		try {
+			subpathValue = decodeURIComponent(fragment);
+		} catch {
+			// keep the raw form when the fragment is not valid percent-encoding
+			subpathValue = fragment;
+		}
+	}
+
+	target = target.replace(/\.(md|mdx)$/i, "").trim();
+	subpathValue = subpathValue.replace(/^#/, "").trim();
+	if (!target) {
+		return { unsupported: "the URI does not name a note; the link is left as written." };
+	}
+
+	return {
+		parsed: {
+			raw,
+			target,
+			isEmbed: false,
+			subpath: subpathValue
+				? subpathValue.startsWith("^")
+					? { kind: "block", value: subpathValue.slice(1).trim() }
+					: { kind: "heading", value: subpathValue }
+				: undefined,
+			isCurrentPageReference: false,
+		},
+	};
+}
+
+/**
+ * Whether a link destination is one this plugin resolves itself.
+ *
+ * The same predicate `parseMarkdownLinkUrl` uses, exported so the Rspress
+ * config hook can exempt exactly those destinations from Rspress's dead-link
+ * gate and leave every other link checked.
+ */
+export function isPluginOwnedMarkdownDestination(url: string): boolean {
+	return parseMarkdownDestination(url) !== undefined;
+}
+
+/**
+ * Build a {@link ParsedWikiLink} from a standard markdown link destination.
+ *
+ * Only `.md` / `.mdx` file references are considered — Obsidian's
+ * autocomplete emits that form, and anything else (external URLs, pure
+ * `#anchors`, extensionless routes) belongs to Rspress's own link handling.
+ */
+function parseMarkdownLinkUrl(
+	url: string,
+	raw: string,
+	isEmbed: boolean,
+): ParsedWikiLink | undefined {
+	const destination = parseMarkdownDestination(url);
+	if (!destination) {
+		return undefined;
+	}
+	const { pathPart, anchor } = destination;
+
 	const subpath = anchor
 		? anchor.startsWith("^")
 			? { kind: "block" as const, value: anchor.slice(1).trim() }
@@ -944,8 +1634,25 @@ function processMarkdownLinks(
 		enableCaseInsensitiveLookup: options.enableCaseInsensitiveLookup,
 	};
 
-	unistVisit(tree, "link", (node: Link) => {
-		const parsed = parseMarkdownLinkUrl(node.url, `[…](${node.url})`, false);
+	/**
+	 * Resolve one destination in place. `.md` destinations and `obsidian://`
+	 * URIs both go through the wikilink ladder; anything else (external URLs,
+	 * pure anchors, extensionless routes) belongs to Rspress's own handling.
+	 */
+	const rewriteDestination = (
+		node: { url: string },
+		raw: string,
+		unresolvedMessage: string,
+	): void => {
+		const obsidianUri = parseObsidianUriTarget(node.url, raw);
+		if (obsidianUri && "unsupported" in obsidianUri) {
+			// An `obsidian://` link cannot be left to Rspress: its scheme looks
+			// external, so an unresolvable one is a dead link nobody reports.
+			reportDiagnostic(file, raw, obsidianUri.unsupported, "broken-page", options);
+			return;
+		}
+
+		const parsed = obsidianUri?.parsed ?? parseMarkdownLinkUrl(node.url, raw, false);
 		if (!parsed) {
 			return;
 		}
@@ -959,15 +1666,25 @@ function processMarkdownLinks(
 			if (resolved.href) {
 				node.url = resolved.href;
 			}
-		} else {
-			reportDiagnostic(
-				file,
-				`[…](${node.url})`,
-				resolved.message ?? "Unable to resolve markdown link.",
-				resolved.status,
-				options,
-			);
+			return;
 		}
+		reportDiagnostic(file, raw, resolved.message ?? unresolvedMessage, resolved.status, options);
+	};
+
+	visit(tree, "link", (node: Link) => {
+		rewriteDestination(node, `[…](${node.url})`, "Unable to resolve markdown link.");
+	});
+
+	// Reference definitions (`[ref]: Page.md`) carry the destination for every
+	// `[label][ref]` in the document, so resolving the definition fixes all of them
+	// at once — and a broken one is reported instead of rendering a dead `.md`
+	// href that Rspress's dead-link gate has been told to leave alone.
+	visit(tree, "definition", (node) => {
+		rewriteDestination(
+			node,
+			`[${node.identifier}]: ${node.url}`,
+			"Unable to resolve markdown reference definition.",
+		);
 	});
 }
 
@@ -995,16 +1712,48 @@ async function processMarkdownEmbeds(
 	interface EmbedWork {
 		node: Image;
 		parent: Parent;
+		/** Set when the node is a sized media image rather than a page embed. */
+		media?: { alt: string; sizeAttr: string };
 	}
 	const work: EmbedWork[] = [];
 
-	unistVisit(tree, "image", (node, _position, parent) => {
+	visit(tree, "image", (node, _position, parent) => {
 		if (!parent) return;
-		if (!/\.(md|mdx)([#?]|$)/i.test(node.url)) return;
-		work.push({ node: node as Image, parent });
+		const image = node as Image;
+		if (/\.(md|mdx)([#?]|$)/i.test(image.url)) {
+			// `![alt](Note.md)` is markdown-link transclusion, which stays behind
+			// its own flag; this pass now also runs for media alone.
+			if (!options.enableMarkdownLinks) return;
+			work.push({ node: image, parent });
+			return;
+		}
+		// Obsidian lets a markdown image carry the same size a wikilink embed
+		// does — "the same syntax as a wikilink" — either as the alt on its own
+		// (`![250](url)`, `![250x145](url)`) or after a caption
+		// (`![A caption|250](url)`). An alt that is not a bare dimension is
+		// caption text, and the node is left to the ordinary image renderer,
+		// byte for byte.
+		if (!options.enableMediaEmbeds) return;
+		const sized = splitImageSize(image.alt ?? "");
+		if (!sized) return;
+		work.push({ node: image, parent, media: sized });
 	});
 
-	for (const { node, parent } of work) {
+	for (const { node, parent, media } of work) {
+		if (media) {
+			// The `src` remark resolved is kept as-is: it is already correct for
+			// the page it was written on, and resolving it again here would
+			// re-encode a URL that is about to be emitted.
+			const replacement: PhrasingContent = {
+				type: "html",
+				value: `<img src="${escapeHtmlAttribute(node.url)}" alt="${escapeHtmlAttribute(media.alt || altFromImageUrl(node.url))}"${media.sizeAttr} loading="lazy" />`,
+			};
+			const parentWithChildren = parent as Parent & { children: PhrasingContent[] };
+			const position = parentWithChildren.children.indexOf(node);
+			if (position < 0) continue;
+			parentWithChildren.children.splice(position, 1, replacement);
+			continue;
+		}
 		const raw = `![${node.alt ?? ""}](${node.url})`;
 		const parsed = parseMarkdownLinkUrl(node.url, raw, true);
 		if (!parsed) continue;
@@ -1060,6 +1809,7 @@ async function processEmbedsInTree(
 	currentFilePath: string,
 	visited: Set<string>,
 	depth: number,
+	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
 ): Promise<void> {
 	const resolveOptions = {
 		enableFuzzyMatching: options.enableFuzzyMatching,
@@ -1073,7 +1823,7 @@ async function processEmbedsInTree(
 	}
 	const embedNodes: EmbedWork[] = [];
 
-	unistVisit(tree, "text", (node, _position, parent) => {
+	visit(tree, "text", (node, _position, parent) => {
 		if (!parent) return;
 		if (SKIP_PARENT_TYPES.has(parent.type)) return;
 		if (!node.value.includes("![")) return;
@@ -1110,7 +1860,7 @@ async function processEmbedsInTree(
 			const sizeParam = parsedEmbed.alias ?? "";
 			const target = parsedEmbed.target;
 			const fragment = parsedEmbed.subpath ? `#${parsedEmbed.subpath.value}` : "";
-			const ext = target.split(".").pop()?.toLowerCase() ?? "";
+			const ext = extensionOf(target);
 			if (options.enableMediaEmbeds && IMAGE_EXTS.has(ext)) {
 				const sizeAttr = parseSizeAttr(sizeParam);
 				// Obsidian treats a numeric pipe as a size; any other pipe text
@@ -1124,8 +1874,10 @@ async function processEmbedsInTree(
 					options.enableCaseInsensitiveLookup,
 				);
 				if (!resolved.found) {
-					file.message(
-						`[rspress-plugin-obsidian-wikilink:media] Image "${target}" not found on disk for ${fullMatch}.`,
+					reportPluginDiagnostic(
+						file,
+						"media",
+						`Image "${target}" not found on disk for ${fullMatch}.`,
 					);
 				}
 				const src = escapeHtmlAttribute(`${resolved.url}${fragment}`);
@@ -1142,8 +1894,10 @@ async function processEmbedsInTree(
 					options.enableCaseInsensitiveLookup,
 				);
 				if (!resolved.found) {
-					file.message(
-						`[rspress-plugin-obsidian-wikilink:media] Audio "${target}" not found on disk for ${fullMatch}.`,
+					reportPluginDiagnostic(
+						file,
+						"media",
+						`Audio "${target}" not found on disk for ${fullMatch}.`,
 					);
 				}
 				const src = escapeHtmlAttribute(`${resolved.url}${fragment}`);
@@ -1161,8 +1915,10 @@ async function processEmbedsInTree(
 					options.enableCaseInsensitiveLookup,
 				);
 				if (!resolved.found) {
-					file.message(
-						`[rspress-plugin-obsidian-wikilink:media] Video "${target}" not found on disk for ${fullMatch}.`,
+					reportPluginDiagnostic(
+						file,
+						"media",
+						`Video "${target}" not found on disk for ${fullMatch}.`,
 					);
 				}
 				const src = escapeHtmlAttribute(`${resolved.url}${fragment}`);
@@ -1179,16 +1935,75 @@ async function processEmbedsInTree(
 					options.enableCaseInsensitiveLookup,
 				);
 				if (!resolved.found) {
-					file.message(
-						`[rspress-plugin-obsidian-wikilink:media] PDF "${target}" not found on disk for ${fullMatch}.`,
+					reportPluginDiagnostic(
+						file,
+						"media",
+						`PDF "${target}" not found on disk for ${fullMatch}.`,
 					);
 				}
-				const src = escapeHtmlAttribute(`${resolved.url}${fragment}`);
-				const pdfHeight = parsedEmbed.subpath?.value.match(/^height=(\d+)$/i)?.[1] ?? "600";
+				// Obsidian puts the two PDF knobs in the subpath: `#page=3` opens the
+				// viewer at a page, `#height=400` sizes the frame. Only the page
+				// belongs in the URL — the height is a property of this embed, so
+				// it is an attribute and never travels to the file.
+				const subpathValue = parsedEmbed.subpath?.value ?? "";
+				const pdfPage = subpathValue.match(/^page=(\d+)$/i)?.[1];
+				const pdfHeight = subpathValue.match(/^height=(\d+)$/i)?.[1] ?? "600";
+				const src = `${resolved.url}${pdfPage ? `#page=${pdfPage}` : ""}`;
+				// The frame is a figure with a caption bar naming the file and a
+				// link out to it, built in one place because the canvas renderer
+				// embeds the same document. Publishers who do not want inline PDFs
+				// at all should leave `enableMediaEmbeds` off, which links to the
+				// file instead of embedding it.
 				replacementNodes.push({
 					type: "html",
-					value: `<iframe src="${src}" width="100%" height="${pdfHeight}px" frameborder="0"></iframe>`,
+					value: pdfEmbedHtml({ src, target, page: pdfPage, height: Number(pdfHeight) }),
 				});
+			} else if (ext === "canvas") {
+				const resolved = resolveWikiLink(parsedEmbed, {
+					currentPage,
+					index,
+					options: resolveOptions,
+				});
+				if (resolved.status === "ok" && resolved.canvasSrc !== undefined) {
+					if (options.enableMediaEmbeds && depth === 0) {
+						// A board the canvas feature published: render it through the
+						// same `<CanvasEmbed>` component the docs link to. Only the
+						// top-level tree is compiled by MDX — a transclusion is
+						// stringified as plain HTML, where a JSX node degrades to an
+						// empty <div> — so deeper embeds take the link form below.
+						// `fileRoutePrefix` points the board's file cards at the vault
+						// pages this same plugin publishes.
+						const attributes: {
+							type: "mdxJsxAttribute";
+							name: string;
+							value: string;
+						}[] = [{ type: "mdxJsxAttribute", name: "src", value: resolved.canvasSrc }];
+						if (options.vaultRoutePrefix) {
+							attributes.push({
+								type: "mdxJsxAttribute",
+								name: "fileRoutePrefix",
+								value: options.vaultRoutePrefix,
+							});
+						}
+						replacementNodes.push({
+							type: "mdxJsxFlowElement",
+							name: "CanvasEmbed",
+							attributes,
+							children: [],
+						} as unknown as PhrasingContent);
+					} else {
+						// Media embeds are off, or this board sits inside a transcluded
+						// note: link to the board. The link form is plain HTML, so it
+						// survives both the HTML stringifier and a pipeline with the
+						// embed toggle off.
+						replacementNodes.push(createEmbedNode(resolved.href ?? "", resolved.label ?? target));
+					}
+				} else {
+					// No canvas route: the board is not published (canvas feature off,
+					// or excluded from its scan). Previous behaviour applies — an
+					// attachment is never inlined by transclusion either.
+					replacementNodes.push(createTextNode(fullMatch));
+				}
 			} else if (options.enableTransclusion) {
 				const resolved = resolveWikiLink(parsedEmbed, {
 					currentPage,
@@ -1205,6 +2020,7 @@ async function processEmbedsInTree(
 							currentPage,
 							visited,
 							depth,
+							getContentIndex,
 						}),
 					);
 				} else {
@@ -1250,6 +2066,23 @@ function isInsideWikilink(text: string, index: number): boolean {
 	return false;
 }
 
+/**
+ * Remove `position` from a node and its descendants.
+ *
+ * Nodes parsed from a source *fragment* carry offsets relative to that fragment;
+ * any pass that maps offsets back into the document (comment stripping) would
+ * slice the wrong characters. Dropping the positions makes those passes skip the
+ * node instead of corrupting it.
+ */
+function dropPositions(node: unknown): void {
+	if (typeof node !== "object" || node === null) return;
+	const record = node as { position?: unknown; children?: unknown[] };
+	delete record.position;
+	if (Array.isArray(record.children)) {
+		for (const child of record.children) dropPositions(child);
+	}
+}
+
 function createTextNode(value: string): Text {
 	return {
 		type: "text",
@@ -1286,6 +2119,49 @@ function createHighlightNode(text: string): HTML {
 }
 
 /**
+ * Render a wikilink that could not be resolved the way Obsidian shows one:
+ * the label stays readable but marked as unresolved, with the original syntax
+ * and the diagnostic available as attributes. Rendering the raw `[[…]]` text
+ * instead would hide the label a reader expects to see.
+ */
+/**
+ * `<WikiPicker>` for a vault search that matched more than one target.
+ *
+ * The candidates are resolved while compiling and written into the attribute as
+ * JSON, so the component needs no runtime data module and the list keeps working
+ * on a statically exported site.
+ */
+function createWikiPickerNode(
+	parsed: ParsedWikiLink,
+	candidates: WikiLinkCandidate[],
+): PhrasingContent {
+	const attributes: { type: "mdxJsxAttribute"; name: string; value: string }[] = [
+		{ type: "mdxJsxAttribute", name: "candidates", value: JSON.stringify(candidates) },
+	];
+	const query = parsed.subpath?.value.trim();
+	if (query) attributes.push({ type: "mdxJsxAttribute", name: "query", value: query });
+	if (parsed.alias?.trim()) {
+		attributes.push({ type: "mdxJsxAttribute", name: "alias", value: parsed.alias.trim() });
+	}
+	return {
+		type: "mdxJsxTextElement",
+		name: "WikiPicker",
+		attributes,
+		children: [],
+	} as unknown as PhrasingContent;
+}
+
+function createUnresolvedNode(parsed: ParsedWikiLink, reason: string): HTML {
+	const label = parsed.alias?.trim() || parsed.target;
+	return {
+		type: "html",
+		value:
+			`<span class="obsidian-unresolved" title="${escapeHtmlAttribute(reason)}"` +
+			` data-wikilink="${escapeHtmlAttribute(parsed.raw)}">${escapeHtmlText(label)}</span>`,
+	};
+}
+
+/**
  * Emit HTML anchors for every block ID indexed on the current page, so that
  * `[[Page#^block-id]]` links actually resolve in the browser.
  *
@@ -1293,13 +2169,14 @@ function createHighlightNode(text: string): HTML {
  * counterpart that materializes an `id="^block-id"` target in the output.
  * Standalone `^id` markers are replaced entirely; inline `… ^id` markers are
  * stripped from the paragraph and replaced with an empty anchor at their
- * position. Both match the exact patterns used by {@link extractBlocks}.
+ * position. Both match the exact patterns used by `extractBlocks()` in
+ * `content-index.ts`.
  */
 function emitBlockAnchors(tree: Root, currentPage: ContentPage): void {
 	const ids = new Set(currentPage.blocks.map((block) => block.id));
 	if (ids.size === 0) return;
 
-	unistVisit(tree, "text", (node, position, parent) => {
+	visit(tree, "text", (node, position, parent) => {
 		if (!parent || typeof position !== "number") return;
 		if (SKIP_PARENT_TYPES.has(parent.type)) return;
 
@@ -1343,14 +2220,6 @@ function createBlockAnchor(id: string): HTML {
 	};
 }
 
-function escapeHtmlText(value: string): string {
-	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeHtmlAttribute(value: string): string {
-	return escapeHtmlText(value).replace(/"/g, "&quot;");
-}
-
 function reportDiagnostic(
 	file: VFile,
 	raw: string,
@@ -1358,26 +2227,43 @@ function reportDiagnostic(
 	status: "broken-page" | "broken-anchor" | "ambiguous-page",
 	options: NormalizedPluginOptions,
 ): void {
-	const prefix = `[rspress-plugin-obsidian-wikilink:${status}] ${raw} — ${message}`;
+	const failing =
+		status === "ambiguous-page"
+			? options.onAmbiguousLink === "error"
+			: options.onBrokenLink === "error";
 
-	if (status === "ambiguous-page") {
-		if (options.onAmbiguousLink === "error") {
-			pendingFailures.add(file);
-			file.message(prefix);
-			return;
-		}
+	reportPluginDiagnostic(file, status, `${raw} — ${message}`, failing ? "defer" : "warn");
+}
 
-		file.message(prefix);
-		return;
+/**
+ * Split a markdown image's alt text into alt text and a size.
+ *
+ * Obsidian documents two forms for a markdown image: the size alone in the alt
+ * (`![250](url)`, `![250x145](url)`) and a caption followed by a size pipe
+ * (`![A picture|80](url)`), the latter matching the wikilink embed's `|80`. A
+ * caption that is not a bare dimension — `![A picture|wide](url)` — is left
+ * alone, so no size is ever claimed from prose.
+ */
+function splitImageSize(alt: string): { alt: string; sizeAttr: string } | undefined {
+	const separator = alt.lastIndexOf("|");
+	if (separator !== -1) {
+		const sizeAttr = parseSizeAttr(alt.slice(separator + 1).trim());
+		if (sizeAttr) return { alt: alt.slice(0, separator).trim(), sizeAttr };
 	}
+	const sizeAttr = parseSizeAttr(alt.trim());
+	if (sizeAttr) return { alt: "", sizeAttr };
+	return undefined;
+}
 
-	if (options.onBrokenLink === "error") {
-		pendingFailures.add(file);
-		file.message(prefix);
-		return;
-	}
-
-	file.message(prefix);
+/** Alt text for a sized image that carried none: the file's own name. */
+function altFromImageUrl(url: string): string {
+	const name =
+		url
+			.split("/")
+			.pop()
+			?.split(/[?#]/)[0]
+			?.replace(/\.[^.]+$/, "") ?? "";
+	return humanizeBaseName(name);
 }
 
 function parseSizeAttr(sizeParam: string): string {
@@ -1546,7 +2432,7 @@ function restoreHijackedCallouts(tree: Root, source: string): void {
 	// Collect hijacked containers with the source line range they cover.
 	// Only the topmost ones are restored: replacing an outer container
 	// re-parses its nested callouts from source too.
-	unistVisit(tree, "containerDirective", (rawNode, _position, parent) => {
+	visit(tree, "containerDirective", (rawNode, _position, parent) => {
 		const node = rawNode as RspressCalloutContainer;
 		if (parent) {
 			parents.set(node, parent);
@@ -1691,7 +2577,7 @@ function processCallouts(
 		return firstText?.value.split("\n")[0];
 	};
 
-	unistVisit(tree, "blockquote", (node, position, parent) => {
+	visit(tree, "blockquote", (node, position, parent) => {
 		if (!parent || typeof position !== "number") return;
 
 		const bq = node as Blockquote;
@@ -1738,6 +2624,14 @@ function processCallouts(
 			const contentLines = sourceLines.slice(startLine, endLine).map(stripQuoteMarker);
 			const reParsed = unified().use(remarkParse).parse(contentLines.join("\n"))
 				.children as typeof bq.children;
+			// These nodes were parsed from a *fragment*, so their positions are
+			// relative to it, not to the document. Handing those offsets to the
+			// source-range consumers (comment stripping) would cut the wrong
+			// characters, so drop them: the passes that follow either work on node
+			// values or rebuild their own positions.
+			for (const node of reParsed) {
+				dropPositions(node);
+			}
 			if (reParsed.length === 0) {
 				bq.children.shift();
 			} else {
@@ -1855,12 +2749,12 @@ function renderCalloutTitleHtml(
 	// trims it. Skipped when the title contains a code span, where `==` may
 	// be literal text.
 	if (withLinks.includes("==") && !withLinks.includes("`")) {
-		const parts = withLinks.split(/(==[^=]+==)/).filter(Boolean);
+		const parts = withLinks.split(/(==[^=]+(?:=[^=]+)*==)/).filter(Boolean);
 		const highlighted = parts
 			.map((part) => {
 				const leading = /^[ \t]+/.exec(part)?.[0] ?? "";
 				const trailing = /[ \t]+$/.exec(part)?.[0] ?? "";
-				const match = /^==([^=]+)==$/.exec(part);
+				const match = /^==([^=]+(?:=[^=]+)*)==$/.exec(part);
 				const core = match?.[1]
 					? `<mark>${renderInlineMarkdownHtml(match[1])}</mark>`
 					: renderInlineMarkdownHtml(part);
@@ -1952,167 +2846,7 @@ function resolveTitleWikilinks(
 function encodeMarkdownDestination(href: string): string {
 	return href.replace(/[ ()<>\\"[\]]/g, (char) => encodeURIComponent(char));
 }
-function stripFrontmatter(content: string): string {
-	if (!content.startsWith("---")) return content;
-	const end = content.indexOf("\n---", 3);
-	if (end === -1) return content;
-	return content.slice(end + 4).trimStart();
-}
-
-function extractHeadingSection(content: string, heading: string): string | undefined {
-	const stripped = stripFrontmatter(content);
-	const lines = stripped.split("\n");
-	const normalizedTarget =
-		heading
-			.split("#")
-			.map((part) => part.trim())
-			.filter(Boolean)
-			.at(-1) ?? heading.trim();
-	const normalizedLower = normalizedTarget.toLowerCase();
-	let startLine = -1;
-	let startLevel = 0;
-
-	// True when `line` refers to the requested heading. Accepts a raw heading
-	// name, an explicit `{#id}`, or an already-slugified heading anchor.
-	const matchesTarget = (line: string): boolean => {
-		const trimmed = line.trim();
-		const explicitIdMatch = trimmed.match(/\s*\{#([A-Za-z0-9_:.-]+)\}\s*$/);
-		const headingText = explicitIdMatch
-			? trimmed.slice(0, trimmed.length - explicitIdMatch[0].length).trim()
-			: trimmed;
-		const slug = slugifyHeading(headingText);
-		return (
-			normalizedTarget === headingText ||
-			normalizedLower === headingText.toLowerCase() ||
-			normalizedTarget === slug ||
-			normalizedLower === slug ||
-			(explicitIdMatch !== null && explicitIdMatch[1] === normalizedTarget)
-		);
-	};
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i] ?? "";
-
-		// ATX heading: ## Heading text (up to 3 leading spaces, per Markdown)
-		const atxMatch = line.match(/^\s{0,3}(#{1,6})[ \t]+(.+?)(?:\s+#+)?[ \t]*$/);
-		if (atxMatch) {
-			const level = (atxMatch[1] ?? "").length;
-			const title = (atxMatch[2] ?? "").trim();
-			if (startLine === -1) {
-				if (matchesTarget(title)) {
-					startLine = i;
-					startLevel = level;
-				}
-			} else if (level <= startLevel) {
-				return lines.slice(startLine, i).join("\n").trim();
-			}
-			continue;
-		}
-
-		// Setext heading: text on line i, underline (=== or ---) on line i+1
-		const nextLine = lines[i + 1] ?? "";
-		const setextUnderline = nextLine.match(/^\s*(=+|-+)\s*$/);
-		if (setextUnderline && line.trim().length > 0) {
-			const level = (setextUnderline[1] ?? "").startsWith("=") ? 1 : 2;
-			const title = line.trim();
-			if (startLine === -1) {
-				if (matchesTarget(title)) {
-					startLine = i;
-					startLevel = level;
-				}
-			} else if (level <= startLevel) {
-				return lines.slice(startLine, i).join("\n").trim();
-			}
-			i += 1; // skip underline
-		}
-	}
-
-	if (startLine !== -1) {
-		return lines.slice(startLine).join("\n").trim();
-	}
-
-	return undefined;
-}
-
-function extractBlockSection(content: string, blockId: string): string | undefined {
-	const stripped = stripFrontmatter(content);
-	const lines = stripped.split("\n");
-	const normalizedId = blockId.trim().toLowerCase();
-
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i] ?? "";
-		const lineNorm = line.trim().toLowerCase();
-
-		// Standalone block ID on its own line: references the block above it
-		// (blank lines between the block and the marker are tolerated).
-		if (lineNorm === `^${normalizedId}`) {
-			let start = i - 1;
-			while (start >= 0 && (lines[start] ?? "").trim() === "") {
-				start -= 1;
-			}
-			while (start >= 0 && (lines[start] ?? "").trim() !== "") {
-				start -= 1;
-			}
-			const block = lines
-				.slice(start + 1, i)
-				.join("\n")
-				.trim();
-			return block || undefined;
-		}
-
-		// Inline block ID appended to a line: references that whole block.
-		const inlineMatch = line.match(/^(.*?)\s+\^([A-Za-z0-9_-]+)\s*$/);
-		if (inlineMatch && inlineMatch[2]?.toLowerCase() === normalizedId) {
-			const text = (inlineMatch[1] ?? "").trimEnd();
-			return extractInlineBlock(lines, i, text) || undefined;
-		}
-	}
-
-	return undefined;
-}
-
-/**
- * Extract the markdown block beginning at `index`, whose first line is `text`
- * (already stripped of the inline block ID). List items are extended to include
- * their nested sub-items and continuation lines; every other block type is
- * returned as a single line, matching the indexed block-ID semantics.
- */
-function extractInlineBlock(lines: string[], index: number, text: string): string {
-	const listItem = text.match(/^(\s*)([-*+]|\d+[.)])\s+/);
-	if (!listItem) {
-		return text.trim();
-	}
-
-	const indent = (listItem[1] ?? "").length;
-	const block: string[] = [];
-	for (let j = index; j < lines.length; j++) {
-		if (j === index) {
-			block.push(text);
-			continue;
-		}
-
-		const line = lines[j] ?? "";
-		if (line.trim() === "") {
-			block.push(line);
-			continue;
-		}
-
-		const leading = line.length - line.trimStart().length;
-		if (leading > indent) {
-			block.push(line);
-			continue;
-		}
-
-		// A sibling item at the same indent, or a dedented line, ends the block.
-		break;
-	}
-
-	return block.join("\n").trim();
-}
-function extractFootnoteSourceMetadata(source: string): {
-	definitions: Map<string, string>;
-	continuationLineNumbers: Set<number>;
-} {
+function extractFootnoteSourceMetadata(source: string): FootnoteSourceMetadata {
 	const definitions = new Map<string, string>();
 	const continuationLineNumbers = new Set<number>();
 
@@ -2136,21 +2870,37 @@ function normalizeFootnoteContent(content: string): string {
 	return content.replace(/\n[ \t]+/g, " ").trim();
 }
 
+/** Plain text of a node subtree — the fallback source for a definition the raw
+ *  source scan did not catch (an indented or otherwise unusual form). */
+function flattenMdastText(nodes: unknown): string {
+	if (!Array.isArray(nodes)) return "";
+	let out = "";
+	for (const node of nodes as { type?: string; value?: string; children?: unknown }[]) {
+		if (typeof node?.value === "string" && (node.type === "text" || node.type === "inlineCode")) {
+			out += node.value;
+		} else if (node?.children) {
+			out += flattenMdastText(node.children);
+		}
+	}
+	return out;
+}
+
 function renderAllFootnotesHtml(
 	defs: Map<string, string>,
 	inlineDefs: Array<{ id: string; content: string }>,
+	renderContent: (content: string) => string,
 ): string {
 	const items: string[] = [];
 
 	defs.forEach((content, label) => {
 		items.push(
-			`<li id="fn-${escapeHtmlAttribute(label)}">${escapeHtmlText(content)} <a href="#fnref-${escapeHtmlAttribute(label)}">↩</a></li>`,
+			`<li id="fn-${escapeHtmlAttribute(label)}">${renderContent(content)} <a href="#fnref-${escapeHtmlAttribute(label)}">↩</a></li>`,
 		);
 	});
 
 	for (const { id, content } of inlineDefs) {
 		items.push(
-			`<li id="fn-${escapeHtmlAttribute(id)}">${escapeHtmlText(content)} <a href="#fnref-${escapeHtmlAttribute(id)}">↩</a></li>`,
+			`<li id="fn-${escapeHtmlAttribute(id)}">${renderContent(content)} <a href="#fnref-${escapeHtmlAttribute(id)}">↩</a></li>`,
 		);
 	}
 

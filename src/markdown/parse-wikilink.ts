@@ -1,4 +1,4 @@
-import type { ParsedWikiLink, WikilinkMatch } from "./types.ts";
+import type { ParsedWikiLink, WikilinkMatch } from "./types.js";
 
 /**
  * Find a complete wikilink token while honoring backslash escapes inside the

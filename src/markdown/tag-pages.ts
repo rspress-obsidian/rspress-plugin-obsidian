@@ -1,20 +1,12 @@
-import type { ContentIndex, ContentPage } from "./types.ts";
+import { encodeTagPathSegment } from "../shared/paths.js";
+import type { ContentIndex, ContentPage } from "./types.js";
+import { routeHref } from "./utils.js";
+
+export { encodeTagPathSegment };
 
 interface TagEntry {
 	displayName: string;
 	pages: ContentPage[];
-}
-
-const TAG_UNSAFE_CHARS = /[\s"<>#?%&]/g;
-
-export function encodeTagPathSegment(tag: string): string {
-	const encoded = tag.replace(TAG_UNSAFE_CHARS, (c) => encodeURIComponent(c));
-	if (!encoded) {
-		console.warn(
-			`[rspress-plugin-obsidian-wikilink] Tag "${tag}" encoded to an empty path segment — skipping.`,
-		);
-	}
-	return encoded;
 }
 
 /**
@@ -94,7 +86,7 @@ function generateTagPageContent(displayName: string, pages: ContentPage[]): stri
 	const listItems = pages
 		.map((p) => {
 			const label = escapeMarkdownLabel(p.title ?? p.baseName);
-			const destination = escapeMarkdownDestination(p.routePath);
+			const destination = escapeMarkdownDestination(routeHref(p.routePath, p.relativePath));
 			return `- [${label}](${destination})`;
 		})
 		.join("\n");

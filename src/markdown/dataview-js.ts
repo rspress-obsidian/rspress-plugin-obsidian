@@ -1,7 +1,8 @@
-import type { DailyNoteConfig } from "./daily-notes.ts";
-import { parseDailyNoteDate } from "./daily-notes.ts";
-import type { ContentIndex, ContentPage } from "./types.ts";
-import { encodeRoutePath, normalizeFilePathKey } from "./utils.ts";
+import { escapeHtmlAttribute, escapeHtmlText, sanitizeUrl } from "../shared/escape.js";
+import type { DailyNoteConfig } from "./daily-notes.js";
+import { parseDailyNoteDate } from "./daily-notes.js";
+import type { ContentIndex, ContentPage } from "./types.js";
+import { normalizeFilePathKey, routeHref } from "./utils.js";
 
 interface JsLink {
 	kind: "link";
@@ -288,24 +289,30 @@ function renderApiCall(name: string, args: unknown[]): string {
 	}
 	const headers = Array.isArray(args[0]) ? args[0] : [];
 	const rows = Array.isArray(args[1]) ? args[1] : [];
-	return `<table class="dataviewjs-table"><thead><tr>${headers.map((header) => `<th>${escapeHtml(String(header ?? ""))}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${(Array.isArray(row) ? row : [row]).map((value) => `<td>${renderValue(value)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+	return `<table class="dataviewjs-table"><thead><tr>${headers.map((header) => `<th>${escapeHtmlText(String(header ?? ""))}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${(Array.isArray(row) ? row : [row]).map((value) => `<td>${renderValue(value)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function renderTask(value: unknown): string {
 	if (!value || typeof value !== "object") return `<li>${renderValue(value)}</li>`;
 	const completed = "completed" in value && value.completed === true;
 	const text = "text" in value ? String(value.text ?? "") : String(value);
-	return `<li><input type="checkbox" disabled${completed ? " checked" : ""} /> ${escapeHtml(text)}</li>`;
+	return `<li><input type="checkbox" disabled${completed ? " checked" : ""} /> ${escapeHtmlText(text)}</li>`;
 }
 
 function renderValue(value: unknown): string {
 	if (value == null) return "";
-	if (isLink(value))
-		return `<a href="${escapeAttribute(value.href)}">${escapeHtml(value.label)}</a>`;
-	if (value instanceof Date) return escapeHtml(value.toISOString().slice(0, 10));
+	if (isLink(value)) {
+		// dataviewjs can build a link object from arbitrary data, so the href is
+		// treated as untrusted for the same reason as the static query renderer.
+		const href = sanitizeUrl(value.href);
+		return href
+			? `<a href="${escapeHtmlAttribute(href)}">${escapeHtmlText(value.label)}</a>`
+			: escapeHtmlText(value.label);
+	}
+	if (value instanceof Date) return escapeHtmlText(value.toISOString().slice(0, 10));
 	if (Array.isArray(value)) return value.map(renderValue).join(", ");
-	if (typeof value === "object") return escapeHtml(JSON.stringify(value));
-	return escapeHtml(String(value));
+	if (typeof value === "object") return escapeHtmlText(JSON.stringify(value));
+	return escapeHtmlText(String(value));
 }
 
 function pageValue(page: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig): JsPage {
@@ -484,7 +491,7 @@ function pageLink(page: ContentPage): JsLink {
 	return {
 		kind: "link",
 		label: page.title ?? page.baseName,
-		href: encodeRoutePath(page.routePath),
+		href: routeHref(page.routePath, page.relativePath),
 	};
 }
 
@@ -497,12 +504,4 @@ function linkForTarget(target: string, index: ContentIndex): JsLink {
 
 function isLink(value: unknown): value is JsLink {
 	return Boolean(value && typeof value === "object" && "kind" in value && value.kind === "link");
-}
-
-function escapeHtml(value: string): string {
-	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeAttribute(value: string): string {
-	return escapeHtml(value).replace(/"/g, "&quot;");
 }

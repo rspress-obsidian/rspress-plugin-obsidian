@@ -9,8 +9,10 @@ The plugin ships with a complete default stylesheet. Override any part by target
 
 ## Import
 
+The default stylesheet is injected automatically (`enableDefaultStyles` defaults to `true`). Only if you set `enableDefaultStyles: false` do you need to import it yourself:
+
 ```ts
-import 'rspress-plugin-obsidian-canvas/style.css';
+import 'rspress-plugin-obsidian/canvas/styles.css';
 ```
 
 ## Class Reference
@@ -19,7 +21,8 @@ import 'rspress-plugin-obsidian-canvas/style.css';
 
 | Class | Purpose |
 |-------|---------|
-| `.canvas-viewport` | Outer container with grid background |
+| `.canvas-viewport` | Outer container; sets the viewport background color |
+| `.canvas-background` | Dot-grid layer behind the world |
 | `.canvas-world` | Transformable layer holding nodes and edges |
 
 ### Nodes
@@ -30,7 +33,7 @@ import 'rspress-plugin-obsidian-canvas/style.css';
 | `.canvas-node-hovered` | Active hover state (elevated shadow) |
 | `.canvas-node-text` | Text node border color |
 | `.canvas-node-file` | File node border color |
-| `.canvas-node-link` | Link node background and border |
+| `.canvas-node-link` | Link node left accent border |
 | `.canvas-node-group` | Group node dashed border and transparency |
 
 ### Edges
@@ -47,9 +50,10 @@ import 'rspress-plugin-obsidian-canvas/style.css';
 |-------|---------|
 | `.canvas-markdown` | Markdown content wrapper inside text nodes |
 | `.canvas-group-label` | Group node label text |
-| `.canvas-file-link` | File node clickable card |
+| `.canvas-file-fallback` | File node card (clickable link or bare filename) |
+| `.canvas-file-media` | Audio/video element inside a file node |
+| `.canvas-file-pdf` | PDF iframe inside a file node |
 | `.canvas-link` | Link node URL display |
-| `.canvas-link-preview` | Link node iframe container |
 | `.wiki-link` | Obsidian wiki-link color |
 | `.canvas-error` | Parse error message display |
 

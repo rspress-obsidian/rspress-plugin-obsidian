@@ -1,5 +1,6 @@
 ---
 title: Getting Started
+description: Install the graph view plugin, add it to rspress.config.ts, and see how the build-time graph extraction and runtime panel fit together.
 ---
 
 # Getting Started
@@ -10,19 +11,31 @@ Think of it as [Obsidian's graph view](https://obsidian.md) for your docs. The p
 
 ## Prerequisites
 
-- [Rspress](https://rspress.dev/) `^2.0.7` or later
-- React `^19`
+- [Rspress](https://rspress.dev/) `^2.0.21` or later
+- `react-force-graph-2d` — **required** to render the panel. It is an optional
+  peer dependency, so your package manager will not install it for you, and the
+  build fails without it: the panel imports it by name and the bundler resolves
+  that specifier before any runtime fallback can run.
+- React `^18 || ^19` — an optional peer, required only to render the panel
 
 ## Installation
 
 Install the plugin alongside your existing Rspress setup:
 
 ```bash
-bun add rspress-plugin-graph-view
+bun add rspress-plugin-obsidian
 # or
-npm install rspress-plugin-graph-view
+npm install rspress-plugin-obsidian
 # or
-pnpm add rspress-plugin-graph-view
+pnpm add rspress-plugin-obsidian
+```
+
+Then install the peer the panel renders with:
+
+```bash
+bun add react-force-graph-2d
+# or
+npm install react-force-graph-2d
 ```
 
 ## Quick Start
@@ -31,11 +44,11 @@ Add the plugin to your `rspress.config.ts`:
 
 ```ts
 import { defineConfig } from "@rspress/core";
-import { pluginGraphview } from "rspress-plugin-graph-view";
+import { graphview } from "rspress-plugin-obsidian";
 
 export default defineConfig({
   root: "docs",
-  plugins: [pluginGraphview()],
+  plugins: [graphview()],
 });
 ```
 
@@ -47,8 +60,8 @@ The plugin operates in two phases:
 
 **Build time** — When Rspress generates routes, the plugin:
 1. Collects all route metadata
-2. Reads each `.md`/`.mdx` file
-3. Extracts `[title](./path.md)` internal links
+2. Reads each `.md`/`.mdx` file and `.canvas` board
+3. Extracts `[title](./path.md)` internal links and canvas file references
 4. Resolves relative and absolute link targets
 5. Builds a graph data structure and injects it as a virtual module
 

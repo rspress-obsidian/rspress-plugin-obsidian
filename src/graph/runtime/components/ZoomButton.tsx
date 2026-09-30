@@ -3,15 +3,25 @@ export interface ZoomButtonProps {
 	ariaLabel: string;
 	onClick: () => void;
 	size?: "sm" | "md";
+	/** Set on disclosure-style buttons (the filters toggle) so assistive tech
+	 * announces whether the panel they control is open. */
+	ariaExpanded?: boolean;
 }
 
-export default function ZoomButton({ children, ariaLabel, onClick, size = "md" }: ZoomButtonProps) {
+export default function ZoomButton({
+	children,
+	ariaLabel,
+	onClick,
+	size = "md",
+	ariaExpanded,
+}: ZoomButtonProps) {
 	const dimension = size === "sm" ? 22 : 26;
 
 	return (
 		<button
 			type="button"
 			aria-label={ariaLabel}
+			aria-expanded={ariaExpanded}
 			onClick={onClick}
 			style={{
 				width: dimension,

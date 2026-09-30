@@ -1,4 +1,4 @@
-import type { CanvasEdgeData, CanvasNode } from "../types";
+import type { CanvasEdgeData, CanvasNode } from "../types.js";
 
 function createNodeId(nodes: CanvasNode[]): string {
 	let index = nodes.length + 1;

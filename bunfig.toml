@@ -9,18 +9,35 @@ cache = true
 # Install peer dependencies automatically (@rspress/core, react, react-dom,
 # react-force-graph-2d are needed for local dev and test to work)
 peer = true
-# Don't error on missing lockfile updates during active development
-frozenLockfile = false
+# Refuse to install when package.json and bun.lock disagree (CI already passes
+# --frozen-lockfile). A silently rewritten lockfile is how "works on my machine"
+# starts; an intentional dependency change should update the lock in the same
+# commit.
+frozenLockfile = true
 
 [test]
-# Per-test timeout: 30 seconds — parser/resolver tests involve async FS I/O
-timeout = 30000
-# Stop on first failure — faster feedback when iterating
-bail = true
-# Suppress noisy Bun prelude output from test runner
-quiet = true
+# Bun's `[test]` section has no `timeout`, `bail` or `quiet` key — all three were
+# here and all three were inert (verified on Bun 1.4.2: `bail = true` still
+# reported every failure, `timeout = 12000` still killed a 6.5s test at the 5s
+# default). Per-test timeout and fail-fast iteration are CLI flags
+# (`bun test --timeout 30000 --bail`); CI wants every failure, so it passes
+# neither.
 # happy-dom for component tests (graph runtime, canvas embed)
 preload = ["./test/test-setup.ts"]
+# Coverage must measure the code we ship, not build output or test helpers:
+# `dist/` is the built bundle (the publish test imports it) and `doc_build/` is a
+# generated site.
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["dist/**", "doc_build/**", "coverage/**"]
+# Backstop only, and deliberately weak: Bun applies this to *every* file and has
+# no exception mechanism, so it has to sit below the weakest measured file
+# (`scripts/obsidian-sync.ts`, 52.8% lines) or `bun test` would fail outright. It
+# still trips on a module that gets imported and never exercised (0%), but it is
+# not the gate. The real floors live in `scripts/check-coverage.ts`, which CI runs
+# against the lcov report: 0.85 per shipped `src/` module (no exceptions — every
+# entry in its allow-list is printed with its reason on every run) plus 97% over
+# `src/` as a whole. `statements` is accepted, not enforced.
+coverageThreshold = { lines = 0.5, functions = 0.5 }
 
 [debug]
 # Enable frontend debugging — attaches to React DevTools and provides

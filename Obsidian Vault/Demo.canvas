@@ -4,11 +4,17 @@
 		{"id":"node-2","type":"file","file":"Welcome.md","subpath":"#getting-started","x":445,"y":-10,"width":250,"height":120,"color":"5"},
 		{"id":"node-1","type":"text","text":"# Welcome to Obsidian Canvas\n\nThis text node supports **bold**, *italic*, and `code`.\n\n- List item one\n- List item two\n\n> A blockquote for emphasis","x":-95,"y":-90,"width":320,"height":270,"color":"4"},
 		{"id":"node-5","type":"text","text":"## Markdown Features\n\nVisit [Rspress](https://rspress.dev) for docs. Tag: #canvas #rspress/demo\n\n> [!tip] Did you know?\n> Canvas renders callouts, math, and diagrams.\n\nInline math: $E = mc^2$. A note[^1].\n\n```mermaid\ngraph TD\n    A[Start] --> B[End]\n```\n\n[^1]: A footnote body.","x":1060,"y":110,"width":440,"height":460,"color":"1"},
-		{"id":"node-3","type":"link","url":"https://rspress.dev","x":160,"y":400,"width":450,"height":380,"color":"2"}
+		{"id":"node-3","type":"link","url":"https://rspress.dev","x":160,"y":400,"width":450,"height":380,"color":"2"},
+		{"id":"node-6","type":"text","text":"## Highlights\n\nA card renders ==highlights== with the same rule a note page uses, so the span ends where it ends there. A bare `====` run is left alone, and inline code is protected, so `==this stays literal==`.\n\nAlso: [[create a link|a wikilink]], #canvas, and a callout:\n\n> [!warning] Careful\n> A malformed card no longer takes the whole board down.","x":-95,"y":230,"width":320,"height":330,"color":"3"},
+		{"id":"node-7","type":"text","text":"## Section Embeds\n\nA card can embed one section of a note rather than the whole file. This is `![[guide/intro#Transclusion Target]]`:\n\n![[guide/intro#Transclusion Target]]\n\nAnd a block reference, `![[guide/intro#^anchor-demo]]`:\n\n![[guide/intro#^anchor-demo]]\n\nA heading the note does not have falls back to the whole note instead of an empty card.","x":1060,"y":610,"width":440,"height":330,"color":"1"},
+		{"id":"node-8","type":"file","file":"guide/intro.md","subpath":"#intro-guide","x":445,"y":190,"width":250,"height":150,"color":"5"}
 	],
 	"edges":[
 		{"id":"edge-1","fromNode":"node-1","fromSide":"right","toNode":"node-2","toSide":"left","color":"3","label":"references"},
 		{"id":"edge-2","fromNode":"node-1","fromSide":"bottom","toNode":"node-3","toSide":"top"},
-		{"id":"edge-3","fromNode":"node-2","fromSide":"bottom","toNode":"node-3","toSide":"right","label":"related"}
+		{"id":"edge-3","fromNode":"node-2","fromSide":"bottom","toNode":"node-3","toSide":"right","label":"related"},
+		{"id":"edge-4","fromNode":"node-6","fromSide":"top","toNode":"node-1","toSide":"left","label":"details"},
+		{"id":"edge-5","fromNode":"node-7","fromSide":"left","toNode":"node-6","toSide":"right","label":"embeds"}
+		,{"id":"edge-6","fromNode":"node-8","fromSide":"bottom","toNode":"node-7","toSide":"top","label":"embeds"}
 	]
 }

@@ -1,8 +1,8 @@
 import { useLocation, useNavigate } from "@rspress/core/runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
-import GraphIcon from "./components/GraphIcon";
-import ZoomButton from "./components/ZoomButton";
-import GraphView, { type GraphViewColors, type GraphViewHandle } from "./GraphView";
+import GraphIcon from "./components/GraphIcon.js";
+import ZoomButton from "./components/ZoomButton.js";
+import GraphView, { type GraphViewColors, type GraphViewHandle } from "./GraphView.js";
 
 interface GraphSidebarProps {
 	colors?: GraphViewColors;
@@ -41,7 +41,8 @@ export default function GraphSidebar({ colors }: GraphSidebarProps) {
 
 	const [dimensions, setDimensions] = useState({ width: 268, height: 200 });
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: isExpanded triggers dimension recalculation
+	// Measuring depends only on the container's width, which collapsing does not
+	// change (the content clips by `max-height`), so expansion is not a dep.
 	useEffect(() => {
 		const updateDimensions = () => {
 			const container = containerRef.current;
@@ -55,7 +56,7 @@ export default function GraphSidebar({ colors }: GraphSidebarProps) {
 		updateDimensions();
 		window.addEventListener("resize", updateDimensions);
 		return () => window.removeEventListener("resize", updateDimensions);
-	}, [isExpanded]);
+	}, []);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: pathname triggers stats refresh on route change
 	useEffect(() => {

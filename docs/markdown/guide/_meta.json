@@ -1,6 +1,12 @@
 [
   "getting-started",
   "examples",
+  "link-resolution",
+  "callouts",
+  "transclusion",
+  "backlinks",
+  "tags-and-daily-notes",
+  "media-embeds",
   "advanced",
   "api"
 ]
