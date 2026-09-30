@@ -23,6 +23,9 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dir, "..");
 const SOURCES = [
+	// The README first: it is the most-pasted snippet in the repository, and a
+	// wrong option name there is the first thing a new user hits.
+	"README.md",
 	"docs/getting-started.md",
 	"docs/markdown/guide/getting-started.md",
 	"docs/graph/guide/getting-started.md",
