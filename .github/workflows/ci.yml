@@ -25,17 +25,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # The dev toolchain, not the support floor. `engines.bun` is the
-        # consumer contract and stays at 1.3; the committed `bun.lock` is
-        # lockfileVersion 2, which only bun >= 1.4 can parse — pinning this to
-        # the floor made `bun install --frozen-lockfile` fail before any step ran.
+        # One bun line, and it is the only one that can check this repository
+        # out: the committed `bun.lock` is lockfileVersion 2, which bun < 1.4
+        # cannot parse (verified against 1.3.14), so `bun install
+        # --frozen-lockfile` fails before any step runs. There is no second
+        # version to exercise — 1.4.2 is the newest release.
         bun-version: ['1.4.x']
-        include:
-          # Bun's own runtime differences are platform-independent, so the
-          # second runtime is exercised on one OS instead of tripling the job
-          # count.
-          - os: ubuntu-latest
-            bun-version: '1.5.x'
     defaults:
       run:
         # Git Bash ships with all three runners and is the one shell whose
