@@ -128,13 +128,38 @@ describe("documented examples", () => {
 		// The JSDoc in `src/markdown/index.ts` shipped an example that imported
 		// one name and called another; inside a doc fence the same slip reads as
 		// working code and teaches a broken first line.
+		//
+		// The name has to be compared against what the fence actually imports.
+		// An earlier version tested `!code.includes(factory)`, which is
+		// unsatisfiable — any string matching `canvas(` contains "canvas" — so
+		// the guard could never fire. `check-doc-examples.ts` papers over the
+		// symptom by prepending the missing import before type-checking, so this
+		// static check is the only thing standing between a doc and a
+		// copy-paste that does not run.
 		const bad: string[] = [];
 		for (const fence of ALL_FENCES) {
-			const importsPackage = /from\s*["']rspress-plugin-obsidian(?:\/[^"']*)?["']/.test(fence.code);
-			if (!importsPackage) continue;
+			// `pluginObsidian((markdown, canvas, graphview) => …)` hands the three
+			// factories in as parameters, so the names are bound without an import.
+			if (/\bpluginObsidian\s*\(/.test(fence.code)) continue;
+			const imported = new Set<string>();
+			for (const group of fence.code.matchAll(
+				/import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']rspress-plugin-obsidian(?:\/[^"']*)?["']/g,
+			)) {
+				for (const part of (group[1] ?? "").split(",")) {
+					const name = part
+						.trim()
+						.replace(/^type\s+/, "")
+						.split(/\s+as\s+/)[0]
+						?.trim();
+					if (name) imported.add(name);
+				}
+			}
+			if (imported.size === 0) continue;
 			for (const factory of FACTORIES) {
-				if (new RegExp(`\\b${factory}\\s*\\(`).test(fence.code) && !fence.code.includes(factory)) {
-					bad.push(`${fence.file}:${fence.line} calls ${factory}() but never imports it`);
+				if (new RegExp(`\\b${factory}\\s*\\(`).test(fence.code) && !imported.has(factory)) {
+					bad.push(
+						`${fence.file}:${fence.line} calls ${factory}() but imports only ${[...imported].join(", ")}`,
+					);
 				}
 			}
 		}

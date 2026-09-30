@@ -33,8 +33,7 @@ html {
 .rp-home-background {
 	background:
 		radial-gradient(circle at 18% 12%, rgb(109 93 252 / 16%), transparent 34rem),
-		radial-gradient(circle at 84% 22%, rgb(59 130 246 / 12%), transparent 32rem),
-		var(--rp-c-bg);
+		radial-gradient(circle at 84% 22%, rgb(59 130 246 / 12%), transparent 32rem), var(--rp-c-bg);
 }
 
 /* Feature cards: subtle lift, brand border on hover, token colors. */
@@ -72,8 +71,14 @@ html {
 	font-size: 1.25rem;
 }
 
-html.dark .rp-home-feature__card {
+/* Both selectors sit at (0, 3, 0) — one above them in source order would win on
+   specificity, so a hovered card kept the light-mode shadow in dark mode. */
+html.dark .rp-home-feature__item-wrapper .rp-home-feature__card {
 	box-shadow: 0 14px 44px rgb(0 0 0 / 18%);
+}
+
+html.dark .rp-home-feature__item-wrapper:hover .rp-home-feature__card {
+	box-shadow: 0 18px 40px rgb(0 0 0 / 24%);
 }
 
 @media (prefers-reduced-motion: reduce) {

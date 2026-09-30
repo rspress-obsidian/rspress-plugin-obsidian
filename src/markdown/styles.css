@@ -1,5 +1,5 @@
 /* rspress-plugin-obsidian:markdown — default stylesheet
-  Import via: enableDefaultStyles: true in wikilink() */
+  Import via: enableDefaultStyles: true in markdown() */
 
 @import "./media-embed.css";
 

@@ -2601,9 +2601,15 @@ describe("media embeds", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		// No transclusion, and no size invented from a caption either.
+		// No transclusion, and no size invented from a caption either. Asserting
+		// `not.toContain("<iframe")` proved nothing: the only iframe producer is
+		// the PDF renderer, which a `.md` destination never reaches, so the test
+		// stayed green if the embed started inlining the whole note. The class
+		// `renderPageEmbed` actually emits is the assertion that can fail.
 		expect(String(file)).toContain("Setup");
-		expect(String(file)).not.toContain("<iframe");
+		expect(String(file)).not.toContain("obsidian-transclusion");
+		expect(String(file)).not.toContain("data-src");
+		expect(String(file)).not.toContain("width=");
 	});
 
 	test("leaves a markdown image without a size pipe exactly as it was", async () => {

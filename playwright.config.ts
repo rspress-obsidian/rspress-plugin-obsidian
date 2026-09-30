@@ -18,7 +18,10 @@ const BUILD_ENTRY = path.join("doc_build", "index.html");
  * Vault`, `src`) are watched instead — watching the copies would race, because
  * rspress sometimes writes them after `doc_build/index.html` in the same run.
  */
-const GENERATED_INPUT_DIRS = [path.join("docs", "public", "vault"), path.join("docs", "public", "__canvases__")];
+const GENERATED_INPUT_DIRS = [
+	path.join("docs", "public", "vault"),
+	path.join("docs", "public", "__canvases__"),
+];
 
 /** Newest mtime under `dir`, recursively. */
 const newestMtime = (dir: string): number =>
@@ -58,10 +61,7 @@ export default defineConfig({
 			// as workflow artifacts (see `.github/workflows/ci.yml`), so a failure
 			// can be inspected without re-running the suite. Locally `list` is
 			// enough and skips writing `playwright-report/`.
-			[
-				["list"],
-				["html", { open: "never" }],
-			]
+			[["list"], ["html", { open: "never" }]]
 		: [["list"]],
 	use: {
 		baseURL: "http://localhost:4321",

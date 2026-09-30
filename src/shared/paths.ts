@@ -3,10 +3,11 @@ import { normalizeUnicode } from "./slug.js";
 
 export function normalizeFilePathKey(input: string): string {
 	return normalizeUnicode(
-		normalizeFsPath(input)
+		// Trim first: the extension strip is anchored to the end, so a stray
+		// leading or trailing space left `.md` on the key and the lookup missed.
+		normalizeFsPath(input.trim())
 			.replace(/\.(md|mdx)$/i, "")
-			.replace(/^\/+|\/+$/g, "")
-			.trim(),
+			.replace(/^\/+|\/+$/g, ""),
 	);
 }
 

@@ -18,10 +18,23 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dir, "..");
+
+// The scratch tsconfig sets `moduleResolution: "bundler"` with no `paths`, so
+// `import { markdown } from "rspress-plugin-obsidian"` resolves through the
+// package's own `exports` map — that is, through `dist/index.d.ts`. Without a
+// build, tsc fails with a TS7016 suggesting a `@types/` package that does not
+// exist and should not be published.
+if (!existsSync(path.join(ROOT, "dist", "index.d.ts"))) {
+	console.error(
+		"[check-doc-examples] dist/index.d.ts is missing — the documented configs type-check against the built package, so nothing could be verified. Run `bun run build` first.",
+	);
+	process.exit(1);
+}
+
 const SOURCES = [
 	// The README first: it is the most-pasted snippet in the repository, and a
 	// wrong option name there is the first thing a new user hits.
