@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
+	cpSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -8,6 +9,7 @@ import {
 	rmSync,
 	statSync,
 	symlinkSync,
+	writeFileSync,
 } from "node:fs";
 import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
@@ -90,17 +92,27 @@ test.skipIf(!distExists)(
 			// 2. Extract into node_modules so bare imports resolve upward.
 			rmSync(installDir, { recursive: true, force: true });
 			mkdirSync(installDir, { recursive: true });
-			// `tar` is an executable image on every platform — Windows ships
-			// `tar.exe` in System32 — so it needs no shell, unlike `npm` above; the
-			// `.exe` on win32 skips the PATHEXT search entirely and keeps the temp
-			// paths in the argument list quoted rather than re-split by cmd.exe.
-			execFileSync(process.platform === "win32" ? "tar.exe" : "tar", [
-				"-xzf",
-				tarball,
-				"-C",
-				installDir,
-				"--strip-components=1",
-			]);
+			// Extraction goes through `bun install <tarball>` rather than a `tar`
+			// child process. bun is already the runner for this job, reads `.tgz`
+			// natively, and this drops the `tar.exe` that failed silently on
+			// Windows — non-zero exit, no signal, empty stdout *and* stderr.
+			// `npm pack` above still proves the archive is well-formed; only the
+			// way it is unpacked changed. The result is copied to `installDir` so
+			// every assertion below keeps the layout it already expects.
+			const consumer = path.join(workDir, "consumer");
+			mkdirSync(consumer, { recursive: true });
+			writeFileSync(
+				path.join(consumer, "package.json"),
+				JSON.stringify({ name: "publish-test-consumer", private: true }),
+				"utf-8",
+			);
+			execFileSync(process.execPath, ["install", tarball, "--no-save"], {
+				cwd: consumer,
+				stdio: "pipe",
+			});
+			cpSync(path.join(consumer, "node_modules", "rspress-plugin-obsidian"), installDir, {
+				recursive: true,
+			});
 			rmSync(path.join(root, "node_modules", "rspress-plugin-obsidian"), {
 				recursive: true,
 				force: true,
