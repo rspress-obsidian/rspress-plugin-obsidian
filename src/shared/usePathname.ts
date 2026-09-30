@@ -1,33 +1,39 @@
-import { useEffect, useState } from "react";
+import { useInRouterContext, useLocation, useNavigate } from "@rspress/core/runtime";
+import { useCallback, useEffect, useState } from "react";
 
 /**
- * The current path, without asking the host router for it.
+ * The current route path, normalized to what the router calls it.
  *
- * Four components imported `useLocation` and `useNavigate` from
- * `@rspress/core/runtime`. That entry exports only `isDataUrl`, `isExternalUrl`,
- * `matchNavbar`, `matchSidebar` and `normalizeHref` at Rspress 2.0.21 — neither
- * hook exists. A bundler follows the re-export chain and tolerates the missing
- * names, so the built site worked; Bun's ESM validator does not, and the unit
- * suite failed to load on macOS with `SyntaxError: Export named 'useNavigate'
- * not found`. The tests passed only because each one stubbed the module with
- * those two symbols in it, which is also why nothing caught the invalid import.
+ * Rspress mounts the whole app inside a react-router `BrowserRouter`
+ * (`@rspress/core/runtime`, which re-exports the hooks used here), so the
+ * router — not the document — is the source of truth. A client-side navigation
+ * rewrites history and fires no `popstate`, so reading `window.location` on
+ * its own left every graph frozen on the route it first mounted at: clicking a
+ * sidebar link moved the page and the current node, the neighbourhood scope
+ * and the hover preview all stayed behind. The router also strips the site
+ * base from the path, which the raw pathname carried and no node id has.
  *
- * On a published site a route change is a document load, so the path only has to
- * be right when a component mounts and navigation is the browser's own job.
+ * `window` is still the fallback, because the runtime components are exported
+ * for custom themes: rendered outside a router (or on the server) there is
+ * nothing to subscribe to.
  */
 export function usePathname(): string {
-	const [pathname, setPathname] = useState(() =>
+	const inRouter = useInRouterContext();
+	// biome-ignore lint/correctness/useHookAtTopLevel: `inRouter` is fixed for the life of the instance
+	const location = inRouter ? useLocation() : null;
+	const [documentPath, setDocumentPath] = useState(() =>
 		typeof window === "undefined" ? "" : window.location.pathname,
 	);
 
 	useEffect(() => {
-		const sync = () => setPathname(window.location.pathname);
-		sync();
+		if (inRouter) return;
+		const sync = () =>
+			setDocumentPath(typeof window === "undefined" ? "" : window.location.pathname);
 		window.addEventListener("popstate", sync);
 		return () => window.removeEventListener("popstate", sync);
-	}, []);
+	}, [inRouter]);
 
-	return pathname;
+	return location?.pathname ?? documentPath;
 }
 
 /**
@@ -42,7 +48,23 @@ export const navigation = {
 	},
 };
 
-/** Navigate to a site route — a full document load, which is what it is. */
-export function navigate(href: string): void {
-	navigation.assign(href);
+/**
+ * Navigate to a site route: a client-side transition inside the router (which
+ * also resolves the site base), a document load outside one.
+ */
+export function useNavigateTo(): (href: string) => void {
+	const inRouter = useInRouterContext();
+	// biome-ignore lint/correctness/useHookAtTopLevel: `inRouter` is fixed for the life of the instance
+	const navigate = inRouter ? useNavigate() : null;
+
+	return useCallback(
+		(href: string) => {
+			if (navigate) {
+				navigate(href);
+			} else {
+				navigation.assign(href);
+			}
+		},
+		[navigate],
+	);
 }
