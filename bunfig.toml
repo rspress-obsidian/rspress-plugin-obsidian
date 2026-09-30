@@ -28,7 +28,7 @@ preload = ["./test/test-setup.ts"]
 # `dist/` is the built bundle (the publish test imports it) and `doc_build/` is a
 # generated site.
 coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["dist/**", "doc_build/**", "coverage/**"]
+coveragePathIgnorePatterns = ["dist/**", "doc_build/**", "coverage/**", "test/**", "scripts/**"]
 # Backstop only, and deliberately weak: Bun applies this to *every* file and has
 # no exception mechanism, so it has to sit below the weakest measured file
 # (`scripts/obsidian-sync.ts`, 52.8% lines) or `bun test` would fail outright. It
