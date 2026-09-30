@@ -24,9 +24,7 @@ jobs:
       # is the point of the matrix.
       fail-fast: false
       matrix:
-        # Pinned rather than `ubuntu-latest`: that label migrates to Ubuntu 26
-        # on 2026-10-19, moving the OS without anyone choosing it.
-        os: [ubuntu-24.04, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         # One bun line, and it is the only one that can check this repository
         # out: the committed `bun.lock` is lockfileVersion 2, which bun < 1.4
         # cannot parse (verified against 1.3.14), so `bun install
@@ -166,7 +164,7 @@ jobs:
     # `import.meta.dirname` crash and the ESM dynamic-require failure both
     # shipped once) cannot pass unnoticed. Bundler output is platform-neutral,
     # so one OS covers it.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         # 22.14.0 is the floor `engines` declares, not merely the 22.x line's
@@ -209,7 +207,7 @@ jobs:
 
   lint:
     # Biome's findings are source-level, not platform-level.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -233,7 +231,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

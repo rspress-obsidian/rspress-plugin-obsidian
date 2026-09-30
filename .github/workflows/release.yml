@@ -23,10 +23,7 @@ concurrency:
 
 jobs:
   release:
-    # Pinned rather than `ubuntu-latest`: that label migrates to Ubuntu 26 on
-    # 2026-10-19, which would move the OS under this workflow without anyone
-    # choosing it.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
