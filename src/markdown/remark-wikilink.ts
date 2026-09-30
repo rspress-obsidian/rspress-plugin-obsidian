@@ -127,6 +127,24 @@ const pendingFailures = new WeakSet<VFile>();
  * option-driven error modes), `"defer"` marks the file so the top-level pass
  * can fail it once every link has been resolved.
  */
+/**
+ * A fatal `VFileMessage`, which is what `file.fail` throws in `"fail"` mode.
+ *
+ * The top-level pass must rethrow one so the build actually fails. So must
+ * every catch that runs while rendering a transcluded document: swallowing it
+ * turns `onDataviewError: "error"` (and the broken/ambiguous link modes) into a
+ * warning the moment the offending note happens to be embedded, so the same
+ * document fails one build and passes the next.
+ */
+function isFatalVFileMessage(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"fatal" in error &&
+		(error as { fatal?: unknown }).fatal === true
+	);
+}
+
 function reportPluginDiagnostic(
 	file: VFile,
 	scope: string,
@@ -670,12 +688,7 @@ export const remarkWikilink: RemarkPluginFactory<RemarkWikiLinkPluginOptions> =
 		} catch (error) {
 			// A fatal VFileMessage (raised by file.fail for error-mode broken or
 			// ambiguous links) must propagate so the build actually fails.
-			if (
-				typeof error === "object" &&
-				error !== null &&
-				"fatal" in error &&
-				(error as { fatal?: unknown }).fatal === true
-			) {
+			if (isFatalVFileMessage(error)) {
 				throw error;
 			}
 
@@ -1441,6 +1454,13 @@ async function renderPageEmbed(
 			value: `<div class="obsidian-transclusion" data-src="${escapeHtmlAttribute(resolved.href ?? "")}">\n${transcludedHtml}\n</div>`,
 		};
 	} catch (error) {
+		// `file.fail` inside the transcluded document — a Dataview query that
+		// cannot evaluate, a broken or ambiguous link — throws rather than warns.
+		// Swallowing it here reported the failure and let the build pass, so the
+		// same document failed on its own and succeeded once embedded.
+		if (isFatalVFileMessage(error)) {
+			throw error;
+		}
 		reportPluginDiagnostic(
 			ctx.file,
 			"transclusion",

@@ -1758,3 +1758,37 @@ test("further queries over the same index reuse page values instead of rebuildin
 
 	expect(reads).toBe(afterFirstQuery);
 });
+
+// The frontmatter-boundary rule was written three times with three answers.
+// This one opened frontmatter on a bare leading `---` with no closing delimiter,
+// so a note beginning with the thematic break lost every task, list item and
+// inline field below it — while headings and tags still indexed, because those
+// read the shared `getContentLineFlags`.
+test("a note opening on a thematic break keeps its tasks and fields", () => {
+	const note = [
+		"---",
+		"# Title",
+		"",
+		"- [ ] a task",
+		"- [x] done",
+		"- a list item",
+		"",
+		"key:: value",
+		"",
+	].join("\n");
+
+	const result = extractDataviewMetadata(note, {}, "note.md");
+
+	expect(result.tasks).toHaveLength(2);
+	expect(result.lists).toHaveLength(3);
+	expect(result.fields).toHaveProperty("key", "value");
+});
+
+test("a real frontmatter block is still skipped", () => {
+	const note = ["---", "title: T", "---", "", "- [ ] a task", ""].join("\n");
+
+	const result = extractDataviewMetadata(note, { title: "T" }, "note.md");
+
+	expect(result.tasks).toHaveLength(1);
+	expect(result.fields).toHaveProperty("title", "T");
+});

@@ -1,3 +1,4 @@
+import { getContentLineFlags } from "../shared/content-flags.js";
 import { escapeHtmlAttribute, escapeHtmlText, sanitizeUrl } from "../shared/escape.js";
 import type { DailyNoteConfig } from "./daily-notes.js";
 import { parseDailyNoteDate } from "./daily-notes.js";
@@ -100,20 +101,16 @@ export function extractDataviewMetadata(
 	const tasks: DataviewTask[] = [];
 	const lists: DataviewListItem[] = [];
 	const lines = markdown.split(/\r?\n/);
-	let inFrontmatter = lines[0]?.trim() === "---";
-	let inFence = false;
+	// The shared boundary rule, not a third copy of it. This one previously
+	// opened frontmatter on a bare leading `---` with no closing delimiter, so a
+	// note opening on the thematic break lost every task, list item and inline
+	// field below it while headings and tags still indexed — `getContentLineFlags`
+	// requires the closing `---` precisely to avoid that.
+	const isContent = getContentLineFlags(lines);
 
 	for (let index = 0; index < lines.length; index += 1) {
+		if (!isContent[index]) continue;
 		const line = lines[index] ?? "";
-		if (inFrontmatter) {
-			if (index > 0 && line.trim() === "---") inFrontmatter = false;
-			continue;
-		}
-		if (/^\s*(```|~~~)/.test(line)) {
-			inFence = !inFence;
-			continue;
-		}
-		if (inFence) continue;
 		const taskMatch = TASK_PATTERN.exec(line);
 		if (taskMatch) {
 			const text = taskMatch[4] ?? "";

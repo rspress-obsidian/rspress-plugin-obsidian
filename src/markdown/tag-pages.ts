@@ -55,27 +55,27 @@ function escapeYamlDoubleQuoted(value: string): string {
 }
 
 /**
- * Escape a tag name for safe inclusion in a markdown heading. HTML special
- * characters are entity-escaped (the page renders with raw HTML enabled) and
- * link-label brackets are escaped so the tag cannot form a `[x](y)` link.
+ * Escape a string for safe inclusion as inline text in the generated page —
+ * a heading, or a link label.
+ *
+ * These pages are parsed with raw HTML enabled, so the escaping has to hold in
+ * both directions. HTML special characters are entity-escaped so the value can
+ * never become an element, and link-label brackets and newlines are neutralised
+ * so it cannot break out of the `[…](…)` it sits in and leave the rest of the
+ * title as page content.
+ *
+ * These were two functions that disagreed: the heading escaped `& < > [ ] \n \r`
+ * and the label only `\ [ ]`, so a `title` containing a newline produced
+ * `- [hello\n<img src=x onerror=alert(1)>](/Eve)` and rendered a live element.
  */
-function escapeHeadingText(value: string): string {
+function escapeMarkdownText(value: string): string {
 	return value
+		.replace(/\\/g, "\\\\")
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
-		.replace(/\[/g, "\\[")
-		.replace(/\]/g, "\\]")
-		.replace(/\n/g, " ")
-		.replace(/\r/g, " ");
-}
-
-/**
- * Escape markdown link-label and destination syntax so a page `title`
- * containing `]`, `(`, or `)` cannot break out of the generated link.
- */
-function escapeMarkdownLabel(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/[[\]]/g, "\\$&");
+		.replace(/[[\]]/g, "\\$&")
+		.replace(/\r?\n/g, " ");
 }
 
 function escapeMarkdownDestination(value: string): string {
@@ -85,13 +85,13 @@ function escapeMarkdownDestination(value: string): string {
 function generateTagPageContent(displayName: string, pages: ContentPage[]): string {
 	const listItems = pages
 		.map((p) => {
-			const label = escapeMarkdownLabel(p.title ?? p.baseName);
+			const label = escapeMarkdownText(p.title ?? p.baseName);
 			const destination = escapeMarkdownDestination(routeHref(p.routePath, p.relativePath));
 			return `- [${label}](${destination})`;
 		})
 		.join("\n");
 
-	const escapedHeading = escapeHeadingText(displayName);
+	const escapedHeading = escapeMarkdownText(displayName);
 	return [
 		"---",
 		`title: "#${escapeYamlDoubleQuoted(displayName)}"`,
