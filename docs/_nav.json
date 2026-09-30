@@ -1,7 +1,7 @@
 [
   {
     "text": "Getting Started",
-    "link": "/getting-started/",
+    "link": "/getting-started",
     "activeMatch": "^/getting-started(/index)?(\\.html?)?$"
   },
   {
