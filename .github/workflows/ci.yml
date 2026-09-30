@@ -25,15 +25,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        # 1.3.0 is the floor `engines` declares; `1.3.x` would float to the
-        # newest patch and never prove the minimum works.
-        bun-version: ['1.3.0', '1.4.x']
+        # The dev toolchain, not the support floor. `engines.bun` is the
+        # consumer contract and stays at 1.3; the committed `bun.lock` is
+        # lockfileVersion 2, which only bun >= 1.4 can parse — pinning this to
+        # the floor made `bun install --frozen-lockfile` fail before any step ran.
+        bun-version: ['1.4.x']
         include:
           # Bun's own runtime differences are platform-independent, so the
           # second runtime is exercised on one OS instead of tripling the job
           # count.
           - os: ubuntu-latest
-            bun-version: 1.4.x
+            bun-version: '1.5.x'
     defaults:
       run:
         # Git Bash ships with all three runners and is the one shell whose
@@ -179,7 +181,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.x
+          bun-version: '1.4.x'
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -217,7 +219,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.x
+          bun-version: '1.4.x'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -241,7 +243,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.x
+          bun-version: '1.4.x'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
