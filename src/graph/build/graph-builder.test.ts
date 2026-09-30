@@ -1,18 +1,28 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import path from "node:path";
 import { setCanvasRoutes } from "../../shared/canvas-routes.js";
 import type { ScannedRouteDocument } from "./cache";
 import { buildGraphData } from "./graph-builder";
 import type { CollectedRoute } from "./types";
+
+// Fixtures must use platform-absolute paths. The resolver does
+// `path.resolve(path.dirname(sourceAbsolutePath), rawLink)`, so a POSIX-looking
+// `/docs/guide.md` is absolute on Linux but merely root-relative on Windows,
+// where `path.resolve` anchors it to the CWD while the alias keys stay
+// root-relative — and every relative link in this file silently stopped
+// resolving there.
+const DOCS_ROOT = path.resolve(process.cwd(), "docs");
 
 function makeRoute(
 	routePath: string,
 	absolutePath: string,
 	pageName = routePath.slice(1) || "index",
 ): CollectedRoute {
+	const absolute = path.resolve(DOCS_ROOT, absolutePath);
 	return {
 		routePath,
-		absolutePath,
-		relativePath: absolutePath.replace("/docs/", ""),
+		absolutePath: absolute,
+		relativePath: path.relative(DOCS_ROOT, absolute).replace(/\\/g, "/"),
 		pageName,
 	};
 }
