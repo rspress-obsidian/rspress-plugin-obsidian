@@ -17,10 +17,6 @@ mock.module("virtual-graph-data", () => ({
 	graphData: { nodes: [], links: [] },
 	default: { nodes: [], links: [] },
 }));
-mock.module("@rspress/core/runtime", () => ({
-	useLocation: () => ({ pathname: "/", search: "", hash: "", state: null, key: "" }),
-	useNavigate: () => () => {},
-}));
 // Snapshot the exports: registering the stub below patches the live namespace
 // in place, so the namespace object itself cannot serve as the restore value.
 const realGraphPanel = { ...(await import("../GraphPanel")) };

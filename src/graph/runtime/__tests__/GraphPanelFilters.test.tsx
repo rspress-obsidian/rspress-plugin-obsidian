@@ -6,6 +6,10 @@ if (!globalThis.document) GlobalRegistrator.register();
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
+// The graph runtime reads the path from the document; this test renders a
+// panel anchored on /guide.
+history.replaceState({}, "", "/guide");
+
 const { mock } = require("bun:test");
 
 // /guide (the current route) reaches /leaf only at depth 2 via /api, and
@@ -26,10 +30,6 @@ const mockGraphData = {
 };
 
 mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
-mock.module("@rspress/core/runtime", () => ({
-	useLocation: () => ({ pathname: "/guide", search: "", hash: "", state: null, key: "" }),
-	useNavigate: () => () => {},
-}));
 
 // Capture the props GraphView hands the force graph so the visible node set
 // can be asserted per filter change.

@@ -1,4 +1,3 @@
-import { useLocation } from "@rspress/core/runtime";
 import {
 	Component,
 	type ElementType,
@@ -12,6 +11,7 @@ import {
 	useState,
 } from "react";
 import { graphData } from "virtual-graph-data";
+import { usePathname } from "../../shared/usePathname.js";
 import type { GraphViewGroup } from "../types.js";
 import {
 	createGraphIndex,
@@ -196,7 +196,7 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 	{ width, height, onNodeClick, onNodeHoverChange, colors: customColors, filters, groups },
 	ref,
 ) {
-	const { pathname } = useLocation();
+	const pathname = usePathname();
 	const dark = useTheme();
 	const baseColors = dark ? DARK_COLORS : LIGHT_COLORS;
 	const colors = useMemo(() => mergeColors(baseColors, customColors), [baseColors, customColors]);

@@ -1,5 +1,5 @@
-import { useLocation, useNavigate } from "@rspress/core/runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { navigate, usePathname } from "../../shared/usePathname.js";
 import GraphIcon from "./components/GraphIcon.js";
 import ZoomButton from "./components/ZoomButton.js";
 import GraphView, { type GraphViewColors, type GraphViewHandle } from "./GraphView.js";
@@ -31,8 +31,7 @@ function ChevronIcon({ expanded, size = 14 }: { expanded: boolean; size?: number
 }
 
 export default function GraphSidebar({ colors }: GraphSidebarProps) {
-	const navigate = useNavigate();
-	const { pathname } = useLocation();
+	const pathname = usePathname();
 	const [isExpanded, setIsExpanded] = useState(true);
 	const [stats, setStats] = useState<{ nodes: number; links: number } | null>(null);
 	const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
@@ -64,12 +63,9 @@ export default function GraphSidebar({ colors }: GraphSidebarProps) {
 		if (s) setStats(s);
 	}, [pathname]);
 
-	const handleNodeClick = useCallback(
-		(routePath: string) => {
-			navigate(routePath);
-		},
-		[navigate],
-	);
+	const handleNodeClick = useCallback((routePath: string) => {
+		navigate(routePath);
+	}, []);
 
 	const handleNodeHoverChange = useCallback((label: string | null, _x: number, _y: number) => {
 		setHoveredLabel(label);

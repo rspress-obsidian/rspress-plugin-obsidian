@@ -1,11 +1,16 @@
 // happy-dom must be registered BEFORE any testing-library import binds to globals
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { navigation } from "../../../shared/usePathname.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { MAX_NEIGHBORS } from "../deriveGraphViewData";
+
+// The graph runtime reads the path from the document; this test renders a
+// panel anchored on /guide.
+history.replaceState({}, "", "/guide");
 
 const { mock } = require("bun:test");
 
@@ -23,12 +28,10 @@ const mockGraphData = {
 
 mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
 
+// The panel navigates through the shared seam rather than `window.location`
+// directly, which is what makes it observable here.
 const navigateSpy = mock(() => {});
-
-mock.module("@rspress/core/runtime", () => ({
-	useLocation: () => ({ pathname: "/guide", search: "", hash: "", state: null, key: "" }),
-	useNavigate: () => navigateSpy,
-}));
+navigation.assign = navigateSpy;
 
 // Capture the props GraphView hands the force graph so node clicks can be driven.
 let capturedGraphProps: Record<string, unknown> | null = null;

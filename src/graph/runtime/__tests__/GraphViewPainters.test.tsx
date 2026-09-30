@@ -8,6 +8,10 @@ import { act, cleanup, render } from "@testing-library/react";
 import { createRef } from "react";
 import type { GraphViewHandle } from "../GraphView";
 
+// The graph runtime reads the path from the document; this test renders a
+// panel anchored on /guide.
+history.replaceState({}, "", "/guide");
+
 const { mock } = require("bun:test");
 
 // "/guide" is the current route; its neighbours are "/api" and "/", so all three
@@ -25,10 +29,6 @@ const mockGraphData = {
 };
 
 mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
-mock.module("@rspress/core/runtime", () => ({
-	useLocation: () => ({ pathname: "/guide", search: "", hash: "", state: null, key: "" }),
-	useNavigate: () => () => {},
-}));
 
 // Capture the props the plugin passes to react-force-graph-2d so we can invoke
 // the canvas painters directly — the same technique as

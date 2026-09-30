@@ -1,6 +1,6 @@
-import { useLocation } from "@rspress/core/runtime";
 import { useEffect } from "react";
 import { MERMAID_BLOCK_CLASS } from "../../mermaid/classes.js";
+import { usePathname } from "../../shared/usePathname.js";
 
 /**
  * Draws every ` ```mermaid ` placeholder on the page.
@@ -17,7 +17,7 @@ import { MERMAID_BLOCK_CLASS } from "../../mermaid/classes.js";
  * `enableMermaid` is on. Renders nothing itself.
  */
 export default function MermaidBlocks() {
-	const { pathname } = useLocation();
+	const pathname = usePathname();
 
 	// `pathname` is the route-change trigger, not an input to the scan.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-run per route

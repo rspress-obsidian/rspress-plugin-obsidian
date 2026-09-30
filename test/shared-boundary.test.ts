@@ -50,6 +50,7 @@ describe("src/shared boundary", () => {
 			"route-path.ts",
 			"slug.ts",
 			"transclusion.ts",
+			"usePathname.ts",
 		]);
 	});
 

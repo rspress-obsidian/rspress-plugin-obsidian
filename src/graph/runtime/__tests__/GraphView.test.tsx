@@ -9,6 +9,10 @@ import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { DARK_COLORS, LIGHT_COLORS } from "../palette/colors";
 
+// The graph runtime reads the path from the document; this test renders a
+// panel anchored on /guide.
+history.replaceState({}, "", "/guide");
+
 const { mock } = require("bun:test");
 
 // `virtual-graph-data` is a build-time module; provide a stable fixture.
@@ -25,10 +29,6 @@ const mockGraphData = {
 };
 
 mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
-mock.module("@rspress/core/runtime", () => ({
-	useLocation: () => ({ pathname: "/guide", search: "", hash: "", state: null, key: "" }),
-	useNavigate: () => () => {},
-}));
 // `react-force-graph-2d` renders to a canvas, so it has no DOM of its own and
 // the palette it is handed would otherwise be invisible to a test. Echo it back
 // as an attribute so a paint's resolved theme can be read from the DOM.

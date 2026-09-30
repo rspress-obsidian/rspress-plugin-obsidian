@@ -7,6 +7,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { cleanup, render } from "@testing-library/react";
 import { MERMAID_BLOCK_CLASS } from "../../mermaid/classes";
 
+// The graph runtime reads the path from the document; this test renders a
+// panel anchored on /guide.
+history.replaceState({}, "", "/guide");
+
 const { mock } = require("bun:test");
 
 // The renderer — and mermaid under it — is a browser-only dependency with its
@@ -18,12 +22,6 @@ mock.module("../../mermaid/blocks", () => ({
 	renderMermaidBlocks,
 	disposeMermaid: () => {},
 	retainMermaid: () => {},
-}));
-
-// `useLocation` is the route-change trigger; the component takes nothing else.
-let pathname = "/guide";
-mock.module("@rspress/core/runtime", () => ({
-	useLocation: () => ({ pathname, search: "", hash: "", state: null, key: "" }),
 }));
 
 // Re-import the component under test AFTER mocks are registered.
@@ -39,7 +37,6 @@ const realCancelFrame = globalThis.cancelAnimationFrame;
 beforeEach(() => {
 	frames.length = 0;
 	frameId = 0;
-	pathname = "/guide";
 	renderMermaidBlocks.mockClear();
 	globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
 		frames.push(() => callback(0));
@@ -121,7 +118,9 @@ describe("MermaidBlocks", () => {
 		await settle();
 		expect(renderMermaidBlocks).toHaveBeenCalledTimes(1);
 
-		pathname = "/guide/advanced";
+		// The component reads the document's path, so the test moves the document.
+		history.replaceState({}, "", "/guide/advanced");
+		window.dispatchEvent(new PopStateEvent("popstate"));
 		view.rerender(<MermaidBlocks />);
 		await settle();
 

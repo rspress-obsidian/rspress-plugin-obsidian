@@ -1,5 +1,5 @@
-import { useLocation, useNavigate } from "@rspress/core/runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { navigate, usePathname } from "../../shared/usePathname.js";
 import type { GraphViewGroup } from "../types.js";
 import GraphIcon from "./components/GraphIcon.js";
 import ZoomButton from "./components/ZoomButton.js";
@@ -62,8 +62,7 @@ function injectKeyframes() {
 }
 
 export default function GraphPanel({ defaultOpen = false, colors, groups }: GraphPanelProps) {
-	const navigate = useNavigate();
-	const { pathname } = useLocation();
+	const pathname = usePathname();
 	const [isHydrated, setIsHydrated] = useState(false);
 	const [isOpen, setIsOpen] = useState(defaultOpen);
 	const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -296,12 +295,9 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 		fabRef.current?.focus();
 	}, []);
 
-	const handleNodeClick = useCallback(
-		(routePath: string) => {
-			navigate(routePath);
-		},
-		[navigate],
-	);
+	// `navigate` is a module-level function, so the callback never needs a
+	// dependency to stay stable.
+	const handleNodeClick = useCallback((routePath: string) => navigate(routePath), []);
 
 	const FOOTER_HEIGHT = 22;
 	const HEADER_HEIGHT = 34;
