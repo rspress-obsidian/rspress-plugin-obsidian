@@ -77,9 +77,17 @@ function resolveRelative(target: string, from: Page): string | undefined {
 	return undefined;
 }
 
+// `file` is normalised to `/` because it is compared with `endsWith` and
+// `path.relative` elsewhere in this file, and both are separator-sensitive:
+// `path.join` yields `\` on Windows, so `docs\canvas\guide\styling.md` never
+// ends with `canvas/guide/styling.md`.
 const pages: Page[] = listFiles(DOCS)
 	.filter((file) => /\.mdx?$/.test(file))
-	.map((file) => ({ file, route: routeFor(file), source: fs.readFileSync(file, "utf-8") }));
+	.map((file) => ({
+		file: file.replace(/\\/g, "/"),
+		route: routeFor(file),
+		source: fs.readFileSync(file, "utf-8"),
+	}));
 
 const authoredRoutes = new Set(pages.map((page) => normalizeRoute(page.route)));
 
@@ -119,7 +127,12 @@ describe("docs tree", () => {
 
 	test("the navbar lives only at the docs root", () => {
 		const navFiles = listFiles(DOCS).filter((file) => path.basename(file) === "_nav.json");
-		expect(navFiles.map((file) => path.relative(REPO, file))).toEqual(["docs/_nav.json"]);
+		// Normalised like the reference assertion further down: `path.relative`
+		// yields `\` on Windows, so this compared `docs\_nav.json` with
+		// `docs/_nav.json`.
+		expect(navFiles.map((file) => path.relative(REPO, file).split(path.sep).join("/"))).toEqual([
+			"docs/_nav.json",
+		]);
 	});
 
 	test("the navbar reaches every top-level section", () => {

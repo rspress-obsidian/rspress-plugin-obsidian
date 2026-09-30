@@ -626,9 +626,12 @@ describe("media embeds", () => {
 	});
 
 	test("resolves an attachment relative to the docs root for a nested note", async () => {
+		// Forward slashes: the plugin normalizes the incoming file path before
+		// looking it up in `byAbsolutePath`, so a `path.join` absolute path —
+		// which is backslashes on Windows — never matches the key.
 		const currentPage = makePage({
 			filePathKey: "guide/index",
-			absolutePath: path.join(assetsRoot, "guide", "index.md"),
+			absolutePath: path.join(assetsRoot, "guide", "index.md").replace(/\\/g, "/"),
 			relativePath: "guide/index.md",
 		});
 		const index = makeIndex([currentPage]);
