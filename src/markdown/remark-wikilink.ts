@@ -2344,12 +2344,21 @@ function resolveMediaSrc(
 			: undefined;
 	};
 
+	// A disk check is not authoritative about spelling: on a case-insensitive
+	// filesystem (macOS, Windows) `existsSync("document.pdf")` is true for a file
+	// actually named `Document.pdf`, and returning the name as typed emits a URL
+	// the site never publishes. The index recorded the real casing, so ask it
+	// first and fall back to the request only when it has no entry.
+	const canonicalOrTyped = (absolutePath: string): string | undefined => {
+		const rel = path.relative(docsRoot, absolutePath).replace(/\\/g, "/");
+		if (rel.startsWith("..") || path.isAbsolute(rel) || rel.length === 0) return undefined;
+		return relativeAsset(absolutePath)?.url ?? encodePath(rel.split("/"));
+	};
+
 	const tryRelToFile = path.resolve(path.dirname(currentFilePath), target);
 	if (fs.existsSync(tryRelToFile)) {
-		const rel = path.relative(docsRoot, tryRelToFile).replace(/\\/g, "/");
-		if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
-			return { url: encodePath(rel.split("/")), found: true };
-		}
+		const url = canonicalOrTyped(tryRelToFile);
+		if (url) return { url, found: true };
 	}
 	const indexedRelative = relativeAsset(tryRelToFile);
 	if (indexedRelative) {
@@ -2358,10 +2367,8 @@ function resolveMediaSrc(
 
 	const tryRelToRoot = path.resolve(docsRoot, target);
 	if (fs.existsSync(tryRelToRoot)) {
-		const rel = path.relative(docsRoot, tryRelToRoot).replace(/\\/g, "/");
-		if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
-			return { url: encodePath(rel.split("/")), found: true };
-		}
+		const url = canonicalOrTyped(tryRelToRoot);
+		if (url) return { url, found: true };
 	}
 	const indexedRoot = relativeAsset(tryRelToRoot);
 	if (indexedRoot) {

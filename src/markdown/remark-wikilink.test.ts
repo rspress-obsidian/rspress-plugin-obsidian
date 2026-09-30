@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import fs from "node:fs";
 import path from "node:path";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -1018,4 +1019,32 @@ describe("pipeline ordering", () => {
 		expect(output).toContain("obsidian-transclusion");
 		expect(output).not.toMatch(/<p[^>]*>\s*<div/);
 	});
+});
+
+// macOS and Windows report `existsSync("document.pdf")` as true for a file
+// actually named `Document.pdf`. The resolver used to return the name as typed,
+// emitting a URL the site never publishes; it now takes the casing the index
+// recorded. Simulated here rather than left to CI, because the behaviour is a
+// property of the filesystem and a Linux checkout cannot produce it.
+test("a case-insensitive filesystem does not make the emitted URL lowercase", async () => {
+	const realExistsSync = fs.existsSync;
+	const asCaseInsensitive = (candidate: string): boolean =>
+		realExistsSync(candidate) ||
+		realExistsSync(candidate.replace(/document\.pdf$/i, "Document.pdf"));
+	const spy = spyOn(fs, "existsSync").mockImplementation(((candidate: string) =>
+		asCaseInsensitive(String(candidate))) as typeof fs.existsSync);
+	try {
+		const processor = makeProcessor(assetsRoot, {
+			enableMediaEmbeds: true,
+			enableCaseInsensitiveLookup: true,
+		});
+		const file = await processor.process({
+			value: "![[document.pdf]]",
+			path: path.resolve(assetsRoot, "index.md"),
+		});
+
+		expect(String(file)).toContain('src="/Document.pdf"');
+	} finally {
+		spy.mockRestore();
+	}
 });
