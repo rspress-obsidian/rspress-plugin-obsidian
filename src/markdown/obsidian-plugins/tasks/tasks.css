@@ -1,0 +1,164 @@
+/* Tasks: styles for the markup `src/markdown/obsidian-plugins/tasks/` emits —
+ * Tasks' own classes, so a theme or snippet written for Obsidian applies too. */
+
+.block-language-tasks {
+	margin: 1em 0;
+}
+
+.plugin-tasks-query-result {
+	margin: 0.25em 0;
+}
+
+.plugin-tasks-query-result .plugin-tasks-query-result {
+	margin: 0;
+}
+
+.plugin-tasks-list-item > .task-list-item-checkbox {
+	cursor: default;
+}
+
+/* Done and cancelled results are muted, as in the note itself. */
+.plugin-tasks-list-item.is-checked[data-task-status-type="DONE"] > .tasks-list-text,
+.plugin-tasks-list-item.is-checked[data-task-status-type="CANCELLED"] > .tasks-list-text {
+	color: var(--rp-c-text-2, #67676c);
+}
+
+.plugin-tasks-list-item[data-task-status-type="CANCELLED"] > .tasks-list-text .task-description {
+	text-decoration: line-through;
+}
+
+.plugin-tasks-list-item .task-due[data-task-due^="past-"],
+.plugin-tasks-list-item .task-due[data-task-due="today"] {
+	color: var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
+}
+
+.plugin-tasks-list-item[data-task-status-type="DONE"] .task-due,
+.plugin-tasks-list-item[data-task-status-type="CANCELLED"] .task-due {
+	color: inherit;
+}
+
+/* The `^block-id` a task ends with is an anchor, not text (Tasks hides it too). */
+.task-list-item .task-block-link {
+	display: none;
+}
+
+/* Short mode: the emoji alone, its value in the title. */
+.tasks-layout-short-mode .tasks-list-text [title] {
+	cursor: help;
+}
+
+.tasks-layout-hide-tags .task-description a[href*="/tags/"] {
+	display: none;
+}
+
+.task-extras {
+	white-space: nowrap;
+}
+
+/* A field (`📅 2026-10-06`, `🔁 every day`) wraps as a unit, never at a date's
+ * hyphens; the description still wraps freely. */
+.tasks-list-text > span:not(.task-description) {
+	white-space: nowrap;
+}
+
+.tasks-backlink {
+	font-size: 0.9em;
+	color: var(--rp-c-text-2, #67676c);
+}
+
+.tasks-backlink a.internal-link {
+	color: inherit;
+	text-decoration: underline dotted;
+}
+
+.tasks-backlink a.internal-link-short-mode {
+	text-decoration: none;
+}
+
+.tasks-urgency {
+	font-size: 0.8em;
+	padding: 2px 6px;
+	border-radius: 4px;
+	margin-left: 0.5em;
+	line-height: 1;
+	color: var(--rp-c-text-1, inherit);
+	background-color: var(--rp-c-bg-soft, #f6f6f7);
+}
+
+.tasks-group-heading {
+	margin: 1em 0 0.25em;
+}
+
+.tasks-group-count {
+	color: var(--rp-c-text-2, #67676c);
+	font-size: 0.85em;
+	font-weight: normal;
+	white-space: nowrap;
+}
+
+.task-count {
+	color: var(--rp-c-text-2, #67676c);
+	font-size: 0.9em;
+	padding-left: 1.4em;
+}
+
+.plugin-tasks-query-explanation {
+	white-space: pre;
+	overflow-x: auto;
+	padding: 0.75em 1em;
+	border-radius: 8px;
+	font-size: 0.85em;
+	background-color: var(--rp-c-bg-soft, #f6f6f7);
+}
+
+.plugin-tasks-query-error pre {
+	white-space: pre-wrap;
+	padding: 0.75em 1em;
+	border-radius: 8px;
+	border-left: 3px solid var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
+	background-color: var(--rp-c-bg-soft, #f6f6f7);
+	color: var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
+	font-size: 0.85em;
+}
+
+html.dark .tasks-urgency,
+html.dark .plugin-tasks-query-explanation,
+html.dark .plugin-tasks-query-error pre {
+	background-color: var(--rp-c-bg-soft, #202127);
+}
+
+/* `view columns by …`: one column per top-level group, each task a card. */
+.tasks-columns {
+	display: flex;
+	gap: 1rem;
+	overflow-x: auto;
+	align-items: flex-start;
+	padding: 0.5rem 2px;
+}
+
+.tasks-columns-column {
+	flex: 0 0 18rem;
+	min-width: 18rem;
+	max-width: 18rem;
+	padding: 0 0.5rem;
+	border: 1px solid var(--rp-c-divider, #e2e2e3);
+	border-radius: 8px;
+	background: var(--rp-c-bg-soft, #f6f6f7);
+}
+
+.tasks-columns-column .plugin-tasks-query-result {
+	padding-left: 0;
+}
+
+/* The column's own heading: the theme's heading margin left a band above it. */
+.tasks-columns-column > .tasks-group-heading:first-child {
+	margin-top: 0.75rem;
+}
+
+.tasks-columns-column-card {
+	margin-bottom: 0.5rem;
+	padding: 0.25em 0.5em 0.25em 1.9em;
+	border: 1px solid var(--rp-c-divider, #e2e2e3);
+	border-radius: 6px;
+	background: var(--rp-c-bg, #fff);
+}
