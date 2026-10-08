@@ -27,14 +27,19 @@ test.describe("Graph View Panel", () => {
 		await expect(page.locator(STATS)).toHaveText(/[1-9]\d* nodes? · [1-9]\d* links?/);
 
 		// Moving the pointer over the graph must not dismiss the panel.
-		await page.locator(`${PANEL} [role='img']`).hover();
+		await page.locator(`${PANEL} [aria-label^='Graph view showing']`).hover();
 		await expect(page.locator(PANEL)).toBeVisible();
 	});
 
-	test("graph panel closes on escape", async ({ page }) => {
+	test("graph panel closes on escape when focus is inside it", async ({ page }) => {
 		const panel = page.locator(PANEL);
 		await expect(panel).toBeVisible();
 
+		// Escape belongs to whichever widget has focus: from the page it must
+		// not close the (non-modal) panel, from inside the panel it does.
+		await page.keyboard.press("Escape");
+		await expect(panel).toBeVisible();
+		await panel.locator("button[aria-label='Close graph view']").focus();
 		await page.keyboard.press("Escape");
 
 		await expect(panel).not.toBeVisible();

@@ -11,7 +11,8 @@ import path from "node:path";
  * unit tests and 41 browser tests, because a fenced code block is a string.
  *
  * So this reads the fences. It does not run them — that is
- * `scripts/check-doc-examples.ts`, which the CI release job invokes — but it
+ * `scripts/check-doc-examples.ts`, which CI and the release build job run after
+ * the build — but it
  * catches the class that is cheapest to catch statically: a doc naming a symbol
  * the package does not export, or calling a factory it never imported.
  */

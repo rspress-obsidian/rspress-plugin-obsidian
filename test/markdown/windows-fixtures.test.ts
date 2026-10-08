@@ -137,6 +137,17 @@ const OPTIONS: NormalizedPluginOptions = {
 	enableMermaid: false,
 	mermaidSecurityLevel: "strict",
 	enableDefaultStyles: false,
+	enableTasks: false,
+	tasks: {},
+	enableKanban: false,
+	kanban: {},
+	enableExcalidraw: false,
+	excalidraw: {},
+	enableBases: false,
+	bases: {},
+	enableTemplater: false,
+	templater: {},
+	onPluginError: "error",
 };
 
 /**
@@ -235,9 +246,10 @@ describe("CRLF vault (Windows-authored)", () => {
 		expect(html).toContain('href="/Note#target-heading"');
 		expect(html).toContain('href="/Note#%5Eblock-one"');
 		expect(html).not.toContain("[[Note");
-		// The fragments point at ids the emitted headings actually carry.
+		// The page's own heading carries its id; the embedded copy of Note's
+		// heading keeps Note's id behind the embed prefix, so it cannot clash.
 		expect(html).toContain('<h1 id="index">');
-		expect(html).toContain('<h2 id="target-heading">');
+		expect(html).toContain('<h2 id="embed-1-target-heading">');
 	});
 
 	test("keeps multi-line paragraphs, fences, callouts and transclusions intact", async () => {

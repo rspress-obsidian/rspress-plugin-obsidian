@@ -1,0 +1,9 @@
+{
+	"nodes": [
+		{ "id": "text", "type": "text", "text": "# Board\n\nSee [[Welcome]].", "x": 0, "y": 0, "width": 260, "height": 140 },
+		{ "id": "file", "type": "file", "file": "Second note.md", "x": 320, "y": 0, "width": 260, "height": 140 }
+	],
+	"edges": [
+		{ "id": "edge", "fromNode": "text", "fromSide": "right", "toNode": "file", "toSide": "left" }
+	]
+}

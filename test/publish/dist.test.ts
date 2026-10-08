@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
-	cpSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -15,6 +15,54 @@ import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { gunzipSync } from "node:zlib";
+
+/**
+ * Unpack an `npm pack` tarball (gzip + ustar, with pax extended headers for
+ * long names) into `destination`, stripping the leading `package/` directory.
+ *
+ * In-process on purpose: `bun install <tarball>` resolves every dependency
+ * against the registry, and a `tar` child process failed silently on Windows
+ * (non-zero exit, empty stdout and stderr). Reading the archive here needs
+ * neither the network nor a platform binary.
+ */
+function extractTarball(tarball: string, destination: string): void {
+	const archive = gunzipSync(readFileSync(tarball));
+	const field = (offset: number, length: number, at: number) =>
+		archive
+			.subarray(at + offset, at + offset + length)
+			.toString("utf-8")
+			.replace(/\0.*$/s, "");
+	let paxPath: string | undefined;
+	let offset = 0;
+	while (offset + 512 <= archive.length) {
+		const name = field(0, 100, offset);
+		if (name === "") break;
+		const size = Number.parseInt(field(124, 12, offset).trim() || "0", 8);
+		const type = field(156, 1, offset);
+		const prefix = field(345, 155, offset);
+		const body = archive.subarray(offset + 512, offset + 512 + size);
+		offset += 512 + Math.ceil(size / 512) * 512;
+		if (type === "x") {
+			paxPath = /\d+ path=([^\n]*)\n/.exec(body.toString("utf-8"))?.[1];
+			continue;
+		}
+		const entryPath = paxPath ?? (prefix ? `${prefix}/${name}` : name);
+		paxPath = undefined;
+		if (type !== "0" && type !== "" && type !== "5") continue;
+		const relative = entryPath.replace(/^package\//, "");
+		const target = path.resolve(destination, relative);
+		if (!target.startsWith(path.resolve(destination) + path.sep)) {
+			throw new Error(`tarball entry escapes the destination: ${entryPath}`);
+		}
+		if (type === "5") {
+			mkdirSync(target, { recursive: true });
+			continue;
+		}
+		mkdirSync(path.dirname(target), { recursive: true });
+		writeFileSync(target, body);
+	}
+}
 
 // Asserts the *packed* artifact, not the dist/ on disk: exports-map resolution,
 // both module formats loading under Node, tarball contents and size. Run with
@@ -55,7 +103,6 @@ test.skipIf(!distExists)(
 	"packed artifact",
 	async () => {
 		const workDir = mkdtempSync(path.join(os.tmpdir(), "rspress-obsidian-pack-"));
-		const installDir = path.join(root, "node_modules", ".publish-test");
 		try {
 			// 1. Pack and inspect the tarball.
 			const packJson = execFileSync("npm", ["pack", "--json", "--pack-destination", workDir], {
@@ -89,65 +136,63 @@ test.skipIf(!distExists)(
 			// The 13 MB devkit/TypeScript chunk used to ship here.
 			expect(packed.size).toBeLessThan(2 * 1024 * 1024);
 
-			// 2. Extract into node_modules so bare imports resolve upward.
-			rmSync(installDir, { recursive: true, force: true });
-			mkdirSync(installDir, { recursive: true });
-			// Extraction goes through `bun install <tarball>` rather than a `tar`
-			// child process. bun is already the runner for this job, reads `.tgz`
-			// natively, and this drops the `tar.exe` that failed silently on
-			// Windows — non-zero exit, no signal, empty stdout *and* stderr.
-			// `npm pack` above still proves the archive is well-formed; only the
-			// way it is unpacked changed. The result is copied to `installDir` so
-			// every assertion below keeps the layout it already expects.
+			// 2. Lay out an isolated consumer inside the temp directory:
+			//      <work>/consumer/node_modules/rspress-plugin-obsidian  ← the tarball
+			//      <work>/node_modules → the repository's node_modules
+			//    Bare imports from the unpacked package walk up past the consumer
+			//    to the link, so dependencies resolve without an install and the
+			//    repository's own node_modules is never written to.
 			const consumer = path.join(workDir, "consumer");
-			mkdirSync(consumer, { recursive: true });
-			writeFileSync(
-				path.join(consumer, "package.json"),
-				JSON.stringify({ name: "publish-test-consumer", private: true }),
-				"utf-8",
-			);
-			execFileSync(process.execPath, ["install", tarball, "--no-save"], {
-				cwd: consumer,
-				stdio: "pipe",
-			});
-			cpSync(path.join(consumer, "node_modules", "rspress-plugin-obsidian"), installDir, {
-				recursive: true,
-			});
-			rmSync(path.join(root, "node_modules", "rspress-plugin-obsidian"), {
-				recursive: true,
-				force: true,
-			});
+			const installDir = path.join(consumer, "node_modules", "rspress-plugin-obsidian");
+			extractTarball(tarball, installDir);
 			// A Windows directory *symlink* needs Developer Mode or elevation
 			// (`EPERM` otherwise); a junction is a reparse point that needs neither
 			// and is what npm/pnpm create for linked packages. POSIX ignores the type
 			// argument, so one call covers all three platforms.
 			symlinkSync(
-				installDir,
-				path.join(root, "node_modules", "rspress-plugin-obsidian"),
+				path.join(root, "node_modules"),
+				path.join(workDir, "node_modules"),
 				process.platform === "win32" ? "junction" : "dir",
+			);
+			expect(JSON.parse(readFileSync(path.join(installDir, "package.json"), "utf-8")).name).toBe(
+				"rspress-plugin-obsidian",
 			);
 
 			// 3. Every advertised subpath resolves to a file that exists, under the
 			// `require` conditions too: a CJS consumer — or a resolver that only
 			// understands `require` — must not hit ERR_PACKAGE_PATH_NOT_EXPORTED.
-			const require = createRequire(pathToFileURL(path.join(root, "index.js")).href);
+			const require = createRequire(pathToFileURL(path.join(consumer, "index.js")).href);
 			for (const entry of EXPORTS) {
 				const resolved = require.resolve(entry.subpath);
 				expect(existsSync(resolved)).toBe(true);
+				// Resolved from the unpacked tarball, not from the repository. Both
+				// sides are realpaths: macOS's temp dir sits behind a symlink, and
+				// Bun returns either spelling depending on what it resolved before.
+				expect(realpathSync(resolved).startsWith(realpathSync(installDir))).toBe(true);
 				if (entry.load === "css") {
 					expect(statSync(resolved).size).toBeGreaterThan(0);
 				}
 			}
 
-			// 4. Both formats load under Node, not just Bun. Dynamic import is
-			//    required here: the specifier is built at runtime from the exports
-			//    subpaths above, and this test exists to exercise module loading.
+			// 4. Both formats load. The ESM side follows the unpacked package's own
+			//    `import` condition to a file URL: a bare specifier would resolve
+			//    relative to this test file, i.e. through the repository's package
+			//    self-reference rather than the tarball. Dynamic import is the point
+			//    here — the test exercises module loading of runtime-chosen files.
 			for (const name of ENTRIES) {
 				const loaded = require(`rspress-plugin-obsidian${name}`) as Record<string, unknown>;
 				expect(Object.keys(loaded).length).toBeGreaterThan(0);
 			}
+			const unpackedExports = (
+				JSON.parse(readFileSync(path.join(installDir, "package.json"), "utf-8")) as {
+					exports: Record<string, { import: { default: string } }>;
+				}
+			).exports;
 			for (const name of ENTRIES) {
-				const loaded = (await import(`rspress-plugin-obsidian${name}`)) as Record<string, unknown>;
+				const target = unpackedExports[name === "" ? "." : `.${name}`]?.import.default;
+				if (!target) throw new Error(`no import condition for "${name || "."}"`);
+				const file = path.join(installDir, target);
+				const loaded = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
 				expect(Object.keys(loaded).length).toBeGreaterThan(0);
 			}
 
@@ -158,17 +203,11 @@ test.skipIf(!distExists)(
 			expect(aggregate).toContain(".canvas-");
 			expect(aggregate).toContain(".obsidian-hover-preview");
 		} finally {
-			rmSync(path.join(root, "node_modules", "rspress-plugin-obsidian"), {
-				recursive: true,
-				force: true,
-			});
-			rmSync(installDir, { recursive: true, force: true });
 			rmSync(workDir, { recursive: true, force: true });
 		}
-		// `npm pack`, a `tar` extraction and a symlink, in that order. It clears the
-		// 5s default on Linux but was killed mid-`tar` on a cold Windows runner
-		// (`signal: "SIGTERM"`), so the timeout is per-test rather than global —
-		// bunfig.toml removed the global key for exactly that reason.
+		// `npm pack` is a child process that was killed mid-run on a cold Windows
+		// runner at the 5s default, so the timeout is per-test rather than
+		// global — bunfig.toml removed the global key for exactly that reason.
 	},
 	60_000,
 );
@@ -202,8 +241,10 @@ async function bareImportsInSource(include: (file: string) => boolean): Promise<
 		if (!include(file)) continue;
 		const source = readFileSync(path.join(root, file), "utf-8")
 			.replace(/\bimport\s+type\s+[\s\S]*?from\s*["'][^"']+["'];?/g, "")
-			// JSDoc examples import the package by its own name.
-			.replace(/\/\*[\s\S]*?\*\//g, "");
+			// JSDoc examples import the package by its own name, and a line comment
+			// may quote the import another tool generates (`import x from "img.png"`).
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/^\s*\/\/.*$/gm, "");
 		for (const match of source.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["']([^"']+)["']/g)) {
 			const specifier = match[1] as string;
 			if (specifier.startsWith(".") || specifier.startsWith("node:") || specifier.startsWith("/")) {

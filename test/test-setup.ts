@@ -1,6 +1,9 @@
-import { mock } from "bun:test";
+import { beforeEach, mock } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
+import { setCanvasRoutes } from "../src/shared/canvas-routes.js";
+import { clearPublishedFileRoutes } from "../src/shared/file-routes.js";
+import { setPublishedContent } from "../src/shared/published-content.js";
 
 // A real origin so the no-router `usePathname` fallback has a pathname to
 // read. Tests that need a specific route set it with `history.replaceState`
@@ -26,3 +29,13 @@ mock.module("@rspress/core/runtime", () => ({
 	useLocation,
 	useNavigate,
 }));
+
+// The plugins hand each other build state through module-level registries
+// (what `markdown()` publishes, the boards `canvas()` routes). Every test file
+// shares one process, so a test that runs a plugin's hooks would otherwise leak
+// that state into whichever file Bun runs next.
+beforeEach(() => {
+	setPublishedContent(undefined);
+	setCanvasRoutes([]);
+	clearPublishedFileRoutes();
+});

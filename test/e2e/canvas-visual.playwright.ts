@@ -179,17 +179,19 @@ test.describe("Canvas visual rendering", () => {
 		// capturing on pointerdown makes every link inside a card unclickable.
 		// Component tests cannot see it (they dispatch `click` directly), hence a
 		// real pointer sequence against the built site.
-		const wrapper = page.locator(".canvas-editor-node-wrapper").first();
+		// Groups paint behind cards and come first; the press is meant for a card.
+		const CARD = ".canvas-node-frame:not(.canvas-node-frame-group)";
+		const wrapper = page.locator(CARD).first();
 		const box = await wrapper.boundingBox();
 		if (!box) throw new Error("canvas card has no bounding box");
 		const x = box.x + 6;
 		const y = box.y + 6;
 
 		const capturedNow = () =>
-			page.evaluate(() => {
-				const element = document.querySelector(".canvas-editor-node-wrapper");
+			page.evaluate((selector) => {
+				const element = document.querySelector(selector);
 				return element ? element.hasPointerCapture(1) : null;
-			});
+			}, CARD);
 
 		await page.mouse.move(x, y);
 		await page.mouse.down();
@@ -206,11 +208,11 @@ test.describe("Canvas visual rendering", () => {
 		// the hit test. The component suite dispatches `click` straight at the
 		// element and can never see the overlap.
 		const groupZ = await page
-			.locator(".canvas-editor-node-wrapper:has(.canvas-node-group)")
+			.locator(".canvas-node-frame:has(.canvas-node-group)")
 			.first()
 			.evaluate((el) => Number(getComputedStyle(el).zIndex));
 		const cardZ = await page
-			.locator(".canvas-editor-node-wrapper:has(.canvas-node-file)")
+			.locator(".canvas-node-frame:has(.canvas-node-file)")
 			.first()
 			.evaluate((el) => Number(getComputedStyle(el).zIndex));
 		expect(cardZ).toBeGreaterThan(groupZ);
@@ -223,9 +225,11 @@ test.describe("Canvas visual rendering", () => {
 test.describe("Inline canvas embed", () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto("/canvas/guide/embed.html");
-		// The embed is client-rendered, so this selector appearing *is* the
-		// hydration wait.
 		await page.waitForSelector(".canvas-viewport");
+		// The viewport appears before the runtime's fit-on-mount replaces the
+		// 1:1 transform; a wheel event sent in between is undone by the fit, so
+		// wait for it as the full-page tests do.
+		await waitForCanvasRuntime(page);
 	});
 
 	test("embed loads and renders canvas viewport", async ({ page }) => {
@@ -241,15 +245,23 @@ test.describe("Inline canvas embed", () => {
 		}
 	});
 
-	test("embed zooms on scroll", async ({ page }) => {
-		// The embed's documented controls are "drag to pan, scroll to zoom,
-		// double-click to fit" — there are no keyboard shortcuts outside the
-		// editor, so assert the scroll zoom the embed actually implements.
+	test("embed leaves a bare wheel to the page and zooms with Ctrl+wheel", async ({ page }) => {
+		// The guide's contract: inside a page a plain wheel keeps scrolling the
+		// page, and the board zooms with Ctrl/⌘+wheel (or a pinch).
 		const initialTransform = await worldTransform(page);
-
 		await page.locator(".canvas-viewport").first().hover();
-		await page.mouse.wheel(0, -100);
 
+		await page.mouse.wheel(0, -100);
+		await page.evaluate(() => {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			requestAnimationFrame(() => resolve());
+			return promise;
+		});
+		expect(await worldTransform(page)).toBe(initialTransform);
+
+		await page.keyboard.down("Control");
+		await page.mouse.wheel(0, -100);
+		await page.keyboard.up("Control");
 		await expect.poll(() => worldTransform(page)).not.toBe(initialTransform);
 	});
 });

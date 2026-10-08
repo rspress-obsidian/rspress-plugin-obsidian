@@ -1,17 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { PageIndexInfo } from "@rspress/shared";
+import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 import { buildContentIndex, getCachedContentIndex } from "../../src/markdown/content-index";
 import { formatDailyNoteDate, parseDailyNoteDate } from "../../src/markdown/daily-notes";
+import { markdown as markdownPlugin } from "../../src/markdown/index";
+import { resolveMediaSrc } from "../../src/markdown/media";
 import { findWikilinkMatches, parseWikiLink } from "../../src/markdown/parse-wikilink";
 import { remarkWikilink } from "../../src/markdown/remark-wikilink";
 import { resolveWikiLink } from "../../src/markdown/resolve-wikilink";
-import type { NormalizedPluginOptions } from "../../src/markdown/types";
+import type { ContentIndex, NormalizedPluginOptions } from "../../src/markdown/types";
 import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../src/shared/media-exts.js";
 
 const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
@@ -95,11 +101,27 @@ const DEFAULT_OPTIONS: NormalizedPluginOptions = {
 	enableMermaid: false,
 	mermaidSecurityLevel: "strict",
 	enableDefaultStyles: false,
+	enableTasks: false,
+	tasks: {},
+	enableKanban: false,
+	kanban: {},
+	enableExcalidraw: false,
+	excalidraw: {},
+	enableBases: false,
+	bases: {},
+	enableTemplater: false,
+	templater: {},
+	onPluginError: "error",
 };
 
+/**
+ * The remark half of a Rspress compile: Rspress runs `remark-gfm` before any
+ * plugin, so footnotes, tables and autolinks reach the pass as GFM nodes.
+ */
 function makeProcessor(docsRoot: string, optionOverrides: Partial<NormalizedPluginOptions> = {}) {
 	return unified()
 		.use(remarkParse)
+		.use(remarkGfm)
 		.use(remarkWikilink, {
 			getDocsRoot: () => docsRoot,
 			options: { ...DEFAULT_OPTIONS, ...optionOverrides },
@@ -115,8 +137,28 @@ function makeProcessor(docsRoot: string, optionOverrides: Partial<NormalizedPlug
 function makeProcessorFor(tuple: [unknown, unknown]) {
 	return unified()
 		.use(remarkParse)
+		.use(remarkGfm)
 		.use(tuple[0] as typeof remarkWikilink, tuple[1] as never)
 		.use(remarkStringify);
+}
+
+/** Compile `value` as page `index.md` of `docsRoot` all the way to HTML. */
+async function renderHtml(
+	docsRoot: string,
+	value: string,
+	optionOverrides: Partial<NormalizedPluginOptions> = {},
+): Promise<string> {
+	const file = await unified()
+		.use(remarkParse)
+		.use(remarkGfm)
+		.use(remarkWikilink, {
+			getDocsRoot: () => docsRoot,
+			options: { ...DEFAULT_OPTIONS, ...optionOverrides },
+		})
+		.use(remarkRehype, { allowDangerousHtml: true })
+		.use(rehypeStringify, { allowDangerousHtml: true })
+		.process({ value, path: path.resolve(docsRoot, "index.md") });
+	return String(file);
 }
 
 describe("parseWikiLink", () => {
@@ -235,11 +277,14 @@ describe("buildContentIndex", () => {
 		const index = await buildContentIndex(headingFixtureRoot);
 		const page = index.byPathKey.get("guide/variants");
 
-		expect(page?.headings.map(({ preview: _, ...rest }) => rest)).toEqual([
+		expect(
+			page?.headings.map(({ preview: _, depth: _depth, sourceText: _source, ...rest }) => rest),
+		).toEqual([
 			{ rawText: "Variants", slug: "variants" },
 			{
 				rawText: "Named Setext",
-				slug: "named-setext",
+				// The id the rendered heading carries: an explicit id replaces the slug.
+				slug: "custom-setext",
 				explicitId: "custom-setext",
 			},
 			{ rawText: "Spaced ATX Heading", slug: "spaced-atx-heading" },
@@ -255,7 +300,11 @@ describe("buildContentIndex", () => {
 		const index = await buildContentIndex(compatibilityFixtureRoot);
 		const page = index.byPathKey.get("shared/Concept");
 
-		expect(page?.headings.map(({ preview: _, ...heading }) => heading)).toEqual([
+		expect(
+			page?.headings.map(
+				({ preview: _, depth: _depth, sourceText: _source, ...heading }) => heading,
+			),
+		).toEqual([
 			{ rawText: "Concept", slug: "concept" },
 			{ rawText: "Café Déjà Vu", slug: "café-déjà-vu" },
 			{ rawText: "Punctuation: A/B & C", slug: "punctuation-ab--c" },
@@ -340,7 +389,8 @@ describe("static Dataview", () => {
 
 		const output = String(file);
 		expect(output).toContain('class="dataview dataview-table"');
-		expect(output).toContain("Alpha");
+		// Dataview labels a file link with the file name, not its title.
+		expect(output).toContain(">alpha<");
 		expect(output).not.toContain("Beta");
 	});
 
@@ -350,7 +400,7 @@ describe("static Dataview", () => {
 		});
 		const file = await processor.process({
 			value: [
-				"Open task count: = length(file.tasks)",
+				"Open task count: `= length(this.file.tasks)`",
 				"",
 				"```dataview",
 				"TASK",
@@ -392,7 +442,9 @@ describe("static Dataview", () => {
 		});
 
 		const output = String(file);
-		expect(output).toContain("Value 9.");
+		expect(output).toContain(
+			'Value <span class="dataview inline-field"><span class="dataview inline-field-key">rating</span><span class="dataview inline-field-value">9</span></span>.',
+		);
 		expect(output).toContain("#project/demo");
 		expect(output).toContain("2");
 	});
@@ -464,7 +516,8 @@ describe("Dataview FROM sources", () => {
 		// alpha links to beta and beta links nowhere, so the two link forms
 		// select alpha while outlinks selects nothing.
 		const output = String(file);
-		expect(output.match(/>alpha</g)).toHaveLength(2);
+		// Each matching row shows alpha twice: the file link and the file.name cell.
+		expect(output.match(/>alpha</g)).toHaveLength(4);
 		expect(output).not.toContain(">beta<");
 		expect(output).not.toContain(">orphan<");
 	});
@@ -582,7 +635,8 @@ describe("static Daily Notes", () => {
 		};
 		const date = parseDailyNoteDate("2026-08-20.md", config);
 
-		expect(date?.toISOString()).toBe("2026-08-20T00:00:00.000Z");
+		// A local calendar date, the time model Dataview's `file.day` uses.
+		expect(date).toEqual(new Date(2026, 7, 20));
 		expect(formatDailyNoteDate(date!, "dddd, MMMM D, YYYY")).toBe("Thursday, August 20, 2026");
 	});
 
@@ -631,7 +685,9 @@ describe("static Daily Notes", () => {
 		expect(output).not.toContain("First task");
 	});
 
-	test("expands {{title}} in daily note content", async () => {
+	// Template tokens belong to templates: Obsidian expands them once, when it
+	// creates a note from one, so text an author wrote keeps them as written.
+	test("leaves {{title}} in a written daily note as text", async () => {
 		const processor = makeProcessor(dailyNotesFixtureRoot, {
 			enableDailyNotes: true,
 			dailyNotes: {
@@ -647,10 +703,10 @@ describe("static Daily Notes", () => {
 			path: path.join(dailyNotesFixtureRoot, "2026-08-20.md"),
 		});
 
-		expect(String(file)).toContain("Notes for 2026-08-20.");
+		expect(String(file)).toContain("Notes for {{title}}.");
 	});
 
-	test("expands templates and renders previous/current/next navigation", async () => {
+	test("renders previous/current/next navigation without rewriting the note's text", async () => {
 		const processor = makeProcessor(dailyNotesFixtureRoot, {
 			enableDailyNotes: true,
 			enableDataview: true,
@@ -668,7 +724,8 @@ describe("static Daily Notes", () => {
 		});
 
 		const output = String(file);
-		expect(output).toContain("Thursday, August 20, 2026");
+		expect(output).toContain("Today is {{date:dddd, MMMM D, YYYY}}.");
+		expect(output).toContain("August 20, 2026");
 		expect(output).toContain('class="obsidian-daily-navigation"');
 		expect(output).toContain('href="/2026-08-19"');
 		expect(output).toContain('href="/2026-08-21"');
@@ -692,7 +749,8 @@ describe("resolveWikiLink", () => {
 		expect(result).toMatchObject({
 			status: "ok",
 			href: "/guide/getting-started",
-			label: "getting started",
+			// Obsidian shows the target as typed, not a humanised file name.
+			label: "guide/getting-started",
 		});
 	});
 	test("resolves folder index paths independently from flat pages", async () => {
@@ -848,7 +906,7 @@ describe("resolveWikiLink", () => {
 		expect(result).toMatchObject({
 			status: "ok",
 			href: "/guide/advanced#advanced-usage",
-			label: "Advanced Usage",
+			label: "advanced > Advanced Usage",
 		});
 	});
 	test("resolves unique vault-wide heading and block searches", async () => {
@@ -897,7 +955,7 @@ describe("resolveWikiLink", () => {
 		});
 	});
 
-	test("reports ambiguous basename links", async () => {
+	test("resolves an ambiguous basename like Obsidian and reports the alternatives", async () => {
 		const index = await buildContentIndex(
 			path.resolve(process.cwd(), "test/markdown/fixtures/ambiguous"),
 		);
@@ -908,10 +966,13 @@ describe("resolveWikiLink", () => {
 			index,
 		});
 
-		expect(result.status).toBe("ambiguous-page");
+		expect(result.status).toBe("ok");
+		// Shortest vault path wins (guide/ is shorter than reference/).
+		expect(result.href).toBe("/guide/getting-started");
+		expect(result.ambiguity).toContain("guide/getting-started.md, reference/getting-started.md");
 	});
 
-	test("reports ambiguous alias links", async () => {
+	test("resolves an ambiguous alias to one page and reports it", async () => {
 		const index = await buildContentIndex(aliasAmbiguousFixtureRoot);
 		const currentPage = index.byPathKey.get("")!;
 
@@ -920,7 +981,9 @@ describe("resolveWikiLink", () => {
 			index,
 		});
 
-		expect(result.status).toBe("ambiguous-page");
+		expect(result.status).toBe("ok");
+		expect(result.href).toBe("/guide/first");
+		expect(result.ambiguity).toBeDefined();
 	});
 
 	test("reports broken anchors", async () => {
@@ -956,7 +1019,7 @@ describe("resolveWikiLink", () => {
 		expect(result).toMatchObject({
 			status: "ok",
 			href: "/guide/getting-started#^install-block",
-			label: "install-block",
+			label: "guide/getting-started > ^install-block",
 		});
 	});
 
@@ -1071,8 +1134,11 @@ describe("remarkWikilink", () => {
 			path: path.resolve(compatibilityFixtureRoot, "notes/current.md"),
 		});
 
-		expect(String(file)).toContain("[Café Déjà Vu](/shared/Concept#café-déjà-vu)");
-		expect(String(file)).toContain("[Concept](/shared/Concept)");
+		// Obsidian's display text: the target as typed, `Note > Heading`.
+		expect(String(file)).toContain(
+			"[../shared/Concept > Café Déjà Vu](/shared/Concept#café-déjà-vu)",
+		);
+		expect(String(file)).toContain("[../shared/Concept](/shared/Concept)");
 	});
 
 	test("rewrites unique vault-wide searches end to end", async () => {
@@ -1145,7 +1211,7 @@ describe("remarkWikilink", () => {
 			path: path.resolve(fixtureRoot, "guide/getting-started.md"),
 		});
 
-		expect(String(file)).toContain('<div class="obsidian-backlinks">');
+		expect(String(file)).toContain('<div class="obsidian-backlinks rp-toc-exclude">');
 		expect(String(file)).toContain('<a href="/">');
 	});
 
@@ -1170,7 +1236,9 @@ describe("remarkWikilink", () => {
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toBe("Jump to [install-block](/guide/getting-started#^install-block).\n");
+		expect(String(file)).toBe(
+			"Jump to [guide/getting-started > ^install-block](/guide/getting-started#^install-block).\n",
+		);
 	});
 
 	test("emits anchors for block IDs on the page", async () => {
@@ -1349,7 +1417,11 @@ describe("transclusion", () => {
 		const output = String(file);
 		expect(output).toContain('data-callout="tip"');
 		expect(output).toContain("<mark>Important</mark>");
-		expect(output).toContain("First line. Second line.");
+		expect(output).toMatch(/First line\.\s+Second line\./);
+		// The embed's footnote ids are namespaced, so they cannot collide with
+		// the host page's own `fn-1`.
+		expect(output).toContain('id="embed-1-fnref-1"');
+		expect(output).toContain('<li id="embed-1-fn-1">');
 		expect(output).not.toContain("[!tip]");
 	});
 });
@@ -1456,7 +1528,7 @@ describe("vault route prefix", () => {
 		// transcluded page: both resolve against the vault index and must carry
 		// the vault route prefix.
 		expect(output).toContain("(/vault/notes/Sibling)");
-		expect(output).toContain('<a href="/vault/notes/Sibling">Sibling</a>');
+		expect(output).toContain('<a href="/vault/notes/Sibling">notes/Sibling</a>');
 		expect(output).not.toContain('href="/notes/Sibling"');
 		expect(output).not.toContain("](/notes/Sibling)");
 	});
@@ -1508,7 +1580,7 @@ describe("case-insensitive lookup", () => {
 			path: path.resolve(strictFixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toBe("Go to [CaseSensitive](/guide/CaseSensitive).\n");
+		expect(String(file)).toBe("Go to [guide/casesensitive](/guide/CaseSensitive).\n");
 	});
 });
 
@@ -1748,13 +1820,14 @@ describe("callout type aliases", () => {
 		expect(String(file)).toContain("callout-failure");
 	});
 
-	test("maps 'attention' alias to caution type", async () => {
+	// Obsidian documents `caution` and `attention` as aliases of `warning`.
+	test("maps 'attention' alias to the warning type and keeps the written type", async () => {
 		const processor = makeProcessor(fixtureRoot, { enableCallouts: true });
 		const file = await processor.process({
 			value: "> [!attention] Title\n> Body",
 			path: path.resolve(fixtureRoot, "index.md"),
 		});
-		expect(String(file)).toContain("callout-caution");
+		expect(String(file)).toContain('class="callout callout-warning" data-callout="attention"');
 	});
 });
 
@@ -1892,7 +1965,7 @@ describe("tag page generation", () => {
 
 		// The heading must be entity-escaped, never raw HTML. The quote is
 		// harmless in text-node context and correctly left literal.
-		expect(hostile?.content).toContain('# #evil"&lt;script&gt;');
+		expect(hostile?.content).toContain('# \\#evil"&lt;script&gt;');
 		expect(hostile?.content).toContain("&lt;/script&gt;");
 		expect(hostile?.content).not.toContain("# <script>");
 		// The YAML scalar must not contain a literal line break (escaped \n).
@@ -1902,110 +1975,86 @@ describe("tag page generation", () => {
 
 describe("footnote fixes", () => {
 	test("definition lines are stripped from rendered output", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "Reference[^1] here.\n\n[^1]: The definition text.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
-		// Raw definition syntax must not appear as literal text
+		const output = await renderHtml(
+			fixtureRoot,
+			"Reference[^1] here.\n\n[^1]: The definition text.",
+		);
 		expect(output).not.toContain("[^1]:");
-		// The footnote reference superscript must be present
 		expect(output).toContain('id="fnref-1"');
-		// The definition must be rendered in the footnotes list
 		expect(output).toContain("The definition text.");
 		expect(output).toContain('<ol class="footnotes">');
 	});
 
 	test("superscript title is populated even when definition appears after reference", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "Reference[^note] here.\n\n[^note]: Def text.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
+		const output = await renderHtml(fixtureRoot, "Reference[^note] here.\n\n[^note]: Def text.");
 		expect(output).toContain('title="Def text."');
 	});
 
 	test("supports indented multi-line definitions", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "Reference[^long].\n\n[^long]: First line.\n  Second line.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-
-		const output = String(file);
-		expect(output).toContain("First line. Second line.");
-		expect(output).not.toContain("Second line.</p>");
+		const output = await renderHtml(
+			fixtureRoot,
+			"Reference[^long].\n\n[^long]: First line.\n  Second line.",
+		);
+		expect(output).toContain('title="First line. Second line."');
+		expect(output).toMatch(/<li id="fn-1">\s*<p>First line\.\s+Second line\./);
 	});
 
-	test("multiple definitions all stripped and all rendered in list", async () => {
-		// Use multi-word definitions — single-word definitions (e.g. "[^a]: Alpha.")
-		// are indistinguishable from link definitions in remark-parse and stay as
-		// linkReference nodes our text visitor won't see. That is a remark-parse
-		// limitation, not a plugin bug; real Obsidian notes always use prose.
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "A[^a] and B[^b].\n\n[^a]: Alpha definition text.\n\n[^b]: Beta definition text.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
+	// Obsidian and GFM number footnotes by first reference, whatever their
+	// labels, and list them in that order.
+	test("numbers label footnotes by first reference and lists them in that order", async () => {
+		const output = await renderHtml(
+			fixtureRoot,
+			"Z[^z] and A[^a] and Z again[^z].\n\n[^a]: Alpha definition.\n\n[^z]: Zulu definition.",
+		);
+		expect(output).toContain(
+			'<sup class="footnote-ref" id="fnref-1"><a href="#fn-1" title="Zulu definition.">1</a></sup>',
+		);
+		expect(output).toContain(
+			'<sup class="footnote-ref" id="fnref-2"><a href="#fn-2" title="Alpha definition.">2</a></sup>',
+		);
+		expect(output).toContain('id="fnref-1-2"');
+		expect(output.indexOf("Zulu definition. <a")).toBeLessThan(
+			output.indexOf("Alpha definition. <a"),
+		);
 		expect(output).not.toContain("[^a]:");
-		expect(output).not.toContain("[^b]:");
-		expect(output).toContain('id="fn-a"');
-		expect(output).toContain('id="fn-b"');
-		expect(output).toContain("Alpha definition text.");
-		expect(output).toContain("Beta definition text.");
 	});
 
 	test("inline footnote ^[text] renders as numbered superscript", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "Inline footnote^[This is inline content] here.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
-		expect(output).toContain('id="fnref-inline-1"');
+		const output = await renderHtml(fixtureRoot, "Inline footnote^[This is inline content] here.");
+		expect(output).toContain('id="fnref-1"');
 		expect(output).toContain('title="This is inline content"');
-		expect(output).toContain('id="fn-inline-1"');
-		expect(output).toContain('<ol class="footnotes">');
+		expect(output).toContain('<li id="fn-1">');
 		expect(output).toContain("This is inline content");
 	});
 
 	test("inline footnote content with markdown renders as markup", async () => {
 		// The closing bracket lands in a different node than the opener here, so a
 		// per-text-node scan would miss the footnote entirely.
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "Inline^[with **bold**, `code` and [docs](https://example.com) here] ends.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
-
-		expect(output).toContain('id="fnref-inline-1"');
-		expect(output).toContain('id="fn-inline-1"');
+		const output = await renderHtml(
+			fixtureRoot,
+			"Inline^[with **bold**, `code` and [docs](https://example.com) here] ends.",
+		);
+		expect(output).toContain('<li id="fn-1">');
 		expect(output).toContain("<strong>bold</strong>");
 		expect(output).toContain("<code>code</code>");
 		expect(output).toContain('href="https://example.com"');
-		// The body keeps its own text; only the construct is replaced.
 		expect(output).toContain("ends.");
 	});
 
-	test("inline footnote content keeps a wikilink and its brackets", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "See this^[the [[getting-started]] page] for more.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
+	test("inline footnote inside bold keeps the bold", async () => {
+		const output = await renderHtml(fixtureRoot, "Some **bold claim^[source]** here.");
+		expect(output).toContain(
+			'<strong>bold claim<sup class="footnote-ref" id="fnref-1"><a href="#fn-1" title="source">1</a></sup></strong>',
+		);
+	});
 
-		expect(output).toContain('id="fn-inline-1"');
-		// The nested link resolves to a real anchor in the rendered definition,
-		// and the brackets that once truncated the construct are consumed.
-		expect(output).toMatch(/<li id="fn-inline-1">the <a href="\/[^"]*">getting started<\/a> page/);
-		// Nothing dangling is left in the body — only the hover title keeps the
-		// source, brackets and all.
-		expect(output.split("footnotes\n")[1] ?? "").not.toContain("]]");
+	test("inline footnote content keeps a wikilink and its brackets", async () => {
+		const output = await renderHtml(
+			fixtureRoot,
+			"See this^[the [[getting-started]] page] for more.",
+		);
+		expect(output).toMatch(/<li id="fn-1">\s*<p>the <a href="\/[^"]*">getting-started<\/a> page/);
+		expect(output.split("footnotes")[1] ?? "").not.toContain("]]");
 	});
 
 	test("an unclosed inline footnote stays literal text", async () => {
@@ -2021,39 +2070,40 @@ describe("footnote fixes", () => {
 		expect(output).toContain("^\\[dangling");
 	});
 
-	test("inline and label footnotes coexist in same document", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value: "Label[^lbl] and inline^[Inline text] together.\n\n[^lbl]: Label def.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
-		expect(output).toContain('id="fnref-lbl"');
-		expect(output).toContain('id="fnref-inline-1"');
-		expect(output).toContain('id="fn-lbl"');
-		expect(output).toContain('id="fn-inline-1"');
+	// Both kinds used to be numbered from 1 independently.
+	test("inline and label footnotes share one sequence", async () => {
+		const output = await renderHtml(
+			fixtureRoot,
+			"Label[^lbl] and inline^[Inline text] together.\n\n[^lbl]: Label def.",
+		);
+		expect(output).toContain('id="fnref-1"><a href="#fn-1" title="Label def.">1</a>');
+		expect(output).toContain('id="fnref-2"><a href="#fn-2" title="Inline text">2</a>');
 	});
 
 	test("definition content renders inline markdown and resolved wikilinks", async () => {
-		const processor = makeProcessor(fixtureRoot);
-		const file = await processor.process({
-			value:
-				"Reference[^md] here.\n\n[^md]: A **bold** word, `code`, and [[getting-started|the guide]].",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		const output = String(file);
-
-		// The footnotes list carries rendered HTML, not literal markdown.
+		const output = await renderHtml(
+			fixtureRoot,
+			"Reference[^md] here.\n\n[^md]: A **bold** word, `code`, and [[getting-started|the guide]].",
+		);
 		expect(output).toContain("<strong>bold</strong>");
 		expect(output).toContain("<code>code</code>");
 		expect(output).toMatch(/<a href="\/[^"]*">the guide<\/a>/);
-		// The definition paragraph is fully stripped: the raw markdown remains
-		// only in the hover title, never as a leaked body paragraph.
-		expect(output.split("**bold** word")).toHaveLength(2);
-		expect(output.split('id="fn-md"')).toHaveLength(2);
-		// The hover title keeps the plain-text source.
-		expect(output).toContain('title="A **bold** word, `code`, and [[getting-started|the guide]]."');
+		expect(output.split('id="fn-1"')).toHaveLength(2);
+		// The hover title is the definition's text as a reader sees it.
+		expect(output).toContain('title="A bold word, code, and the guide."');
 		expect(output).not.toContain("[^md]:");
+	});
+
+	test("a definition inside a code fence is code, not a footnote", async () => {
+		const output = await renderHtml(fixtureRoot, "```md\n[^1]: The source.\n```");
+		expect(output).not.toContain('class="footnotes"');
+		expect(output).toContain("[^1]: The source.");
+	});
+
+	test("a comment never reaches a definition or its tooltip", async () => {
+		const output = await renderHtml(fixtureRoot, "Ref[^1].\n\n[^1]: Visible %%secret-fn%% end");
+		expect(output).not.toContain("secret-fn");
+		expect(output).toContain("Visible");
 	});
 });
 
@@ -2499,7 +2549,8 @@ describe("media embeds", () => {
 			path: path.resolve(assetsFixtureRoot, "index.md"),
 		});
 
-		expect(String(file)).toContain("[image.png](/image.png)");
+		// Resolved to the real file; the link text stays as typed.
+		expect(String(file)).toContain("[IMAGE.PNG](/image.png)");
 	});
 
 	test("embeds every format the shared table lists, for images", async () => {
@@ -2726,7 +2777,8 @@ describe("backlinks HTML", () => {
 			{ routePath: "/guide/advanced", title: "Advanced" },
 		]);
 
-		expect(html).toContain('<div class="obsidian-backlinks">');
+		// Out of Rspress's outline: the heading has no id to scroll to.
+		expect(html).toContain('<div class="obsidian-backlinks rp-toc-exclude">');
 		expect(html).toContain("<h2>Backlinks</h2>");
 		expect(html).toContain('<li><a href="/">Home</a></li>');
 		expect(html).toContain('<li><a href="/guide/advanced">Advanced</a></li>');
@@ -2975,19 +3027,14 @@ describe("wikilink API", () => {
 		expect("globalStyles" in pluginDefault).toBe(false);
 	});
 
-	test("adds addPages when tag pages are enabled", async () => {
-		const { markdown } = await import("../../src/markdown/index");
-		const plugin = markdown({ enableTagPages: true });
-
-		expect(plugin.addPages).toBeDefined();
-		expect(typeof plugin.addPages).toBe("function");
-	});
-
-	test("does not add addPages by default", async () => {
-		const { markdown } = await import("../../src/markdown/index");
-		const pluginDefault = markdown();
-
-		expect("addPages" in pluginDefault).toBe(false);
+	test("adds no pages by default", async () => {
+		const docsRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-docs-"));
+		try {
+			await fsp.writeFile(path.join(docsRoot, "index.md"), "# Home #tag\n");
+			expect(await markdownPlugin().addPages?.({ root: docsRoot }, false)).toEqual([]);
+		} finally {
+			await fsp.rm(docsRoot, { recursive: true, force: true });
+		}
 	});
 
 	test("defaults to case-insensitive lookup, matching Obsidian", async () => {
@@ -3073,7 +3120,8 @@ describe("wikilink API", () => {
 		);
 		expect(options.vaultRoutePrefix).toBe("/vault");
 		expect(options.onBrokenLink).toBe("error");
-		expect(options.onAmbiguousLink).toBe("error");
+		// Obsidian resolves an ambiguous name anyway, so it only warns.
+		expect(options.onAmbiguousLink).toBe("warn");
 		expect(options.enableTransclusion).toBe(false);
 		expect(options.dailyNotes).toEqual({
 			folder: "",
@@ -3162,6 +3210,53 @@ describe("wikilink API", () => {
 		// The excerpt still lands: filtering the outline must not skip the hook's
 		// other work.
 		expect(page.description).toBe("An excerpt");
+	});
+
+	test("shows rendered heading text and ids in the outline", async () => {
+		// Rspress builds the outline before plugins run, so it listed raw
+		// `[[…]]` / `$…$` with ids no rendered heading carries.
+		const { markdown } = await import("../../src/markdown/index");
+		const plugin = markdown();
+		const source = [
+			"# Title with [[Note|alias]]",
+			"",
+			"## Using [[api-ref|the API]]",
+			"",
+			"## Energy $E=mc^2$",
+			"",
+			"## my_function",
+			"",
+			"## Plain **bold**",
+			"",
+		].join("\n");
+		const page: PageIndexInfo = {
+			routePath: "/index",
+			title: "Title with [[Note|alias]]",
+			toc: [
+				{ id: "using-api-refthe-api", text: "Using [[api-ref|the API]]", depth: 2, charIndex: -1 },
+				{ id: "energy-emc2", text: "Energy $E=mc^2$", depth: 2, charIndex: -1 },
+				{ id: "my_function", text: "my_function", depth: 2, charIndex: -1 },
+				{ id: "plain-bold", text: "Plain **bold**", depth: 2, charIndex: -1 },
+			],
+			content: "",
+			frontmatter: {},
+			lang: "en",
+			version: "v1",
+			_filepath: "index.md",
+			_relativePath: "index.md",
+			_flattenContent: source,
+		};
+
+		plugin.extendPageData?.(page, false);
+
+		expect(page.toc.map((entry) => [entry.id, entry.text])).toEqual([
+			["using-the-api", "Using the API"],
+			["energy-emc2", "Energy E=mc^2"],
+			["my_function", "my_function"],
+			// Ordinary inline markdown is left for the theme to render.
+			["plain-bold", "Plain **bold**"],
+		]);
+		expect(page.title).toBe("Title with alias");
 	});
 
 	test("falls back to the flattened source when the search index is disabled", async () => {
@@ -3380,21 +3475,155 @@ describe("external vault publishing", () => {
 		}
 	});
 
-	test("copies vault assets into the docs public dir", async () => {
+	test("publishes only referenced attachments, outside the docs tree", async () => {
 		const os = await import("node:os");
 		const fsp = await import("node:fs/promises");
 		const { markdown } = await import("../../src/markdown/index");
 		const docsRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-docs-"));
+		const vaultRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-vault-"));
+		const write = async (name: string, content: string) => {
+			await fsp.mkdir(path.dirname(path.join(vaultRoot, name)), { recursive: true });
+			await fsp.writeFile(path.join(vaultRoot, name), content);
+		};
 		try {
-			const plugin = markdown({
-				vaultRoot: path.resolve(process.cwd(), "test/markdown/fixtures/vault-publish"),
-				vaultRoutePrefix: "/vault",
-			});
+			await write("Public.md", "![[cat.png]] and ![](media/My%20Pic.png)\n");
+			await write("Private/Secret.md", "---\npublish: false\n---\n![[tax-return.pdf]]\n");
+			await write("Private/tax-return.pdf", "pdf");
+			await write("cat.png", "png");
+			await write("media/My Pic.png", "png2");
+			await write(".env", "SECRET=1");
+			await write("data/x.csv", "a,b");
+			await write("scripts/backup.sh", "#!/bin/sh");
+
+			const plugin = markdown({ vaultRoot, vaultRoutePrefix: "/vault" });
 			await plugin.addPages?.({ root: docsRoot }, false);
-			const copied = await fsp.readFile(path.join(docsRoot, "public", "vault", "pic.png"), "utf8");
-			expect(copied.length).toBeGreaterThan(0);
+
+			// The staging directory is registered as an extra Rsbuild public dir.
+			let publicDirs: Array<{ name: string }> = [];
+			const rsbuildPlugin = (
+				(plugin.builderConfig?.plugins ?? []) as unknown as Array<{
+					setup: (api: unknown) => void;
+				}>
+			)[0];
+			rsbuildPlugin?.setup({
+				context: { rootPath: docsRoot },
+				modifyRsbuildConfig: (fn: (config: Record<string, unknown>) => void) => {
+					const config: { server?: { publicDir?: unknown } } = {
+						server: { publicDir: { name: path.join(docsRoot, "public") } },
+					};
+					fn(config);
+					publicDirs = config.server?.publicDir as Array<{ name: string }>;
+				},
+			});
+			expect(publicDirs.map((dir) => dir.name)).toEqual([
+				path.join(docsRoot, "public"),
+				expect.stringContaining(path.join("node_modules", ".rspress-plugin-obsidian")),
+			]);
+			const staging = publicDirs[1]?.name ?? "";
+			const staged = (await fsp.readdir(staging, { recursive: true }))
+				.map((entry) => String(entry).split(path.sep).join("/"))
+				.filter((entry) => entry.includes("."))
+				.sort();
+			// Served at `/vault/cat.png` and `/vault/media/My%20Pic.png`; nothing
+			// unreferenced, private or hidden.
+			expect(staged).toEqual(["vault/cat.png", "vault/media/My Pic.png"]);
+			await expect(fsp.stat(path.join(docsRoot, "public"))).rejects.toThrow();
+
+			// A reference that goes away takes its published copy with it.
+			await write("Public.md", "![[cat.png]]\n");
+			await plugin.addPages?.({ root: docsRoot }, false);
+			const restaged = (await fsp.readdir(staging, { recursive: true }))
+				.map((entry) => String(entry).split(path.sep).join("/"))
+				.filter((entry) => entry.includes("."));
+			expect(restaged).toEqual(["vault/cat.png"]);
+			await fsp.rm(staging, { recursive: true, force: true });
 		} finally {
 			await fsp.rm(docsRoot, { recursive: true, force: true });
+			await fsp.rm(vaultRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("publishes a referenced docs-root attachment that lives outside public/", async () => {
+		const docsRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-docs-"));
+		try {
+			await fsp.mkdir(path.join(docsRoot, "public"), { recursive: true });
+			await fsp.writeFile(path.join(docsRoot, "index.md"), "![[local.png]] ![[logo.png]]\n");
+			await fsp.writeFile(path.join(docsRoot, "local.png"), "png");
+			await fsp.writeFile(path.join(docsRoot, "unused.png"), "png");
+			await fsp.writeFile(path.join(docsRoot, "public", "logo.png"), "png");
+
+			// A docs-only site: no vault, no tag pages, still publishes what it embeds.
+			const plugin = markdownPlugin();
+			await plugin.addPages?.({ root: docsRoot }, false);
+			let staging = "";
+			(
+				(plugin.builderConfig?.plugins ?? []) as unknown as Array<{
+					setup: (api: unknown) => void;
+				}>
+			)[0]?.setup({
+				context: { rootPath: docsRoot },
+				modifyRsbuildConfig: (fn: (config: Record<string, unknown>) => void) => {
+					const config: { server?: { publicDir?: Array<{ name: string }> } } = {};
+					fn(config);
+					staging = config.server?.publicDir?.at(-1)?.name ?? "";
+				},
+			});
+			const staged = (await fsp.readdir(staging, { recursive: true }))
+				.map((entry) => String(entry).split(path.sep).join("/"))
+				.filter((entry) => entry.includes("."));
+			// `/local.png` is what the page links; `public/logo.png` is Rspress's own
+			// to serve; `unused.png` is referenced by nothing.
+			expect(staged).toEqual(["local.png"]);
+			await fsp.rm(staging, { recursive: true, force: true });
+		} finally {
+			await fsp.rm(docsRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("lets docs pages and vault notes link and backlink each other", async () => {
+		const os = await import("node:os");
+		const fsp = await import("node:fs/promises");
+		const { markdown } = await import("../../src/markdown/index");
+		const { getCachedBacklinksIndex } = await import("../../src/markdown/backlinks");
+		const docsRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-docs-"));
+		const vaultRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-vault-"));
+		try {
+			await fsp.writeFile(path.join(docsRoot, "index.md"), "See [[Torture]].\n");
+			await fsp.writeFile(path.join(vaultRoot, "Torture.md"), "# Torture\n");
+			await fsp.mkdir(path.join(vaultRoot, "media"));
+			await fsp.writeFile(path.join(vaultRoot, "media", "pic.png"), "png");
+			const plugin = markdown({ vaultRoot, vaultRoutePrefix: "/vault" });
+			(plugin.config as unknown as (config: Record<string, unknown>) => unknown)({
+				root: docsRoot,
+			});
+			const [, { getContentIndex }] = (plugin.markdown?.remarkPlugins?.[0] ?? []) as [
+				unknown,
+				{ getContentIndex: (filePath: string) => Promise<ContentIndex> },
+			];
+			const docs = await getContentIndex(path.join(docsRoot, "index.md"));
+			const vault = await getContentIndex(path.join(vaultRoot, "Torture.md"));
+
+			const docsPage = docs.byFilePathKey.get("index");
+			if (!docsPage) throw new Error("docs page missing");
+			const link = resolveWikiLink(parseWikiLink("Torture", "[[Torture]]"), {
+				currentPage: docsPage,
+				index: docs,
+			});
+			expect(link.href).toBe("/vault/Torture");
+			const backlinks = await getCachedBacklinksIndex(vault);
+			expect(backlinks.get("/vault/Torture")?.map((ref) => ref.routePath)).toEqual(["/"]);
+			// An embed from the docs page reaches the vault's attachment too.
+			const media = resolveMediaSrc("media/pic.png", {
+				docsRoot,
+				currentFilePath: path.join(docsRoot, "index.md"),
+				index: docs,
+				enableCaseInsensitiveLookup: true,
+				siteBase: "/",
+			});
+			expect(media).toMatchObject({ url: "/vault/media/pic.png", found: true });
+		} finally {
+			await fsp.rm(docsRoot, { recursive: true, force: true });
+			await fsp.rm(vaultRoot, { recursive: true, force: true });
 		}
 	});
 });
@@ -3589,7 +3818,9 @@ describe("heading transclusion with explicit ids and slugs", () => {
 
 		const output = String(file);
 		expect(output).toContain('class="obsidian-transclusion"');
-		expect(output).toContain('id="custom-anchor"');
+		// Namespaced, so an embedded heading never duplicates an id of the host.
+		expect(output).toContain('id="embed-1-custom-anchor"');
+		expect(output).toContain('href="#embed-1-custom-anchor"');
 		expect(output).toContain("Custom Anchor");
 		expect(output).not.toContain("{#custom-anchor}");
 	});
@@ -3605,7 +3836,7 @@ describe("heading transclusion with explicit ids and slugs", () => {
 
 		const output = String(file);
 		expect(output).toContain('class="obsidian-transclusion"');
-		expect(output).toContain('id="spaced-atx-heading"');
+		expect(output).toContain('id="embed-1-spaced-atx-heading"');
 		expect(output).toContain("Spaced ATX Heading");
 	});
 });
@@ -3696,17 +3927,27 @@ describe("callout title markdown", () => {
 		expect(output).toContain("alert(1)");
 	});
 
-	test("leaves unresolvable wikilinks in callout titles verbatim", async () => {
+	// A broken link in a title is a broken link: it renders as Obsidian's
+	// unresolved text and is reported, exactly as it would be in the body.
+	test("renders an unresolvable wikilink in a callout title as unresolved text", async () => {
 		const processor = makeProcessor(fixtureRoot, {
 			enableCallouts: true,
+			onBrokenLink: "warn",
 		});
-
-		const file = await processor.process({
-			value: "> [!question] See [[missing-page]] here\n> Body",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-
-		expect(String(file)).toContain('<div class="callout-title">See [[missing-page]] here</div>');
+		const warn = console.warn;
+		console.warn = () => {};
+		try {
+			const file = await processor.process({
+				value: "> [!question] See [[missing-page]] here\n> Body",
+				path: path.resolve(fixtureRoot, "index.md"),
+			});
+			expect(String(file)).toMatch(
+				/<div class="callout-title">See <span class="obsidian-unresolved"[^>]*>missing-page<\/span> here<\/div>/,
+			);
+			expect(file.messages.some((m) => String(m).includes("[[missing-page]]"))).toBe(true);
+		} finally {
+			console.warn = warn;
+		}
 	});
 });
 
@@ -3771,7 +4012,7 @@ describe("wikilink and tag interaction", () => {
 		});
 
 		const output = String(file);
-		expect(output).toContain("[Install](/guide/getting-started#install");
+		expect(output).toContain("[guide/getting-started > Install](/guide/getting-started#install");
 		expect(output).not.toContain("/tags/");
 		expect(output).not.toContain("[[");
 	});
@@ -4211,7 +4452,7 @@ describe("callout title highlights", () => {
 
 describe("markdown link config hook", () => {
 	type ConfigFn = (config: Record<string, unknown>) => {
-		markdown?: { link?: { checkDeadLinks?: unknown } };
+		markdown?: { link?: { checkDeadLinks?: unknown }; shiki?: { fallbackLanguage?: string } };
 	};
 
 	test("excludes plugin-owned markdown destinations from the dead-link gate", async () => {
@@ -4264,19 +4505,31 @@ describe("markdown link config hook", () => {
 		const { markdown } = await import("../../src/markdown/index");
 		const configFn = markdown({ enableMarkdownLinks: false }).config as unknown as ConfigFn;
 
-		expect(configFn({ root: "docs" }).markdown).toBeUndefined();
+		expect(configFn({ root: "docs" }).markdown?.link).toBeUndefined();
+	});
+
+	test("falls back to plain text for fence languages Shiki lacks, unless the site chose one", () => {
+		const configFn = markdownPlugin().config as unknown as ConfigFn;
+
+		expect(configFn({ root: "docs" }).markdown?.shiki?.fallbackLanguage).toBe("txt");
+		expect(
+			configFn({ root: "docs", markdown: { shiki: { fallbackLanguage: "md" } } }).markdown?.shiki
+				?.fallbackLanguage,
+		).toBe("md");
 	});
 });
 
 describe("backlink labels", () => {
 	const backlinkLabelsRoot = path.resolve(process.cwd(), "test/markdown/fixtures/backlink-labels");
 
-	test("prefers frontmatter title, then first heading, then humanized basename", async () => {
+	test("prefers frontmatter title, then the # heading, then humanized basename", async () => {
 		const index = await buildContentIndex(backlinkLabelsRoot);
 
 		expect(index.backlinks.get("/target")).toEqual([
 			{ routePath: "/linker-heading", relativePath: "linker-heading.md", title: "My Heading" },
 			{ routePath: "/linker-plain", relativePath: "linker-plain.md", title: "linker plain" },
+			// A section heading (a Kanban lane) does not name the note.
+			{ routePath: "/linker-section", relativePath: "linker-section.md", title: "linker section" },
 			{ routePath: "/linker-title", relativePath: "linker-title.md", title: "Custom Title" },
 		]);
 	});
@@ -4447,12 +4700,7 @@ describe("math rendering", () => {
 	const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
 
 	async function render(value: string, enableMath = true): Promise<string> {
-		const processor = makeProcessor(fixtureRoot, { enableMath });
-		const file = await processor.process({
-			value,
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-		return String(file);
+		return renderHtml(fixtureRoot, value, { enableMath });
 	}
 
 	async function renderWithMathJax(value: string): Promise<string> {
@@ -4617,7 +4865,7 @@ describe("unsupported fenced blocks", () => {
 		};
 	}
 
-	test("reports a tasks fence and still renders it as code", async () => {
+	test("reports a tasks fence while Tasks is off, names the option, and renders it as code", async () => {
 		const { output, unsupported } = await render("```tasks\nnot done\n```");
 
 		// The block stays visible — it is the missing signal that caused the
@@ -4625,7 +4873,7 @@ describe("unsupported fenced blocks", () => {
 		expect(output).toContain("```tasks");
 		expect(unsupported).toHaveLength(1);
 		expect(unsupported[0]).toContain("[!tasks]");
-		expect(unsupported[0]).toContain("not executed by this plugin");
+		expect(unsupported[0]).toContain("`enableTasks`");
 	});
 
 	test("stays silent for an ordinary language fence", async () => {
@@ -4807,7 +5055,9 @@ describe("unresolved wikilinks", () => {
 		expect(html).not.toContain('title="Unable to resolve wikilink: [[does-not-exist|a "quoted"');
 	});
 
-	test("marks ambiguous targets too", async () => {
+	test("links an ambiguous target the way Obsidian picks it", async () => {
+		// Obsidian never leaves a shared name unresolved: it opens the closest,
+		// shortest-path match. The ambiguity is a diagnostic, not a dead link.
 		const ambiguousRoot = path.resolve(process.cwd(), "test/markdown/fixtures/ambiguous");
 		const processor = makeProcessor(ambiguousRoot, {
 			onBrokenLink: "warn",
@@ -4818,7 +5068,9 @@ describe("unresolved wikilinks", () => {
 			path: path.resolve(ambiguousRoot, "index.md"),
 		});
 
-		expect(String(file)).toContain('class="obsidian-unresolved"');
+		expect(String(file)).toContain("[getting-started](/guide/getting-started)");
+		expect(String(file)).not.toContain('class="obsidian-unresolved"');
+		expect(file.messages.some((m) => String(m).includes("matches 2 files"))).toBe(true);
 	});
 });
 
