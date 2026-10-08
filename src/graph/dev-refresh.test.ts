@@ -2,6 +2,11 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import path from "node:path";
 import { createGraphDevRefresher, type GraphDevRefresher } from "./dev-refresh";
 
+// Absolute on every platform, as the plugin's `node_modules` path is: on
+// Windows a bare `/tmp/...` is drive-relative and gains the drive letter when
+// the refresher resolves it against the compiler's context.
+const moduleDir = path.resolve("/tmp/graph-dev");
+
 type Listener = (event: string, file: string | null) => void;
 
 /** A fake `fs.watch`: records watched roots and lets a test fire changes. */
@@ -69,14 +74,14 @@ afterEach(() => {
 describe("graph dev refresher", () => {
 	test("publishes re-exports of in-memory files seeded with the first build", () => {
 		const refresher = createGraphDevRefresher({
-			moduleDir: "/tmp/graph-dev",
+			moduleDir,
 			rebuild: async () => ({}),
 		});
 
 		const published = refresher.publish({ "virtual-graph-data": "export const graphPayload = 1;" });
 		const { seeded } = attachCompiler(refresher);
 
-		const file = path.join("/tmp/graph-dev", "virtual-graph-data.js");
+		const file = path.join(moduleDir, "virtual-graph-data.js");
 		expect(published["virtual-graph-data"]).toContain(`export * from ${JSON.stringify(file)}`);
 		expect(seeded[0]).toEqual({ [file]: "export const graphPayload = 1;" });
 	});
@@ -86,7 +91,7 @@ describe("graph dev refresher", () => {
 		const { watch, listeners } = fakeWatch();
 		let builds = 0;
 		const refresher = createGraphDevRefresher({
-			moduleDir: "/tmp/graph-dev",
+			moduleDir,
 			debounceMs: 100,
 			watch,
 			rebuild: async () => {
@@ -108,7 +113,7 @@ describe("graph dev refresher", () => {
 		// Two saves inside the debounce window are one rebuild (plus the explicit
 		// refresh above); `node_modules` noise is ignored.
 		expect(builds).toBe(2);
-		expect(writes).toEqual([[path.join("/tmp/graph-dev", "virtual-graph-data.js"), "v2"]]);
+		expect(writes).toEqual([[path.join(moduleDir, "virtual-graph-data.js"), "v2"]]);
 		refresher.close();
 	});
 
@@ -118,7 +123,7 @@ describe("graph dev refresher", () => {
 		// runs at exactly that moment. The refresher invalidates the watching
 		// with the file instead, which rspack queues even mid-compile.
 		const refresher = createGraphDevRefresher({
-			moduleDir: "/tmp/graph-dev",
+			moduleDir,
 			rebuild: async () => ({ "virtual-graph-data": "v2" }),
 		});
 		refresher.publish({ "virtual-graph-data": "v1" });
@@ -126,7 +131,7 @@ describe("graph dev refresher", () => {
 
 		await refresher.refresh();
 
-		const file = path.join("/tmp/graph-dev", "virtual-graph-data.js");
+		const file = path.join(moduleDir, "virtual-graph-data.js");
 		expect(writes).toEqual([[file, "v2"]]);
 		expect(invalidated).toEqual([[file]]);
 	});
@@ -134,7 +139,7 @@ describe("graph dev refresher", () => {
 	test("a failed rebuild warns and keeps the last good data", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const refresher = createGraphDevRefresher({
-			moduleDir: "/tmp/graph-dev",
+			moduleDir,
 			rebuild: async () => {
 				throw new Error("half-typed frontmatter");
 			},
@@ -152,7 +157,7 @@ describe("graph dev refresher", () => {
 	test("watching again replaces the previous watchers", () => {
 		const { watch, closed } = fakeWatch();
 		const refresher = createGraphDevRefresher({
-			moduleDir: "/tmp/graph-dev",
+			moduleDir,
 			watch,
 			rebuild: async () => ({}),
 		});

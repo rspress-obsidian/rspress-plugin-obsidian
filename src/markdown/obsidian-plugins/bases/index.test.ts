@@ -26,10 +26,12 @@ import { unified } from "unified";
 import { VFile } from "vfile";
 import { publishedFileRoutes, setPublishedFileRoutes } from "../../../shared/file-routes.js";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
+import { normalizeFsPath } from "../../../shared/route-path.js";
 import { buildContentIndex } from "../../content-index.js";
 import { normalizePluginOptions } from "../../normalize-options.js";
 import { remarkWikilink } from "../../remark-wikilink.js";
 import type { ContentIndex, NormalizedPluginOptions } from "../../types.js";
+import { isPathInsideRoot } from "../../utils.js";
 import type { PluginPage } from "../types.js";
 import { basesFeature } from "./index.js";
 
@@ -135,8 +137,6 @@ beforeEach(async () => {
 
 afterEach(() => warn.mockRestore());
 
-const isVaultFile = (filePath: string): boolean => filePath.startsWith(`${vaultRoot}${path.sep}`);
-
 async function compile(
 	filePath: string,
 	value: string,
@@ -146,8 +146,8 @@ async function compile(
 		.use(remarkParse)
 		.use(remarkGfm)
 		.use(remarkWikilink, {
-			getDocsRoot: (file) => (file && isVaultFile(file) ? vaultRoot : docsRoot),
-			getContentIndex: async (file) => (isVaultFile(file) ? vault : docs),
+			getDocsRoot: (file) => (file && isPathInsideRoot(file, vaultRoot) ? vaultRoot : docsRoot),
+			getContentIndex: async (file) => (isPathInsideRoot(file, vaultRoot) ? vault : docs),
 			getPublishedIndexes: async () => [docs, vault],
 			getSiteBase: () => siteBase,
 			options,
@@ -187,7 +187,7 @@ describe("base pages", () => {
 			publishedFileRoutes("bases").find((route) => route.routePath === "/bases/Projects"),
 		).toEqual({
 			kind: "bases",
-			absolutePath: path.join(vaultRoot, "Projects.base"),
+			absolutePath: normalizeFsPath(path.join(vaultRoot, "Projects.base")),
 			routePath: "/bases/Projects",
 			source: "Projects.base",
 		});
@@ -199,7 +199,7 @@ describe("base pages", () => {
 		expect(
 			publishedFileRoutes("bases").find((route) => route.routePath === "/bases/Clash")
 				?.absolutePath,
-		).toBe(path.join(vaultRoot, "Clash.base"));
+		).toBe(normalizeFsPath(path.join(vaultRoot, "Clash.base")));
 		expect(
 			warn.mock.calls.some(([message]) => String(message).includes("Clash.base is not published")),
 		).toBe(true);

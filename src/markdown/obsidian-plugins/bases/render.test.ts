@@ -22,6 +22,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { VFile } from "vfile";
+import { normalizeFsPath } from "../../../shared/route-path.js";
 import { buildContentIndex } from "../../content-index.js";
 import { normalizePluginOptions } from "../../normalize-options.js";
 import { remarkWikilink } from "../../remark-wikilink.js";
@@ -890,7 +891,7 @@ views:
 describe("rendering cost", () => {
 	test("text that cannot link renders once for every row; links still render per note", async () => {
 		const options = normalizePluginOptions({ enableBases: true, onPluginError: "warn" });
-		const home = index.byAbsolutePath.get(path.join(root, "Home.md"));
+		const home = index.byAbsolutePath.get(normalizeFsPath(path.join(root, "Home.md")));
 		if (!home) throw new Error("no Home page");
 		const calls: Array<[string, string | undefined]> = [];
 		const ctx: PluginRenderContext = {

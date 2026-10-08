@@ -26,6 +26,7 @@ import { buildContentIndex } from "../../content-index.ts";
 import { normalizePluginOptions } from "../../normalize-options.ts";
 import { remarkWikilink } from "../../remark-wikilink.ts";
 import type { ContentIndex, RspressPluginMarkdownOptions } from "../../types.ts";
+import { isPathInsideRoot } from "../../utils.ts";
 import type { TasksOptions } from "./options.ts";
 
 const FILES: Record<string, string> = {
@@ -99,14 +100,13 @@ async function compile(
 	{ page = "docs/index.md", tasks, ...options }: CompileOptions & { tasks?: TasksOptions } = {},
 ) {
 	const filePath = path.join(root, page);
-	const inVault = filePath.startsWith(vault);
 	const file = await unified()
 		.use(remarkParse)
 		.use(remarkGfm)
 		.use(remarkWikilink, {
-			getDocsRoot: (target?: string) => (target?.startsWith(vault) ? vault : docs),
+			getDocsRoot: (target?: string) => (target && isPathInsideRoot(target, vault) ? vault : docs),
 			getContentIndex: async (target: string) =>
-				target.startsWith(vault) ? vaultIndex : docsIndex,
+				isPathInsideRoot(target, vault) ? vaultIndex : docsIndex,
 			getPublishedIndexes: async () => [docsIndex, vaultIndex],
 			options: normalizePluginOptions({
 				vaultRoot: vault,
@@ -120,7 +120,7 @@ async function compile(
 		})
 		.use(remarkRehype, { allowDangerousHtml: true })
 		.use(rehypeStringify, { allowDangerousHtml: true })
-		.process({ value, path: inVault ? filePath : filePath });
+		.process({ value, path: filePath });
 	return { html: String(file), messages: file.messages.map(String) };
 }
 

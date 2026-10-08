@@ -593,7 +593,12 @@ export interface ResolveContext {
  * unified pipeline.
  */
 export interface RemarkWikiLinkPluginOptions {
+	/**
+	 * The content root a file belongs to. `filePath` has `/` separators on every
+	 * platform, so on Windows a `startsWith` against a native root never matches.
+	 */
 	getDocsRoot: (filePath?: string) => string;
+	/** The index a file belongs to; `filePath` has `/` separators, as for `getDocsRoot`. */
 	getContentIndex?: (filePath: string) => Promise<ContentIndex>;
 	/**
 	 * Every published content index (docs, then the vault). Queries that span
