@@ -7,7 +7,7 @@ description: Install the graph view plugin, add it to rspress.config.ts, and see
 
 Welcome to **Rspress Graph View** — an interactive graph visualization plugin for [Rspress](https://rspress.dev/) documentation sites.
 
-Think of it as [Obsidian's graph view](https://obsidian.md) for your docs. The plugin automatically extracts internal markdown links and renders them as a navigable force-directed graph, helping readers discover connections across your knowledge base.
+Think of it as [Obsidian's graph view](https://obsidian.md) for your docs. The plugin turns the links between your pages into a navigable force-directed graph, helping readers discover connections across your knowledge base.
 
 ## Prerequisites
 
@@ -58,32 +58,34 @@ That's it. Start your dev server and you'll see a floating action button in the 
 
 The plugin operates in two phases:
 
-**Build time** — When Rspress generates routes, the plugin:
-1. Collects all route metadata
-2. Reads each `.md`/`.mdx` file and `.canvas` board
-3. Extracts `[title](./path.md)` internal links and canvas file references
-4. Resolves relative and absolute link targets
-5. Builds a graph data structure and injects it as a virtual module
+**Build time**: once Rspress has its final route list (after every plugin has run, so `publish: false` pages are already gone), the plugin:
+1. Reads each note's links and tags from the markdown plugin's content index, or indexes the docs root itself when `markdown()` is not installed
+2. Reads each `.canvas` board's cards from the `.canvas` file
+3. Resolves every link with the markdown plugin's resolver, the one the rendered page uses
+4. Builds the graph (notes, tags, attachments, unresolved links) and publishes it as a compact virtual module, with the note text for search as a separate module
+
+Under `rspress dev`, editing a note rebuilds the graph and updates the open page.
 
 **Runtime** — The client:
 1. Loads `react-force-graph-2d` dynamically (lazy-loaded)
 2. Renders an interactive force-directed graph
 3. Highlights the current page and its neighbors
-4. Lets users click nodes to navigate between pages
+4. Lets readers click nodes to open pages, or use the keyboard list of the same pages
 
 ## Features
 
 - [Interactive force-directed graph](./graph-view.md) with custom canvas rendering
 - [Click-to-navigate](./graph-view.md#navigation) — click any node to jump to that page
 - [Dark mode](./graph-view.md#dark-mode) — seamlessly adapts to light and dark themes
-- [Build caching](./configuration.md#caching) — incremental rebuilds with mtime-based invalidation
+- [Obsidian's graph settings](./graph-view.md#settings): filters, display and forces, saved per visitor
+- [Fast rebuilds and live dev updates](./configuration.md#link-resolution-rebuilds-and-rspress-dev)
 - [Large graph optimization](./graph-view.md#large-graphs) — automatically reduces visual cost for 80+ node graphs
 - [Color customization](./configuration.md#custom-colors) — override the default palette to match your brand
 
 
 ## Unified Obsidian content
 
-The graph plugin works with the Markdown and Canvas plugins in the same Rspress site. It extracts ordinary Markdown links, Obsidian wikilinks, generated tag-page references, and Markdown references inside Canvas text/file nodes. Headings, block IDs, media assets, and external URLs remain attached to their source page instead of becoming separate graph nodes.
+The graph plugin works with the Markdown and Canvas plugins in the same Rspress site. Its edges are the links each page renders: wikilinks, embeds, Markdown links, `obsidian://` links and frontmatter property links. Tags, attachments and links to notes that do not exist yet can be shown as nodes, and a canvas board links to its cards. Headings and block IDs stay fragments of their page.
 
 See [Graph View: Obsidian content support](./graph-view.md#obsidian-content-support) for the complete integration table.
 See also:

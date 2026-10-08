@@ -14,7 +14,7 @@ markdown({
 
   // Link diagnostics
   onBrokenLink: "error",              // "error" | "warn" (default: "error")
-  onAmbiguousLink: "error",           // "error" | "warn" (default: "error")
+  onAmbiguousLink: "warn",            // "warn" | "error" (default: "warn")
   onDataviewError: "error",           // "error" | "warn" (default: "error")
   onUnsupportedBlock: "warn",         // "error" | "warn" (default: "warn")
 
@@ -41,6 +41,7 @@ markdown({
 
   // Styling
   enableDefaultStyles: false,         // inject bundled CSS
+  strictLineBreaks: undefined,        // unset: vault pages get Obsidian's <br> line breaks
 });
 ```
 
@@ -51,10 +52,20 @@ directory. When set, every routable `.md`/`.mdx` file in the vault becomes a
 page under `vaultRoutePrefix`, with the full pipeline applied. Unset (the
 default) means the docs directory is the only source.
 
-The vault is indexed **separately** from the docs root: wikilinks inside vault
-pages resolve against vault files, and wikilinks inside normal docs pages are
-unaffected. A `[[wikilink]]` in the vault cannot therefore name a docs page —
-reach one by its published route.
+The vault is indexed **separately** from the docs root, and each page resolves
+against its own tree first: a vault note's `[[Setup]]` finds the vault's
+`Setup.md` even if the docs root has one too. A link with no match in its own
+tree falls back to the other, so a docs page can link a vault note and a vault
+note a docs page, and backlinks follow both ways.
+
+Vault attachments are published only when a published page references them
+(an embed, a wikilink, a Markdown link or image, a frontmatter property link),
+at `<vaultRoutePrefix>/<path in vault>`. Dotfiles and dot-directories are never
+read, and a file only a `publish: false` note uses is never published. The
+files are staged in `node_modules/.rspress-plugin-obsidian/` and served from
+there by the dev server and the build; nothing is written into `docs/public/`.
+Earlier versions copied **every** vault file to `docs/public/<vaultRoutePrefix>/`
+— delete that directory if it is still there (the build warns about it).
 
 ```ts
 markdown({
@@ -88,19 +99,38 @@ Controls how a `dataview` block that will not evaluate is handled:
 
 ### `onUnsupportedBlock`
 
-Reports fences belonging to a plugin runtime this plugin cannot run — `tasks`,
-`excalidraw`, `base`, `kanban`, `dataviewjs`, and `dataview` while
-`enableDataview` is off. They stay published as code either way.
+Reports a fence that belongs to a plugin this site has not enabled — `tasks`
+without `enableTasks`, `base` without `enableBases`, `excalidraw` without
+`enableExcalidraw`, and `dataview`/`dataviewjs` without `enableDataview`. The
+message names the option that turns the plugin on. The block stays published
+as code either way.
 
 - `"warn"` (default) — report and continue
 - `"error"` — fail the build
 
+### `onPluginError`
+
+Controls how a Tasks, Kanban, Excalidraw, Bases or Templater block that will
+not render is handled — a query that does not parse, a malformed base or
+board settings block, a corrupt drawing, a template command that fails. The
+problem is shown in place, where the block would have rendered, either way.
+Things a static site cannot do (a `tp.system.prompt`, a map view) are always
+warnings, never failures.
+
+- `"error"` (default) — fail the build
+- `"warn"` — emit a warning and publish the page with the in-place message
+
 ### `onAmbiguousLink`
 
-Controls how the plugin handles ambiguous links (multiple pages share the same basename):
+Controls how the plugin reports ambiguous links (several files share the same
+name). The link always resolves the way Obsidian picks — the match in the
+linking note's folder, else the shortest vault path, else the alphabetically
+first:
 
-- `"error"` (default) — fail the build when multiple pages match
-- `"warn"` — emit a warning and render the label as an unresolved marker
+- `"warn"` (default) — emit a warning naming the chosen file and the alternatives
+- `"error"` — fail the build until the link is path-qualified
+
+The default was `"error"` before; set it explicitly to keep failing builds.
 
 ### `enableFuzzyMatching`
 
@@ -140,7 +170,7 @@ A tag links only when its name contains at least one character that is not a dig
 ### `enableTagPages`
 
 - `false` (default) — no tag pages generated
-- `true` — auto-generates a `/tags/{name}` index page for every unique tag found across pages: frontmatter `tags:` fields **and** inline `#tags` in body text. Nested tags also get an index page for each parent segment (`#parent/child` generates `/tags/parent/child` and `/tags/parent`).
+- `true` — auto-generates a `/tags/{name}` index page for every unique tag found across pages of the docs root and the vault together: frontmatter `tags:` fields (a YAML list, or a legacy `tags: a, b` string) **and** inline `#tags` in body text. Tags are case-insensitive like Obsidian's: `#Project` and `#project` share `/tags/project`, titled with the spelling most pages use. Nested tags also get an index page for each parent segment (`#parent/child` generates `/tags/parent/child` and `/tags/parent`). A `#` inside code, a `[[#Heading]]` link, a link destination such as `(#install)` or a URL is not a tag.
 
 Each generated page lists all pages with that tag:
 
@@ -177,12 +207,11 @@ Produces `/tags/tutorial` and `/tags/obsidian`, each listing all pages tagged wi
 | `example` | Purple accent |
 | `quote` | Neutral accent |
 | `abstract` | Cyan accent |
-| `caution` | Orange accent |
 | `failure` | Red accent |
 
-Any other type (or `details`, restored from Rspress's alert transform) keeps its own `callout-<type>` class and falls back to Obsidian's `note` styling — the blue card and pencil glyph — not to a neutral placeholder. Add a rule to give it its own colour and icon; see [Callouts](./callouts#custom-callout-types).
+Any other type — `[!my-type]`, any characters up to `]` — (or `details`, restored from Rspress's alert transform) keeps its own `callout-<type>` class and falls back to Obsidian's `note` styling — the blue card and pencil glyph — not to a neutral placeholder. Add a rule to give it its own colour and icon; see [Callouts](./callouts#custom-callout-types). With no title, the title is the type capitalised (`Tip`). `> [!type|metadata]` passes `metadata` on as `data-callout-metadata`.
 
-**Supported aliases** (map to canonical type above):
+**Supported aliases** (Obsidian's documented list; each shares its canonical type's styling):
 
 | Aliases | Canonical |
 |---------|-----------|
@@ -190,22 +219,24 @@ Any other type (or `details`, restored from Rspress's alert transform) keeps its
 | `check`, `done` | `success` |
 | `help`, `faq` | `question` |
 | `hint`, `important` | `tip` |
-| `attention` | `caution` |
-| `failure`, `fail`, `missing` | `failure` |
+| `caution`, `attention` | `warning` |
+| `fail`, `missing` | `failure` |
 | `error` | `danger` |
 | `cite` | `quote` |
 
+The class names the canonical type and `data-callout` keeps the type as written, as in Obsidian's DOM.
+
 **Static callout:**
 ```markdown
-> [!failure] Watch out
+> [!caution] Watch out
 > This will be transformed.
 ```
 
 Output:
 ```html
-<div class="callout callout-failure" data-callout="failure">
+<div class="callout callout-warning" data-callout="caution">
   <div class="callout-title">Watch out</div>
-  <div class="callout-content">This will be transformed.</div>
+  <div class="callout-content"><p>This will be transformed.</p></div>
 </div>
 ```
 
@@ -335,6 +366,18 @@ placeholder, so it configures the shared client instance before the first
 diagram draws. A diagram that fails to render keeps its source and gains an
 `.obsidian-mermaid-error` class.
 
+`mermaid` is an optional peer dependency, the same arrangement as
+`mathjax-full`, so a site that never draws a diagram does not install it:
+
+```bash
+npm install mermaid
+```
+
+Without it the site still builds. The build prints one install hint, and each
+diagram stays on the page as its source, with `.obsidian-mermaid-error`, a
+`data-mermaid-unavailable` attribute and the install hint as its title. Mermaid
+fences inside canvas text cards need the same package.
+
 ### `enableMediaEmbeds`
 
 - `false` (default) — `![[file]]` is rewritten to an embed anchor
@@ -374,9 +417,11 @@ Styling the frame is yours: the bar, border and radius are plain CSS in
 renderer emits the same markup and pulls the same rules from its own stylesheet, so
 a card and a note never disagree.
 
-Size parameter: `![[image.png|300x200]]` → `width="300" height="200"`. Width-only: `![[image.png|300]]` → `width="300"`. A markdown image takes the same syntax, which is how Obsidian documents it — the size alone (`![300](image.png)`) or after a caption (`![A caption|300](image.png)`); anything that is not a bare dimension, `![A caption|wide](image.png)`, stays caption text.
+Size parameter: `![[image.png|300x200]]` → `width="300" height="200"`. Width-only: `![[image.png|300]]` → `width="300"`. A caption and a size combine: `![[image.png|A caption|300]]` → `alt="A caption" width="300"`. A markdown image takes the same syntax, which is how Obsidian documents it — the size alone (`![300](image.png)`) or after a caption (`![A caption|300](image.png)`); anything that is not a bare dimension, `![A caption|wide](image.png)`, stays caption text.
 
 PDF embeds take their two knobs from the subpath: `![[doc.pdf#page=3]]` opens the frame at that page, `![[doc.pdf#height=400]]` sizes the frame (default 600). Only the page reaches the URL — the height is an attribute of the embed, not something the file is asked for.
+
+Audio, video and PDF frames carry the site `base` (as do raw `<audio>`, `<video>`, `<source>` and `<iframe>` elements a note writes itself); images go through Rspress's `img` component, which adds it.
 
 Media paths are resolved in order:
 1. On disk relative to the current file's directory
@@ -385,6 +430,16 @@ Media paths are resolved in order:
 4. Indexed asset at the docs-root path
 5. Unique asset basename anywhere in the index (exact, then case-insensitive) — this is what makes a bare `![[photo.png]]` work
 6. Root-relative URL fallback (`/filename`), reported as unresolved
+
+Markdown images (`![](photo.png)`, `![](media/photo.png)`, `![](<my photo.png>)`, `![](my%20photo.png)`) are resolved the same way, whether or not `enableMediaEmbeds` is on — they are core Markdown. Rspress turns every relative image into a bundler import before plugins run; the plugin rewrites that import to the file it found, relative to the page, so the image is bundled like any other Rspress image. It also exempts relative image urls from Rspress's dead-image gate (`markdown.image.checkDeadImages.excludes`, unless your config sets `checkDeadImages` itself) and reports an image found nowhere through `onBrokenLink` instead.
+
+### `strictLineBreaks`
+
+Obsidian's "Strict line breaks" setting. Obsidian's default (off) shows a single newline inside a paragraph as a line break; CommonMark joins the lines with a space.
+
+- unset (default) — vault pages (`vaultRoot`) follow Obsidian's default and render `<br>`; docs-root pages keep CommonMark, as Rspress renders them
+- `false` — every page renders single newlines as `<br>`
+- `true` — no page does
 
 ### `enableDefaultStyles`
 
@@ -475,28 +530,26 @@ This is <mark>highlighted text</mark> in a sentence.
 
 ## Footnotes
 
-Footnote references `[^1]` are converted to superscript links, with definitions rendered at the end of the page — no option required:
+Footnote references `[^1]` are converted to superscript links, with definitions rendered at the end of the page — no option required. Label and inline footnotes share one sequence, numbered in the order they are first referenced (as Obsidian and GFM do), whatever the labels:
 
 ```markdown
-This is a statement[^1] with a footnote.
+This is a statement[^note] with a footnote, and an aside^[Written inline].
 
-[^1]: This is the footnote definition.
+[^note]: This is the footnote definition.
 ```
 
 Output:
 ```html
-This is a statement<sup class="footnote-ref" id="fnref-1"><a href="#fn-1" title="This is the footnote definition.">1</a></sup> with a footnote.
+This is a statement<sup class="footnote-ref" id="fnref-1"><a href="#fn-1" title="This is the footnote definition.">1</a></sup> with a footnote, and an aside<sup class="footnote-ref" id="fnref-2"><a href="#fn-2" title="Written inline">2</a></sup>.
 
 <hr />
 <ol class="footnotes">
-<li id="fn-1">This is the footnote definition. <a href="#fnref-1">↩</a></li>
+<li id="fn-1"><p>This is the footnote definition. <a href="#fnref-1" class="footnote-backref">↩</a></p></li>
+<li id="fn-2"><p>Written inline <a href="#fnref-2" class="footnote-backref">↩</a></p></li>
 </ol>
 ```
 
-Inline footnotes are also supported:
-```markdown
-Inline footnote^[This is inline] works differently.
-```
+A repeated reference reuses its number (`id="fnref-1-2"`, with a second back-link). Definitions are rendered like the body — Markdown, wikilinks, math, tags — and the `title` tooltip is the definition's visible text. A definition inside a code fence is code, and `%%comments%%` never reach a definition or its tooltip. Inside a transcluded note every footnote id carries the embed's prefix (`embed-1-fn-1`), so it cannot collide with the host page's.
 
 ## Link Resolution
 
@@ -504,12 +557,16 @@ Resolution order for `[[target]]`:
 
 1. **Explicitly relative path** — `[[../shared/Concept]]`, resolved from the current note
 2. **Exact vault path** — `[[guide/getting-started]]`
-3. **Unique basename** — `[[getting-started]]` (one page matches)
-4. **Frontmatter `title`** — `[[Onboarding Guide]]` (unique match)
-5. **Frontmatter `aliases`** — `[[Start Here]]` (unique match)
+3. **Basename or path suffix** — `[[getting-started]]`, `[[guide/getting-started]]` for `docs/v2/guide/getting-started.md`
+4. **Frontmatter `title`** — `[[Onboarding Guide]]`
+5. **Frontmatter `aliases`** — `[[Start Here]]`
 6. **Case-insensitive** — (default; disable with `enableCaseInsensitiveLookup: false`)
 7. **Fuzzy matching** — (when `enableFuzzyMatching` is on) case-insensitive, shortest-suffix
-8. **Rejected** — broken or ambiguous
+8. **The other tree** — steps 2–7 again in the vault (for a docs page) or the docs root (for a vault note)
+9. **Rejected** — broken
+
+Several matches at one step resolve like Obsidian (same folder, shortest path,
+alphabetical) and are reported through `onAmbiguousLink`.
 
 Explicit `./` and `../` paths do not fall back to basename or metadata lookup when
 their target is missing.
@@ -609,11 +666,11 @@ With `"warn"`, the build continues and each broken link prints a message showing
 
 ### My `[[Page]]` wikilink reports as ambiguous
 
-Multiple pages share the same filename (e.g. `docs/guide/getting-started.md` and `docs/tutorial/getting-started.md`). Fix by using a path-qualified link: `[[guide/getting-started]]` instead of `[[getting-started]]`.
+Multiple pages share the same filename (e.g. `docs/guide/getting-started.md` and `docs/tutorial/getting-started.md`). The link still resolves — to the one in the linking note's folder, else the shortest path — and the warning names the alternatives. To choose explicitly, use a path-qualified link: `[[guide/getting-started]]` instead of `[[getting-started]]`.
 
 ### Transcluded content shows "Heading not found" but the heading exists
 
-The heading lookup is case-insensitive (matching is done on normalized slugs), but it does respect exact text including punctuation — `[[Page#Getting Started!]]` will not match a heading written `Getting Started?`. Check the available headings listed in the diagnostic message — you may have a subtle character difference. An unmatched heading falls back to a plain link to the page itself.
+The heading lookup is case-insensitive and exact — a prefix or a single word of a heading does not match — and it respects punctuation — `[[Page#Getting Started!]]` will not match a heading written `Getting Started?`. Check the available headings listed in the diagnostic message — you may have a subtle character difference. An unmatched heading falls back to a plain link to the page itself.
 
 ### My `![[image.png|300x200]]` renders as a broken embed anchor
 
@@ -642,6 +699,13 @@ Footnote definitions must match the pattern `[^label]: definition text` with a c
 ### Memory usage grows when building many documentation sites in one process
 
 The content index cache is bounded to 10 entries with LRU eviction. If you need more simultaneous cached indexes, adjust `MAX_CACHED_INDEXES` in the source.
+
+### How much memory does a large vault need?
+
+Measured on a 3,000-note vault with every feature on: the plugin itself keeps about 57 MB alive (content indexes 22 MB, graph state 12 MB, the Bases dataset 12 MB, the Tasks index 10 MB). The build's 3–4.6 GB peak comes from Rspress and rspack bundling the pages and writing their persistent build cache at exit — bare Rspress peaks at about 3.1 GB on the same 3,008 pages. Two levers matter:
+
+- `RSPRESS_PERSISTENT_CACHE=false` lowers the peak by roughly 0.4–0.8 GB, at the cost of slower warm rebuilds.
+- A base that lists thousands of rows on one page is the most expensive single feature, because every row becomes compiled page code (two 3,000-row tables cost about 600 MB). Give such views a `limit`, or split them.
 
 ### I found a bug or have a feature request
 

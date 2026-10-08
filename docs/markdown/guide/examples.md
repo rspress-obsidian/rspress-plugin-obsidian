@@ -209,16 +209,18 @@ A footnote or citation definition *looks* like one of these but addresses
 nothing, so neither becomes a backlink: a note[^ref-not-a-link] and a
 citation[~cite] stay out.
 
-## Dataview Inline Expressions
+## Dataview Inline Queries
 
-With `enableDataview` on, a bare `= expression` in prose is evaluated and the
-value is rendered in place. This page's own name resolves:
+With `enableDataview` on, inline code that starts with `=` is a Dataview
+inline query, evaluated with `this` as the current page — Dataview's own
+syntax. This page's own name resolves:
 
-The file name is = file.name, and its folder is = file.folder.
+The file name is `= this.file.name`, and its folder is `= this.file.folder`.
 
-An expression that resolves to nothing is left exactly as written rather than
-collapsed into an empty span — ordinary prose survives untouched, which is why
-the sentence below still reads as prose and reports no diagnostic:
+Inline code that starts with `$=` is inline DataviewJS: this site has
+`$= dv.pages().length` pages.
+
+Plain prose is never evaluated, so the sentence below reads exactly as written:
 
 The speed = value.
 

@@ -20,10 +20,15 @@ If the vault contains the board, the Obsidian wikilink form works too — inside
 
 That live embed above came from `![[Demo.canvas]]`, and [[Demo.canvas|this link]] comes from `[[Demo.canvas]]` — both resolve through the canvas feature's published board, not the raw JSON attachment.
 
-Rspress base paths are detected automatically. If the site is served behind a proxy that does not expose its base in asset URLs, pass it explicitly:
+The embed fetches the board from the site's Rspress `base` automatically. Pass
+`basePath` only to load a board published by a different site:
 
 ```mdx
 <CanvasEmbed src="Demo.canvas" basePath="/docs" />
 ```
 
-The embed supports the same features as the full canvas page: pan, zoom, edge highlighting, and all node types.
+The embed supports the same features as the full canvas page: pan, zoom, edge
+highlighting, and all node types. Inside a page, a plain scroll wheel keeps
+scrolling the page; the board zooms with `Ctrl`/`⌘`+wheel or a trackpad pinch,
+or with any wheel once you have clicked into it. Each board remembers its own
+viewport, so two boards on one page do not share one.

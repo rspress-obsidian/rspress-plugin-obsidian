@@ -29,8 +29,7 @@ Callouts are styled content blocks that highlight important information. They su
 | `todo` | Blue | Tasks and checklists |
 | `success` | Green | Positive outcomes |
 | `question` | Lime | Open questions |
-| `warning` | Orange | Cautionary information |
-| `caution` | Orange | Permanent warnings (alias: `attention`) |
+| `warning` | Orange | Cautionary information (aliases: `caution`, `attention`) |
 | `danger` | Red | Critical warnings |
 | `failure` | Red | Negative outcomes |
 | `bug` | Pink | Known issues |
@@ -40,10 +39,14 @@ Callouts are styled content blocks that highlight important information. They su
 
 ## Custom Callout Types
 
-A type outside the table above — for example `[!roadmap]` — keeps its own
-`callout-roadmap` class and falls back to Obsidian's `note` styling: a blue
-card with the pencil glyph. The plugin also emits Obsidian's `data-callout`
-attribute, so the documented Obsidian customization recipe works unchanged:
+A type outside the table above — for example `[!roadmap]` or `[!my-roadmap]`;
+any characters up to `]` work — keeps its own `callout-roadmap` class and falls
+back to Obsidian's `note` styling: a blue card with the pencil glyph. Without a
+title the type is the title, capitalised (`> [!tip]` reads "Tip"). The plugin
+also emits Obsidian's `data-callout` attribute with the type as written (so
+`[!caution]` is `class="callout callout-warning" data-callout="caution"`), and
+Obsidian's metadata — `> [!roadmap|wide]` — as `data-callout-metadata`, so the
+documented Obsidian customization recipes work unchanged:
 
 ```css
 .callout[data-callout="roadmap"] {
@@ -52,6 +55,10 @@ attribute, so the documented Obsidian customization recipe works unchanged:
 
 .callout[data-callout="roadmap"] .callout-title::before {
   content: "🏁";
+}
+
+.callout[data-callout-metadata~="wide"] {
+  max-width: none;
 }
 ```
 

@@ -36,7 +36,7 @@ Embeds the entire content of the Getting Started page.
 ![[Getting Started#Install]]
 ```
 
-Embeds only the content under the `Install` heading.
+Embeds only the content under the `Install` heading. A nested path, `![[Getting Started#Setup#Linux]]`, picks the `Linux` under `Setup`, and the second of two same-named headings is reached by its id (`#install-1`). A note can embed one of its own sections: `![[#Install]]`.
 
 ## Block Transclusion
 
@@ -44,14 +44,19 @@ Embeds only the content under the `Install` heading.
 ![[Notes#^important-point]]
 ```
 
-Embeds only the block with the ID `important-point`.
+Embeds only the block with the ID `important-point` — the whole paragraph (or list item, with its nested items) carrying it, not just its last line.
+
+## Ids inside an embed
+
+Every id an embedded note emits — its headings, footnotes and block anchors — is prefixed per embed (`embed-1-install`, `embed-1-fn-1`), so the host page never carries a duplicate id and its own `#install` and `#fn-1` links keep pointing at the host's headings and footnotes.
 
 ## Circular Detection
 
-The plugin detects circular transclusions and breaks the cycle:
+The plugin detects circular transclusions — keyed on page *and* section, so only an embed already being rendered is refused — and breaks the cycle with a link to the page plus a warning:
 
 ```
-Page A → Page B → Page A (broken, shows raw wikilink)
+Page A → Page B → Page A (refused: rendered as a link to Page A)
+Note#Part embeds ![[#Part]] (refused: the section embeds itself)
 ```
 
 ## Depth Limit

@@ -22,13 +22,38 @@ Wikilinks are the core of Obsidian-style linking. They let you connect pages usi
 When you write `[[Page]]`, the plugin resolves it in this order:
 
 1. **Exact path match** — `docs/Page.md` exists
-2. **Base name match** — `Page` matches a file's basename
+2. **Base name match** — `Page` matches a file's basename; `[[sub/Page]]` matches
+   any `…/sub/Page.md` (a path suffix), no fuzzy matching needed
 3. **Title match** — `Page` matches a page's frontmatter `title`
 4. **Alias match** — `Page` matches a page's frontmatter `aliases`
-5. **Case-insensitive** — Case-insensitive path resolution (if enabled)
+5. **Case-insensitive** — Case-insensitive path resolution (on by default)
 6. **Fuzzy match** — Shortest suffix path fallback (if enabled)
 
+When several files match a step, the link resolves the way Obsidian picks: the
+file in the linking note's own folder, else the shortest vault path, else the
+alphabetically first. The choice and the alternatives are reported through
+`onAmbiguousLink` (default `"warn"`).
+
+With `vaultRoot` set, a docs page whose own tree has no match tries the vault,
+and a vault note tries the docs root, so the two can link each other and the
+backlinks follow.
+
 If no match is found, the link is marked as broken (behavior controlled by `onBrokenLink`).
+
+## Link Text
+
+The link shows what Obsidian shows: the alias when there is one, otherwise the
+target exactly as typed — `[[2024-01-15]]` reads `2024-01-15`, `[[my_note]]`
+reads `my_note`. A subpath is shown as `Note > Heading` or `Note > ^block`, and a
+same-page `[[#Heading]]` as just `Heading`.
+
+## Headings
+
+`[[Note#Heading]]` matches a heading exactly — its text, its id, or Obsidian's
+link form of it (where `:` and the other characters a link cannot hold read as
+spaces). A prefix or a word of a heading does not match: a renamed heading is
+reported through `onBrokenLink` rather than sent to a different one.
+`[[Note#Chapter#Details]]` picks the `Details` heading under `Chapter`.
 
 ## Aliases
 
@@ -112,7 +137,7 @@ visible rather than silent.
 ```ts
 markdown({
   onBrokenLink: "error",        // "error" | "warn"
-  onAmbiguousLink: "error",     // "error" | "warn"
+  onAmbiguousLink: "warn",      // "warn" (default) | "error"
   enableFuzzyMatching: false,   // Enable shortest-suffix fallback
   enableCaseInsensitiveLookup: true,  // Case-insensitive resolution
   enableMarkdownLinks: true,    // Resolve .md links as wikilinks

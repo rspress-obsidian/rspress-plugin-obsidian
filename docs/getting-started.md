@@ -50,7 +50,7 @@ export default defineConfig({
         navigation: true,
       },
       onBrokenLink: "error",
-      onAmbiguousLink: "error",
+      onAmbiguousLink: "warn",
     }),
     canvas({
       vaultRoot,

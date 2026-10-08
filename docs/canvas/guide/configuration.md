@@ -15,12 +15,13 @@ Customize how the plugin discovers canvas files and generates routes.
 | `routePrefix` | `string` | `/canvas` | URL prefix for generated canvas pages |
 | `include` | `string[]` | `['**/*.canvas']` | Glob patterns for finding canvas files |
 | `exclude` | `string[]` | `node_modules`, `dist`, `.git`, `doc_build`, `coverage` | Extra glob patterns to ignore (added to the built-ins) |
-| `fileRoutePrefix` | `string` | — | URL prefix prepended to resolved Markdown file routes (e.g. `/docs`) |
-| `linkPreview` | `boolean` | `false` | Render link nodes as embedded iframes |
-| `iframeSandbox` | `string` | `allow-scripts allow-same-origin allow-popups` | Sandbox attributes applied to link-preview and PDF iframes |
+| `fileRoutePrefix` | `string` | — | Route prefix of the vault's note pages and attachments (the markdown plugin's `vaultRoutePrefix`, e.g. `/vault`) |
+| `linkPreview` | `boolean` | `true` | Show link nodes as a live, sandboxed preview of the website, like Obsidian; `false` for a plain link card |
+| `iframeSandbox` | `string` | `allow-scripts allow-same-origin allow-popups` | Sandbox attributes for link-node previews (PDF cards are never sandboxed) |
 | `editable` | `boolean` | `false` | Enable browser-side editing controls |
-| `editorTitle` | `string` | `Canvas editor` | Editor banner and export filename |
+| `editorTitle` | `string` | `Canvas editor` | Editor banner, and the export filename when the board has no name |
 | `enableDefaultStyles` | `boolean` | `true` | Inject the bundled canvas stylesheet; set `false` to import it yourself |
+| `outDir` | `string` | `node_modules/.rspress-plugin-obsidian/canvas` | Plugin-owned directory for published board JSON and attachments, emptied on every build |
 
 ## vaultRoot
 
@@ -74,62 +75,69 @@ would get published.
 
 ## fileRoutePrefix
 
-Map file nodes to your Rspress documentation routes. When a file node references `Welcome.md`, this option determines the link destination:
+The route prefix the vault's notes are published under — set it to the
+markdown plugin's `vaultRoutePrefix` (`fileRoutePrefix: "/vault"` for
+`vaultRoutePrefix: "/vault"`). Links in cards and file nodes are resolved at
+build time with the markdown plugin's own resolver and content index, so they
+land on exactly the route the note page was published at:
 
-```ts
-canvas({
-  fileRoutePrefix: '/docs',
-})
-```
+| Written in a card | Resolves like Obsidian |
+|-------------------|------------------------|
+| `[[Loose]]` | the one note called `Loose` anywhere in the vault (shortest path) |
+| `[[notes/Loose]]` | the vault-absolute path |
+| `[[./Sibling]]`, `[[../Other]]` | relative to the folder the `.canvas` file is in |
+| `![[pic.png]]`, `![](pic.png)` | the attachment named `pic.png`, wherever it lives |
+| `[[Note#Heading]]` | the note, at the heading's anchor; a missing heading opens the note |
 
-| File Node Value | Resolved Link |
-|-----------------|---------------|
-| `Welcome.md` | `/docs/Welcome` |
-| `Notes/Setup.md` | `/docs/Notes/Setup` |
-| `My Note.md` | `/docs/My Note` |
-
-The resolver normalizes separators only. Case and spaces are preserved, so the
-link target is the vault path exactly as the markdown plugin published it
-(`Welcome.md` → `/docs/Welcome`, not `/docs/welcome`). A fragment never appears
-in `file` — a file node carries it in the separate `subpath` field, which is
-appended to the link verbatim. Fragments written *inside* a wikilink or Markdown
-link in a text node are split off and slugified by the Markdown renderer, so
-`[[Notes/Plan#Next Steps]]` becomes `/docs/Notes/Plan#next-steps`.
-
-Without this option, file nodes link to the vault-relative path directly
-(`Welcome.md` → `/Welcome`), and the plugin logs a build warning whenever
-`vaultRoot` is set — those bare routes are not what the markdown plugin
-publishes, so pass the same prefix here (`fileRoutePrefix: "/vault"` for
-`vaultRoutePrefix: "/vault"`), or your docs route prefix when the notes live
-under `docs/`.
+A target that does not resolve — or that resolves to a `publish: false` note —
+renders as plain text styled as an unresolved link, never as a link to a page
+that does not exist. Without `fileRoutePrefix` the vault is indexed with no
+prefix (`Welcome.md` → `/Welcome`), and the plugin logs a build warning
+whenever `vaultRoot` is set.
 
 ## linkPreview and iframeSandbox
 
-Enable iframe previews for link nodes and optionally customize the sandbox:
+Link nodes show the website itself in a sandboxed, lazily loaded frame by
+default, the way Obsidian embeds a web page in a link card. Turn it off for a
+plain link card that loads nothing until the reader clicks, or tighten the
+sandbox:
 
 ```ts
 canvas({
-  linkPreview: true,
-  iframeSandbox: 'allow-scripts allow-same-origin',
+  linkPreview: false,
+})
+
+canvas({
+  iframeSandbox: 'allow-scripts allow-popups',
 })
 ```
 
-The default (`allow-scripts allow-same-origin allow-popups`) is the minimum that
-lets a preview render: a same-origin page loses access to its own storage and
-client runtime without `allow-same-origin` and renders blank (verified in a
-browser), and `allow-scripts` is required by the pages being framed.
+The default sandbox (`allow-scripts allow-same-origin allow-popups`) is the
+minimum that lets most pages render: a page loses access to its own storage
+and client runtime without `allow-same-origin` and renders blank, and
+`allow-scripts` is required by the pages being framed. `allow-scripts
+allow-popups` is the safer value for third-party URLs — it drops the
+same-origin grant. Sites that send `X-Frame-Options` or a `frame-ancestors`
+policy refuse to be framed anywhere; the card's label above the frame still
+links to the page.
 
-Tighten it when you preview content you do not control. `allow-scripts
-allow-popups` is the right value for cross-origin URLs — it drops the
-same-origin grant that, combined with scripts, lets framed content reach out of
-its frame. Keep `allow-same-origin` only when the previews are your own pages.
+PDF file cards are **not** sandboxed: Chromium's PDF viewer refuses to run in a
+sandboxed frame and shows a broken-document icon. The PDF is served from the
+site's own origin.
 
-The markdown feature's inline PDF embeds (`![[doc.pdf]]`) are not sandboxed for
-the same reason: Chromium's PDF viewer needs scripts and shows a
-broken-document icon without them. If you would rather not embed PDFs at all,
-leave `enableMediaEmbeds` off — the file is then linked instead.
+## outDir
 
-When enabled, `http(s)` link nodes render an embedded iframe of the target URL; other targets fall back to a normal link.
+Board JSON (`__canvases__/<vault path>.json`) and every attachment a board
+references (images, audio, video, PDFs, other files — at the same
+`<fileRoutePrefix>/<vault path>` URL the markdown plugin uses) are written to
+this directory and served as an extra Rsbuild public directory, honouring the
+site `base`. The directory belongs to the plugin and is emptied at the start of
+every build, so a deleted board or attachment stops being published; nothing is
+written into your `docs/public/`. Only files a published board references are
+copied, and a note with `publish: false` is never copied into a board.
+
+Earlier versions wrote board JSON into `docs/public/__canvases__/`; the plugin
+removes that directory on its next build.
 
 ## Editor mode
 
@@ -152,6 +160,13 @@ Editor mode supports:
 - Deleting selected cards and connected edges.
 - Undo and redo.
 - Keyboard shortcuts.
-- Exporting updated JSON Canvas with the download button or `Ctrl/Cmd+S`.
+- Moving the selection with the arrow keys (`Shift` for larger steps); `Enter`
+  edits the focused text card and `Escape` finishes the edit.
+- Panning with the middle mouse button or `Space`+drag, even over a card.
+- Exporting the board as a `.canvas` file with the download button or
+  `Ctrl/Cmd+S`. The export is lossless — fields the plugin does not know about
+  (another tool's `styleAttributes`, top-level metadata) are kept — and carries
+  none of the build-time data (resolved files, attachment URLs, note bodies). It
+  is named after the board (`My Board.canvas`).
 
 Rspress builds are static. Editor changes remain in browser memory and must be exported, then copied back into the vault before the next build.

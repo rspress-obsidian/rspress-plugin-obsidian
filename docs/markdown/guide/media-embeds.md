@@ -95,6 +95,9 @@ cards are ordinary text nodes.
 | `![[image.png\|300]]` | Image at 300px wide |
 | `![[image.png\|300x180]]` | Image at 300×180 |
 | `![[image.png\|A caption]]` | Caption, no size |
+| `![[image.png\|A caption\|300]]` | Caption, then width |
+| `![](image.png)` | Markdown image, resolved like an embed (next to the note, from the root, or by unique name) |
+| `![](<my image.png>)`, `![](my%20image.png)` | Markdown image with spaces in its name |
 | `![300](image.png)` | Markdown image, width 300 |
 | `![300x180](image.png)` | Markdown image, width and height |
 | `![A caption\|300](image.png)` | Markdown image, caption then width |
@@ -132,7 +135,10 @@ work:
 
 - The **demo vault** (`Obsidian Vault/media/`), which is what this page uses. The
   plugin publishes vault attachments under `/vault/`, so `![[media/gradient.png]]`
-  resolves and the file is copied next to it during the build.
+  resolves to `/vault/media/gradient.png`. Only attachments a published page
+  references are published — never dotfiles, never a file only a
+  `publish: false` note uses — and they are served from
+  `node_modules/.rspress-plugin-obsidian/`, not written into `docs/public/`.
 - A **vault-relative path** resolved through the content index, the same lookup
   that resolves `[[Some Note]]`.
 

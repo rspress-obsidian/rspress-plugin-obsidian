@@ -50,8 +50,8 @@ import 'rspress-plugin-obsidian/canvas/styles.css';
 ## How It Works
 
 1. **Build time** — The plugin scans your vault directory for `.canvas` files
-2. Each file is parsed, validated against the JSON Canvas 1.0 spec, and embedded as JSON
-3. **Runtime** — A `CanvasViewer` component renders an interactive React canvas on each page
+2. Each file is parsed and validated against the JSON Canvas 1.0 spec; its card links are resolved with the markdown plugin's resolver, and the board JSON and the attachments it references are written to the plugin's own output directory (see [`outDir`](./configuration#outdir))
+3. **Runtime** — A `CanvasViewer` component on each board's page fetches that JSON and renders an interactive React canvas
 4. Nodes are positioned absolutely on a pannable/zoomable viewport with SVG bezier edges
 5. A board reopens where you left it: the last pan/zoom is kept in `localStorage` per board, the way Obsidian restores a canvas viewport. A first visit frames the nodes instead, and **Fit to View** (or the `F` key) re-frames a board you have moved.
 

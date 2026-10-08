@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Every graph view option — defaultOpen, colors, groups, cacheDir, hover previews, styles, plus caching, diagnostics, and peer requirements.
+description: Every graph view option — defaultOpen, colors, groups, hover previews, styles, plus build reuse, dev refresh, diagnostics, and peer requirements.
 ---
 
 # Configuration
@@ -26,20 +26,19 @@ export default defineConfig({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `defaultOpen` | `boolean` | `false` | Open the graph panel by default when the site loads |
-| `profileBuild` | `boolean` | `false` | Log graph build timings, cache hits, and module reuse during route scanning |
+| `defaultOpen` | `boolean` | `false` | Open the graph panel by default when the site loads (not on screens narrower than 640px) |
+| `profileBuild` | `boolean` | `false` | Log graph build counts, timings and module reuse |
 | `colors` | `GraphViewColors` | Light/dark palette | Override the graph palette — see [Custom Colors](#custom-colors) |
-| `cacheDir` | `string` | `<projectRoot>/node_modules/.cache/rspress-graph-view` | Directory for the persisted parse cache |
-| `enableHoverPreviews` | `boolean` | `false` | Show a content preview when hovering an internal link |
+| `enableHoverPreviews` | `boolean` | `false` | Show a content preview when hovering an internal link; the preview data loads on the first hover |
 | `enableDefaultStyles` | `boolean` | `false` | Inject the bundled graph-panel stylesheet; unnecessary if you import `rspress-plugin-obsidian/styles.css` instead |
-| `groups` | `GraphViewGroup[]` | `[]` | Colour groups: nodes whose route matches the group's query paint in its colour — see [Colour Groups](#colour-groups) |
-| `onUnresolvedLink` | `"warn" \| "error" \| "ignore"` | `"warn"` | What to do about a link that resolves to no route — see [Broken Link Diagnostics](#broken-link-diagnostics) |
+| `groups` | `GraphViewGroup[]` | `[]` | Colour groups: nodes matching the group's query paint in its colour — see [`groups`](#groups) |
+| `onUnresolvedLink` | `"warn" \| "error" \| "ignore"` | `"warn"` | What to do about a link that resolves to nothing — see [Broken Link Diagnostics](#broken-link-diagnostics) |
 
 You can also enable build profiling ad hoc with the `RSPRESS_GRAPH_VIEW_PROFILE=1` environment variable — useful for debugging slow builds without changing config.
 
 ### `defaultOpen`
 
-When `true`, the graph panel opens automatically on page load instead of requiring the user to click the FAB button. Useful for documentation sites where the graph is a primary navigation tool. The visitor's own toggle (remembered in `localStorage`) takes precedence after the first visit.
+When `true`, the graph panel opens automatically on page load instead of requiring the user to click the FAB button. Useful for documentation sites where the graph is a primary navigation tool. The visitor's own toggle (remembered in `localStorage`) takes precedence after the first visit. On screens narrower than 640px the panel would cover about half the article, so it starts closed there; a reader who opens it keeps it open.
 
 ```ts
 graphview({ defaultOpen: true })
@@ -47,16 +46,15 @@ graphview({ defaultOpen: true })
 
 ### `profileBuild`
 
-When enabled, the plugin logs detailed timing information for each graph build:
+When enabled, the plugin logs what each graph build did:
 
 ```
-[rspress-plugin-obsidian:graph] graph build | routes=42 | links=87 | cacheHits=40 | cacheMisses=2 | reusedModule=false | total=12.3ms | stat=1.2ms | parse=8.4ms | resolve=1.8ms | serialize=0.9ms
+[rspress-plugin-obsidian:graph] graph build | routes=42 | nodes=51 | links=87 | resolvedLinks=93 | filesRead=1 | reusedModule=false | total=6.3ms
 ```
 
-This helps identify bottlenecks:
-- **High `stat` time** → many files being stat'd; consider reducing doc count
-- **High `parse` time** → large files or cold cache; caching should help on rebuilds
-- **High `reusedModule` rate** → content hasn't changed; build is fully cached
+- `resolvedLinks` — outlinks run through the markdown resolver in this build
+- `filesRead` — files the graph read itself (canvas boards, pages no content index covers, and notes whose text changed since the last build); the content index's own reads are not counted
+- `reusedModule=true` — nothing changed, so the previous modules were reused without resolving or reading anything
 
 ### `groups`
 
@@ -72,7 +70,7 @@ graphview({
 });
 ```
 
-The query language is the same one the panel's search box accepts — plain text, `path:`, `file:`, `tag:`, `-` negation and quoted phrases — so type the query into the search first to see exactly which nodes a group would colour. Groups are checked in order and the first match wins; the current page always keeps its dedicated colour, and a colour `CSS.supports` rejects falls back to the palette rather than corrupting the canvas.
+The query language is the same one the panel's search box accepts (see [Graph View: Filters and search](./graph-view.md#filters-and-search)), so type the query into the search first to see exactly which nodes a group would colour. A group that uses `content:`, `line:`, `section:` or plain words matches note text once the panel has loaded it. Groups are checked in order and the first match wins; the current page always keeps its dedicated colour, and a colour `CSS.supports` rejects falls back to the palette rather than corrupting the canvas.
 
 ## Custom Colors
 
@@ -110,45 +108,43 @@ export default function CustomLayout(props) {
 }
 ```
 
-Available color keys: `currentNode`, `currentLabel`, `node`, `nodeHover`, `nodeDimmed`, `label`, `labelHover`, `labelShadow`, `link`, `linkHighlight`, `fallbackLinkDim`, `loaderBorder`, `loaderTop`.
+Available color keys: `currentNode`, `currentLabel`, `node`, `nodeHover`, `nodeDimmed`, `tagNode`, `attachmentNode`, `unresolvedNode`, `label`, `labelHover`, `labelShadow`, `link`, `linkHighlight`, `fallbackLinkDim`, `loaderBorder`, `loaderTop`.
 
 Any unspecified key falls back to the default light or dark palette.
 
-## Caching
+## Link resolution, rebuilds and `rspress dev`
 
-The plugin uses a multi-level caching strategy:
+The graph does not parse pages itself. It reads each note's links from the
+markdown plugin's content index and resolves them with the markdown plugin's
+resolver, the same index and options the rendered page and its Backlinks pane
+use. With `markdown()` installed it reuses that plugin's cached index; without
+it, the graph indexes the Rspress `root` itself with the default options.
 
-1. **File cache** — Each document is cached by `mtimeMs` + `size`. Unchanged files skip reading and parsing entirely.
-2. **Module cache** — If the graph structure hasn't changed (same files, same content), the serialized virtual module is reused without rebuilding.
-3. **Disk cache** — Parse results (titles + links) are persisted to `<projectRoot>/node_modules/.cache/rspress-graph-view/cache.json`. Dev-server restarts skip the expensive markdown parsing entirely — only the fast graph resolution runs (~0.5ms for a small site).
-4. **Stale pruning** — Deleted or moved routes are automatically removed from the cache on the next build.
+- **Unchanged site**: the previous modules are reused. No link is resolved and no
+  file is read.
+- **One note edited**: the index re-parses that note, the graph resolves the
+  site's links again (a few milliseconds for a thousand notes), and only that
+  note's text is read again for previews and search.
+- **`rspress dev`**: the graph watches the docs root and the vault and pushes new
+  graph and preview data to the browser after an edit. A note added or removed
+  under the vault still needs a dev-server restart, because Rspress fixes its
+  route list when it starts.
 
-The disk cache location can be overridden with the `cacheDir` plugin option:
-
-```ts
-graphview({
-  cacheDir: "./.cache/graph-view", // custom cache location
-})
-```
-
-This means:
-- **Cold build** (first run or cache cleared): all files are read and parsed
-- **Warm rebuild** (no changes): ~0ms, fully cached
-- **Single-file change**: only the modified file is re-parsed; the rest hit cache
-- **Dev-server restart**: parse results load from disk; no re-parsing
+Nothing is cached on disk. Earlier versions kept a `cacheDir` parse cache; that
+option is gone.
 
 ## Broken Link Diagnostics
 
-During the build, the plugin resolves every internal markdown link to a page. Links that don't resolve to any route (typos, moved files, wrong paths) are reported to the console:
+During the build, the plugin resolves every internal link a page makes. Links that resolve to nothing (typos, moved files, notes not written yet) are reported to the console:
 
 ```
 [rspress-plugin-obsidian:graph] 2 page(s) reference 3 unresolved internal link(s):
-  /guide/getting-started -> ./confguration.md
-  /guide/configuration -> ../missing.md
-  /api -> ./guide/typo.md
+  /guide/getting-started -> ./confguration
+  /guide/configuration -> ../missing
+  /api -> Not Yet Written
 ```
 
-This is a build-time warning — the build still succeeds, and unresolved links are simply omitted from the graph. It's a useful way to catch dead links in your docs.
+This is a build-time warning, and the build still succeeds. Links to attachments (`![[diagram.png]]`, `[spec](assets/spec.pdf)`) resolve to attachment nodes, and root-absolute site URLs such as `/downloads/app.zip` are not page links, so neither is reported.
 
 `onUnresolvedLink` decides what happens instead:
 
@@ -156,7 +152,7 @@ This is a build-time warning — the build still succeeds, and unresolved links 
 |-------|--------|
 | `"warn"` (default) | Report as above; the build still succeeds |
 | `"error"` | Fail the build with the same report |
-| `"ignore"` | Say nothing; unresolved links are still omitted from the graph |
+| `"ignore"` | Say nothing |
 
 Two cases reach for `"ignore"`. A site that documents unresolved links *on
 purpose* — showing readers what a broken wikilink looks like — would otherwise
@@ -169,8 +165,9 @@ report of the same fact:
 graphview({ onUnresolvedLink: "ignore" });
 ```
 
-The graph itself does not change either way: a link that resolves to no route
-never becomes an edge.
+The graph itself does not change either way. An unresolved link appears as an
+unresolved node, which the panel hides while **Existing files only** is on (the
+default).
 
 ## Peer Dependencies
 
