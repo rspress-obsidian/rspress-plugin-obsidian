@@ -1,0 +1,14 @@
+{
+  "date-display-format": "ddd, MMM D",
+  "lane-width": 280,
+  "show-checkboxes": true,
+  "tag-colors": [
+    { "tagKey": "#urgent", "color": "#b42318", "backgroundColor": "rgba(240, 68, 56, 0.14)" },
+    { "tagKey": "#design", "color": "#5925dc", "backgroundColor": "rgba(122, 90, 248, 0.14)" }
+  ],
+  "date-colors": [
+    { "isToday": true, "color": "#b54708", "backgroundColor": "rgba(247, 144, 9, 0.16)" },
+    { "isBefore": true, "color": "#b42318", "backgroundColor": "rgba(240, 68, 56, 0.14)" },
+    { "distance": 3, "unit": "days", "direction": "after", "color": "#175cd3", "backgroundColor": "rgba(46, 144, 250, 0.14)" }
+  ]
+}
