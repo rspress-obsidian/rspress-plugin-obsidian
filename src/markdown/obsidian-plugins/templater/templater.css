@@ -1,0 +1,18 @@
+/* Templater: styles for the markup `src/markdown/obsidian-plugins/templater/` emits.
+ * A command's output is plain note content; only a failed command has markup. */
+
+/* A command that failed, in place of its output: inline, so a failure inside
+ * a sentence or a table cell does not break the line. */
+.templater-error {
+	padding: 0 0.35em;
+	border-radius: 3px;
+	color: var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
+	background: var(--rp-c-bg-mute, #f2f3f5);
+	border-left: 3px solid var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
+	font-size: 0.9em;
+	white-space: pre-wrap;
+}
+
+.dark .templater-error {
+	background: var(--rp-c-bg-mute, #2a2c31);
+}
