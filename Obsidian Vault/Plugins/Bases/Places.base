@@ -1,0 +1,23 @@
+filters: file.inFolder("Plugins/Bases/Places")
+properties:
+  note.sight:
+    displayName: Sight
+views:
+  - type: map
+    name: Map
+    coordinates: note.coordinates
+    markerColor: note.color
+    order:
+      - file.name
+      - country
+      - sight
+  - type: map
+    name: Europe
+    filters: country != "Japan"
+    coordinates: note.coordinates
+    markerColor: note.color
+    center: "[45.5, 7.5]"
+    defaultZoom: 4
+    order:
+      - file.name
+      - sight

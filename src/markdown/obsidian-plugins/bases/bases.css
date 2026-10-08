@@ -1,0 +1,562 @@
+/* Bases: styles for the markup `src/markdown/obsidian-plugins/bases/` emits. */
+
+.bases-container {
+	--bases-border: var(--rp-c-divider-light, #e2e8f0);
+	--bases-surface: var(--rp-c-bg-soft, #f7f8fa);
+	--bases-muted: var(--rp-c-text-2, #4b5563);
+	margin: 1rem 0;
+	font-size: 0.9375rem;
+}
+
+html.dark .bases-container {
+	--bases-border: var(--rp-c-divider, #303642);
+	--bases-surface: var(--rp-c-bg-soft, #171a21);
+	--bases-muted: var(--rp-c-text-2, #a0a7b4);
+}
+
+.bases-error,
+.bases-warning {
+	margin: 0.5rem 0;
+	padding: 0.5rem 0.75rem;
+	border-left: 3px solid #e5484d;
+	border-radius: 4px;
+	background: color-mix(in srgb, #e5484d 8%, transparent);
+	white-space: pre-wrap;
+}
+
+.bases-warning {
+	border-left-color: #f5a524;
+	background: color-mix(in srgb, #f5a524 10%, transparent);
+}
+
+.bases-error-value {
+	color: #e5484d;
+	font-size: 0.85em;
+}
+
+/* View switcher: radio inputs, a tab strip, one section per view. */
+.bases-view-tab-input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.bases-view-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	border-bottom: 1px solid var(--bases-border);
+	margin-bottom: 0.5rem;
+}
+
+.bases-view-tab {
+	padding: 0.35rem 0.75rem;
+	border-bottom: 2px solid transparent;
+	color: var(--bases-muted);
+	cursor: pointer;
+}
+
+.bases-view-tab:hover {
+	color: var(--rp-c-text-1, #1f2937);
+}
+
+.bases-view {
+	scroll-margin-top: calc(var(--rp-nav-height, 64px) + 1rem);
+}
+
+.bases-views > .bases-view {
+	display: none;
+}
+
+/* No tab chosen and no view in the URL fragment: the first view, as in Obsidian. */
+.bases-views:not(:has(> .bases-view-tab-input:checked)):not(:has(> .bases-view:target))
+> .bases-view:first-of-type,
+.bases-views:not(:has(> .bases-view-tab-input:checked)) > .bases-view:target {
+	display: block;
+}
+
+.bases-views:not(:has(> .bases-view-tab-input:checked)):not(:has(> .bases-view:target))
+	> .bases-view-tabs
+	> .bases-view-tab:first-child {
+	border-bottom-color: var(--rp-c-brand, #3b82f6);
+	color: var(--rp-c-text-1, #1f2937);
+}
+
+.bases-view-tab-input:nth-of-type(1):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(1),
+.bases-view-tab-input:nth-of-type(2):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(2),
+.bases-view-tab-input:nth-of-type(3):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(3),
+.bases-view-tab-input:nth-of-type(4):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(4),
+.bases-view-tab-input:nth-of-type(5):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(5),
+.bases-view-tab-input:nth-of-type(6):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(6),
+.bases-view-tab-input:nth-of-type(7):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(7),
+.bases-view-tab-input:nth-of-type(8):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(8),
+.bases-view-tab-input:nth-of-type(9):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(9),
+.bases-view-tab-input:nth-of-type(10):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(10),
+.bases-view-tab-input:nth-of-type(11):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(11),
+.bases-view-tab-input:nth-of-type(12):focus-visible
+	~ .bases-view-tabs
+	> .bases-view-tab:nth-child(12) {
+	outline: 2px solid var(--rp-c-brand, #3b82f6);
+	outline-offset: -2px;
+}
+
+/* The chosen view and its tab; render.ts caps a switcher at 12 views to match. */
+.bases-view-tab-input:nth-of-type(1):checked ~ .bases-view:nth-of-type(1),
+.bases-view-tab-input:nth-of-type(2):checked ~ .bases-view:nth-of-type(2),
+.bases-view-tab-input:nth-of-type(3):checked ~ .bases-view:nth-of-type(3),
+.bases-view-tab-input:nth-of-type(4):checked ~ .bases-view:nth-of-type(4),
+.bases-view-tab-input:nth-of-type(5):checked ~ .bases-view:nth-of-type(5),
+.bases-view-tab-input:nth-of-type(6):checked ~ .bases-view:nth-of-type(6),
+.bases-view-tab-input:nth-of-type(7):checked ~ .bases-view:nth-of-type(7),
+.bases-view-tab-input:nth-of-type(8):checked ~ .bases-view:nth-of-type(8),
+.bases-view-tab-input:nth-of-type(9):checked ~ .bases-view:nth-of-type(9),
+.bases-view-tab-input:nth-of-type(10):checked ~ .bases-view:nth-of-type(10),
+.bases-view-tab-input:nth-of-type(11):checked ~ .bases-view:nth-of-type(11),
+.bases-view-tab-input:nth-of-type(12):checked ~ .bases-view:nth-of-type(12) {
+	display: block;
+}
+
+.bases-view-tab-input:nth-of-type(1):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(1),
+.bases-view-tab-input:nth-of-type(2):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(2),
+.bases-view-tab-input:nth-of-type(3):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(3),
+.bases-view-tab-input:nth-of-type(4):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(4),
+.bases-view-tab-input:nth-of-type(5):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(5),
+.bases-view-tab-input:nth-of-type(6):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(6),
+.bases-view-tab-input:nth-of-type(7):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(7),
+.bases-view-tab-input:nth-of-type(8):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(8),
+.bases-view-tab-input:nth-of-type(9):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(9),
+.bases-view-tab-input:nth-of-type(10):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(10),
+.bases-view-tab-input:nth-of-type(11):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(11),
+.bases-view-tab-input:nth-of-type(12):checked ~ .bases-view-tabs > .bases-view-tab:nth-child(12) {
+	border-bottom-color: var(--rp-c-brand, #3b82f6);
+	color: var(--rp-c-text-1, #1f2937);
+}
+
+html.dark .bases-view-tab:hover,
+html.dark .bases-view-tab-input:checked ~ .bases-view-tabs > .bases-view-tab {
+	color: var(--rp-c-text-1, #e5e7eb);
+}
+
+.bases-toolbar {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.5rem;
+	color: var(--bases-muted);
+	font-size: 0.85em;
+}
+
+.bases-toolbar-view-name {
+	font-weight: 600;
+}
+
+/* Table */
+.bases-table-container {
+	overflow-x: auto;
+}
+
+/* Rspress gives a table its rounded frame (`border-radius`, `overflow:
+ * hidden`), which only the separate border model draws: with collapsed
+ * borders the right and bottom edges were clipped away. Each cell draws its
+ * right and bottom rule; the frame draws the outer edges. */
+.bases-container .bases-table {
+	display: table;
+	width: 100%;
+	margin: 0;
+	border-collapse: separate;
+	border-spacing: 0;
+}
+
+.bases-table .bases-th,
+.bases-table .bases-td,
+.bases-table .bases-summary-cell,
+.bases-table .bases-group-heading > th {
+	padding: 0.35rem 0.6rem;
+	border: 0 solid var(--bases-border);
+	border-width: 0 1px 1px 0;
+	text-align: start;
+	vertical-align: top;
+}
+
+.bases-table tr > :last-child {
+	border-right-width: 0;
+}
+
+.bases-table > :last-child > tr:last-child > * {
+	border-bottom-width: 0;
+}
+
+.bases-table .bases-th {
+	background: var(--bases-surface);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.bases-table[data-row-height="medium"] .bases-td {
+	height: 3rem;
+}
+
+.bases-table[data-row-height="tall"] .bases-td {
+	height: 4.5rem;
+}
+
+.bases-table[data-row-height="extra-tall"] .bases-td,
+.bases-table[data-row-height="extraTall"] .bases-td {
+	height: 6rem;
+}
+
+.bases-group-heading {
+	font-weight: 600;
+}
+
+.bases-table .bases-group-heading > th {
+	background: color-mix(in srgb, var(--bases-surface) 60%, transparent);
+}
+
+.bases-group-property,
+.bases-group-count,
+.bases-summary-label {
+	color: var(--bases-muted);
+	font-size: 0.85em;
+	font-weight: 400;
+}
+
+.bases-summary-row {
+	background: var(--bases-surface);
+}
+
+.value-list-container {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+}
+
+.value-list-element {
+	padding: 0 0.4rem;
+	border: 1px solid var(--bases-border);
+	border-radius: 999px;
+	background: var(--bases-surface);
+	font-size: 0.9em;
+}
+
+/* Tags and links in chips sit on the chip's tinted surface: the darker link
+ * colour keeps them readable (WCAG AA) there. */
+.bases-container .value-list-element a {
+	color: var(--obsidian-c-link, var(--rp-c-brand));
+}
+
+.bases-icon {
+	font-family: var(--rp-font-family-mono, monospace);
+	font-size: 0.85em;
+}
+
+/* Lucide's files are 24×24; Obsidian sizes an icon to its text. */
+svg.bases-icon {
+	width: 1.1em;
+	height: 1.1em;
+	vertical-align: -0.15em;
+}
+
+.bases-image {
+	max-height: 4rem;
+}
+
+/* Cards and Kanban cards */
+.bases-cards-container {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(var(--bases-cards-width, 200px), 1fr));
+	gap: 0.75rem;
+}
+
+.bases-cards-item,
+.bases-kanban-card {
+	overflow: hidden;
+	border: 1px solid var(--bases-border);
+	border-radius: 8px;
+	background: var(--rp-c-bg, #fff);
+}
+
+.bases-cards-cover {
+	display: flex;
+	aspect-ratio: 1 / 1;
+	background: var(--bases-surface);
+}
+
+.bases-cards-image,
+.bases-cards-cover .bases-color-swatch {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.bases-cards-cover[data-image-fit="contain"] .bases-cards-image {
+	object-fit: contain;
+}
+
+.bases-cards-content {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	padding: 0.6rem 0.75rem;
+}
+
+.bases-cards-title {
+	font-weight: 600;
+}
+
+.bases-cards-label {
+	color: var(--bases-muted);
+	font-size: 0.75em;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+details.bases-group {
+	margin-bottom: 0.75rem;
+}
+
+details.bases-group > summary {
+	margin-bottom: 0.5rem;
+	cursor: pointer;
+}
+
+/* List */
+.bases-list[data-markers="none"] {
+	list-style: none;
+	padding-inline-start: 0;
+}
+
+.bases-list-separator,
+.bases-list-label {
+	color: var(--bases-muted);
+}
+
+/* Kanban */
+.bases-kanban {
+	display: flex;
+	gap: 0.75rem;
+	overflow-x: auto;
+	padding-bottom: 0.5rem;
+}
+
+.bases-kanban-column {
+	display: flex;
+	flex: 0 0 var(--bases-kanban-column-width, 260px);
+	flex-direction: column;
+	gap: 0.5rem;
+	padding: 0.5rem;
+	border-radius: 8px;
+	background: var(--bases-surface);
+}
+
+.bases-kanban-column-header {
+	display: flex;
+	justify-content: space-between;
+	font-weight: 600;
+}
+
+.bases-kanban-column-count {
+	color: var(--bases-muted);
+	font-weight: 400;
+}
+
+.bases-kanban-cards {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+html.dark .bases-cards-item,
+html.dark .bases-kanban-card {
+	background: var(--rp-c-bg, #0f1115);
+}
+
+/* Map: the table of located files, drawn as a MapLibre map in the browser
+ * (`runtime/maps.ts`). The marker variables are the Maps plugin's own. */
+.bases-map-view {
+	--bases-map-marker-background: var(--rp-c-brand, #3b82f6);
+	--bases-map-marker-icon-color: #fff;
+}
+
+.bases-map-view.is-interactive > .bases-map-fallback {
+	display: none;
+}
+
+.bases-map {
+	height: min(70vh, 640px);
+	min-height: 240px;
+	overflow: hidden;
+	border: 1px solid var(--bases-border);
+	border-radius: 8px;
+	background: var(--bases-surface);
+}
+
+/* A marker's pin: a coloured disc with its icon, or a dot. The table shows
+ * it beside each location; the map's marker is a larger copy. */
+.bases-map-pin {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 1.35em;
+	height: 1.35em;
+	margin-inline-end: 0.4em;
+	border-radius: 50%;
+	background: var(--bases-map-marker-color, var(--bases-map-marker-background));
+	color: var(--bases-map-marker-icon-color);
+	vertical-align: -0.3em;
+}
+
+.bases-map-pin:empty::after {
+	width: 34%;
+	height: 34%;
+	border-radius: 50%;
+	background: currentColor;
+	content: "";
+}
+
+.bases-map-pin > svg {
+	width: 62%;
+	height: 62%;
+}
+
+.bases-map-marker {
+	display: block;
+	border-radius: 50%;
+	cursor: pointer;
+}
+
+.bases-map-marker > .bases-map-pin {
+	width: 28px;
+	height: 28px;
+	margin: 0;
+	box-shadow:
+		0 0 0 2px rgb(255 255 255 / 85%),
+		0 2px 6px rgb(0 0 0 / 35%);
+	transition: transform 0.15s ease;
+}
+
+.bases-map-marker:hover > .bases-map-pin,
+.bases-map-marker:focus-visible > .bases-map-pin {
+	transform: scale(1.15);
+}
+
+.bases-map-marker:focus-visible {
+	outline: 2px solid var(--rp-c-brand, #3b82f6);
+	outline-offset: 3px;
+}
+
+/* Popups, controls and credit take the site's colours; scoped so they win
+ * over MapLibre's stylesheet, which loads after this one. */
+.bases-map-view .maplibregl-popup-content {
+	padding: 0.6rem 0.75rem;
+	border: 1px solid var(--bases-border);
+	border-radius: 8px;
+	background: var(--rp-c-bg, #fff);
+	box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+	color: var(--rp-c-text-1, #1f2937);
+	font-family: inherit;
+	font-size: 0.875rem;
+	line-height: 1.45;
+}
+
+.bases-map-view .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.bases-map-view .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.bases-map-view .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+	border-top-color: var(--rp-c-bg, #fff);
+}
+
+.bases-map-view .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.bases-map-view .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.bases-map-view .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+	border-bottom-color: var(--rp-c-bg, #fff);
+}
+
+.bases-map-view .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+	border-right-color: var(--rp-c-bg, #fff);
+}
+
+.bases-map-view .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+	border-left-color: var(--rp-c-bg, #fff);
+}
+
+.bases-map-popup-title {
+	display: block;
+	font-weight: 600;
+}
+
+a.bases-map-popup-title {
+	color: var(--rp-c-link, var(--rp-c-brand, #3b82f6));
+	text-decoration: none;
+}
+
+a.bases-map-popup-title:hover {
+	text-decoration: underline;
+}
+
+.bases-map-popup-properties {
+	display: grid;
+	gap: 0.3rem;
+	margin-top: 0.4rem;
+	padding-top: 0.4rem;
+	border-top: 1px solid var(--bases-border);
+}
+
+.bases-map-popup-property-label {
+	color: var(--bases-muted);
+	font-size: 0.75rem;
+}
+
+.bases-map-view .maplibregl-ctrl-group {
+	border-radius: 6px;
+}
+
+html.dark .bases-map-view .maplibregl-ctrl-group {
+	background: var(--rp-c-bg-soft, #171a21);
+	box-shadow: 0 0 0 1px var(--bases-border);
+}
+
+html.dark .bases-map-view .maplibregl-ctrl-group button + button {
+	border-top-color: var(--bases-border);
+}
+
+/* MapLibre draws its control icons dark; invert them on a dark surface. */
+html.dark .bases-map-view .maplibregl-ctrl-icon {
+	filter: invert(1) hue-rotate(180deg);
+}
+
+html.dark .bases-map-view .maplibregl-ctrl-attrib {
+	background: rgb(15 17 21 / 75%);
+	color: var(--rp-c-text-2, #a0a7b4);
+}
+
+html.dark .bases-map-view .maplibregl-ctrl-attrib a {
+	color: var(--rp-c-text-1, #e5e7eb);
+}
+
+html.dark .bases-map-view .maplibregl-ctrl-attrib-button {
+	filter: invert(1);
+}

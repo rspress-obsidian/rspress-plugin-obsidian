@@ -1,0 +1,87 @@
+filters:
+  and:
+    - file.inFolder("Plugins/Bases/Books")
+    - file.ext == "md"
+formulas:
+  pages_per_star: (pages / rating).round(1)
+  published_year: published.year
+  status_label: if(read, "Read", "To read")
+  overdue: if(!read && due < today(), "Overdue", "")
+properties:
+  rating:
+    displayName: Stars
+  formula.status_label:
+    displayName: Status
+  file.name:
+    displayName: Title
+summaries:
+  topRated: values.filter(value >= 4).length
+views:
+  - type: table
+    name: Catalogue
+    order:
+      - file.name
+      - author
+      - genre
+      - rating
+      - pages
+      - formula.pages_per_star
+      - read
+      - published
+      - file.tags
+    sort:
+      - property: rating
+        direction: DESC
+    summaries:
+      rating: Average
+      pages: Sum
+      read: Checked
+      published: Earliest
+      genre: Unique
+    columnSize:
+      file.name: 180
+  - type: table
+    name: By genre
+    order:
+      - file.name
+      - rating
+      - formula.status_label
+    groupBy:
+      property: genre
+      direction: ASC
+    summaries:
+      rating: topRated
+  - type: cards
+    name: Shelf
+    order:
+      - file.name
+      - author
+      - rating
+      - formula.published_year
+    image: note.cover
+    imageFit: cover
+    imageAspectRatio: 1.4
+    cardSize: 180
+  - type: list
+    name: Reading order
+    order:
+      - file.name
+      - author
+      - formula.status_label
+      - formula.overdue
+    sort:
+      - property: published
+        direction: ASC
+  - type: kanban
+    name: Board
+    order:
+      - file.name
+      - author
+    groupBy:
+      property: shelf
+      direction: ASC
+    groupOrder:
+      - To read
+      - Reading
+      - Finished
+      - null
