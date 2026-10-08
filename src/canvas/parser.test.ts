@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import fc from "fast-check";
-import { CanvasParseError, parseCanvas } from "./parser";
+import { CanvasParseError, parseCanvas, serializeCanvas } from "./parser";
 import type { CanvasEdgeData, CanvasNode } from "./types";
 
 const validCanvas = JSON.stringify({
@@ -429,7 +429,10 @@ test("treats label and background as optional on group nodes", () => {
 	}
 });
 
-test("parses enriched file node fields", () => {
+test("drops publisher-only fields from a source board", () => {
+	// Fields earlier versions wrote into published boards (and editor exports),
+	// and the current build-time ones: a source file must not be able to steer
+	// what the published page loads.
 	const json = JSON.stringify({
 		nodes: [
 			{
@@ -443,17 +446,120 @@ test("parses enriched file node fields", () => {
 				fileContent: "Hello world content",
 				imageUrl: "data:image/png;base64,123",
 				isImage: true,
+				resolvedFile: { kind: "image", key: "evil.png" },
 			},
 		],
 		edges: [],
+		assets: { "evil.png": "https://evil.example/x.png" },
+		notes: { "a.md": "x" },
+		links: { "": {} },
 	});
 	const data = parseCanvas(json);
-	const node = data.nodes[0] as CanvasNode;
-	if (node.type === "file") {
-		expect(node.fileContent).toBe("Hello world content");
-		expect(node.imageUrl).toBe("data:image/png;base64,123");
-		expect(node.isImage).toBe(true);
-	}
+	expect(Object.keys(data.nodes[0] ?? {}).sort()).toEqual(
+		["file", "height", "id", "type", "width", "x", "y"].sort(),
+	);
+	expect(data.assets).toBeUndefined();
+	expect(data.notes).toBeUndefined();
+	expect(data.links).toBeUndefined();
+});
+
+test("keeps unknown node, edge and document fields for a lossless round trip", () => {
+	const source = {
+		metadata: { version: "1.0" },
+		nodes: [
+			{
+				id: "a",
+				type: "text",
+				x: 0,
+				y: 0,
+				width: 10,
+				height: 10,
+				text: "A",
+				styleAttributes: { shape: "pill" },
+				extra: 1,
+			},
+			{ id: "b", type: "text", x: 20, y: 0, width: 10, height: 10, text: "B" },
+		],
+		edges: [{ id: "e", fromNode: "a", toNode: "b", styleAttributes: { path: "dotted" } }],
+	};
+	const data = parseCanvas(JSON.stringify(source));
+	expect(JSON.parse(serializeCanvas(data))).toEqual(source);
+});
+
+test("reads the build-time fields of a published board when asked to", () => {
+	const json = JSON.stringify({
+		nodes: [
+			{
+				id: "n1",
+				type: "file",
+				x: 0,
+				y: 0,
+				width: 1,
+				height: 1,
+				file: "pic.png",
+				resolvedFile: { kind: "image", key: "pic.png" },
+			},
+			{ id: "g", type: "group", x: 0, y: 0, width: 1, height: 1, resolvedBackground: "bg.png" },
+		],
+		assets: { "pic.png": "/vault/pic.png" },
+		notes: { "a.md": "hello" },
+		links: { "": { Loose: { href: "/vault/loose", label: "Loose" } } },
+	});
+	const data = parseCanvas(json, { enriched: true });
+	expect(data.nodes[0]).toMatchObject({ resolvedFile: { kind: "image", key: "pic.png" } });
+	expect(data.nodes[1]).toMatchObject({ resolvedBackground: "bg.png" });
+	expect(data.assets).toEqual({ "pic.png": "/vault/pic.png" });
+	expect(data.notes).toEqual({ "a.md": "hello" });
+	expect(data.links?.[""]?.Loose).toEqual({ href: "/vault/loose", label: "Loose" });
+	// An unknown kind is a malformed node, reported and skipped.
+	const bad = parseCanvas(
+		JSON.stringify({
+			nodes: [
+				{
+					id: "x",
+					type: "file",
+					x: 0,
+					y: 0,
+					width: 1,
+					height: 1,
+					file: "a",
+					resolvedFile: { kind: "zip" },
+				},
+			],
+		}),
+		{ enriched: true },
+	);
+	expect(bad.problems?.[0]).toMatch(/Invalid node\.resolvedFile\.kind: zip/);
+});
+
+test("export strips every build-time field and map", () => {
+	const published = parseCanvas(
+		JSON.stringify({
+			nodes: [
+				{
+					id: "n1",
+					type: "file",
+					x: 0,
+					y: 0,
+					width: 1,
+					height: 1,
+					file: "pic.png",
+					resolvedFile: { kind: "image", key: "pic.png" },
+				},
+			],
+			edges: [],
+			assets: { "pic.png": "/vault/pic.png" },
+			notes: { "a.md": "hello" },
+		}),
+		{ enriched: true },
+	);
+	const exported = JSON.parse(serializeCanvas(published));
+	expect(exported).toEqual({
+		nodes: [{ id: "n1", type: "file", x: 0, y: 0, width: 1, height: 1, file: "pic.png" }],
+		edges: [],
+	});
+	// Re-importing the export is the source board again.
+	expect(serializeCanvas(parseCanvas(serializeCanvas(published)))).toBe(serializeCanvas(published));
 });
 
 test("parses real Demo.canvas file", async () => {
@@ -594,51 +700,6 @@ test("skips a non-string optional node field", () => {
 	).toMatch(/Expected node\.subpath to be a string, got number$/);
 });
 
-test("skips non-boolean media flags on file nodes", () => {
-	const flags = ["isImage", "isVideo", "isAudio", "isPdf", "isError"];
-	for (const flag of flags) {
-		const fileNode = {
-			id: "f1",
-			type: "file",
-			x: 0,
-			y: 0,
-			width: 1,
-			height: 1,
-			file: "a.md",
-			[flag]: "yes",
-		};
-		expect(firstProblem(JSON.stringify({ nodes: [fileNode] }))).toMatch(
-			new RegExp(`Expected node\\.${flag} to be a boolean$`),
-		);
-	}
-});
-
-test("keeps explicit false media flags on file nodes", () => {
-	const fileNode = {
-		id: "f1",
-		type: "file",
-		x: 0,
-		y: 0,
-		width: 1,
-		height: 1,
-		file: "a.md",
-		isImage: false,
-		isVideo: false,
-		isAudio: false,
-		isPdf: false,
-		isError: false,
-	};
-	const node = parseCanvas(JSON.stringify({ nodes: [fileNode] })).nodes[0];
-	if (node?.type !== "file") throw new Error("expected a file node");
-	expect([node.isImage, node.isVideo, node.isAudio, node.isPdf, node.isError]).toEqual([
-		false,
-		false,
-		false,
-		false,
-		false,
-	]);
-});
-
 test("skips an unknown group backgroundStyle", () => {
 	const group = {
 		id: "g1",
@@ -705,16 +766,17 @@ test("carries the offending ids so a broken file can be fixed", () => {
 	);
 });
 
-test("parses asset and note maps", () => {
+test("parses asset and note maps of a published board", () => {
 	const data = parseCanvas(
 		canvas({ assets: { "img.png": "https://cdn/img.png" }, notes: { "a.md": "hello" } }),
+		{ enriched: true },
 	);
 	expect(data.assets).toEqual({ "img.png": "https://cdn/img.png" });
 	expect(data.notes).toEqual({ "a.md": "hello" });
 });
 
 test("leaves asset and note maps undefined when the file omits them", () => {
-	const data = parseCanvas(canvas({}));
+	const data = parseCanvas(canvas({}), { enriched: true });
 	expect(data.assets).toBeUndefined();
 	expect(data.notes).toBeUndefined();
 });
@@ -722,16 +784,17 @@ test("leaves asset and note maps undefined when the file omits them", () => {
 // The asset and note maps are document-level, not per-item, so a wrong map is
 // still a hard error — there is no partial reading of it worth rendering.
 test("rejects malformed asset and note maps", () => {
+	const enriched = { enriched: true };
 	for (const assets of ["", 3, null, []]) {
-		expect(() => parseCanvas(canvas({ assets }))).toThrow(/assets must be an object/);
+		expect(() => parseCanvas(canvas({ assets }), enriched)).toThrow(/assets must be an object/);
 	}
 	for (const notes of ["", 3, null, []]) {
-		expect(() => parseCanvas(canvas({ notes }))).toThrow(/notes must be an object/);
+		expect(() => parseCanvas(canvas({ notes }), enriched)).toThrow(/notes must be an object/);
 	}
-	expect(() => parseCanvas(canvas({ assets: { "img.png": 5 } }))).toThrow(
+	expect(() => parseCanvas(canvas({ assets: { "img.png": 5 } }), enriched)).toThrow(
 		/Expected assets\.img\.png to be a string, got number/,
 	);
-	expect(() => parseCanvas(canvas({ notes: { "a.md": 5 } }))).toThrow(
+	expect(() => parseCanvas(canvas({ notes: { "a.md": 5 } }), enriched)).toThrow(
 		/Expected notes\.a\.md to be a string, got number/,
 	);
 });

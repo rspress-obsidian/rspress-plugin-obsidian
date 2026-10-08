@@ -1,6 +1,21 @@
 import { expect, test } from "bun:test";
 import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../shared/media-exts";
-import { renderMarkdown } from "./markdown";
+import type { CanvasLinks } from "../types";
+import { collectMarkdownTargets, renderMarkdown } from "./markdown";
+
+/** Parse rendered card HTML the way the browser will, through `innerHTML`. */
+function dom(html: string): HTMLElement {
+	const root = document.createElement("div");
+	root.innerHTML = html;
+	return root;
+}
+
+/** Every attribute name in the tree, for asserting no event handler slipped in. */
+function attributeNames(root: Element): string[] {
+	return [root, ...root.querySelectorAll("*")].flatMap((element) =>
+		[...element.attributes].map((attribute) => attribute.name),
+	);
+}
 
 test("renders plain text as paragraph", () => {
 	const html = renderMarkdown("Hello world");
@@ -66,12 +81,14 @@ test("renders images", () => {
 
 test("renders wiki-links without display text", () => {
 	const html = renderMarkdown("[[My Note]]");
-	expect(html).toContain('<a href="/My Note" class="wiki-link">My Note</a>');
+	expect(html).toContain('<a href="/My Note" class="wiki-link" data-href="/My Note">My Note</a>');
 });
 
 test("renders wiki-links with display text", () => {
 	const html = renderMarkdown("[[My Note|Click Here]]");
-	expect(html).toContain('<a href="/My Note" class="wiki-link">Click Here</a>');
+	expect(html).toContain(
+		'<a href="/My Note" class="wiki-link" data-href="/My Note">Click Here</a>',
+	);
 });
 
 test("renders horizontal rules", () => {
@@ -184,7 +201,9 @@ test("resolves wiki-link aliases, headings, and prefixes", () => {
 	const html = renderMarkdown("[[Notes/Plan#Next Steps|Read plan]]", {
 		fileRoutePrefix: "/docs",
 	});
-	expect(html).toContain('<a href="/docs/Notes/Plan#next-steps" class="wiki-link">Read plan</a>');
+	expect(html).toContain(
+		'<a href="/docs/Notes/Plan#next-steps" class="wiki-link" data-href="/docs/Notes/Plan#next-steps">Read plan</a>',
+	);
 });
 
 test("renders Obsidian media embeds from the asset map", () => {
@@ -374,10 +393,37 @@ test("embeds only the section a subpath names", () => {
 
 test("renders Obsidian callouts", () => {
 	const html = renderMarkdown("> [!note] A note\n> Body text");
-	expect(html).toContain("canvas-callout canvas-callout-note");
-	expect(html).toContain("canvas-callout-title");
-	expect(html).toContain("A note");
-	expect(html).toContain("Body text");
+	expect(html).toContain('class="canvas-callout canvas-callout-note" data-callout="note"');
+	expect(html).toContain('<div class="canvas-callout-title">A note</div>');
+	expect(html).toContain('<div class="canvas-callout-body"><p>Body text</p>');
+});
+
+test("renders hyphenated callout types and inline markdown in the title", () => {
+	const root = dom(renderMarkdown("> [!my-custom_type2] **Bold** [[Note]]\n> Body"));
+	const callout = root.querySelector("div.canvas-callout");
+	expect(callout?.className).toBe("canvas-callout canvas-callout-my-custom_type2");
+	expect(callout?.getAttribute("data-callout")).toBe("my-custom_type2");
+	expect(callout?.querySelector(".canvas-callout-title strong")?.textContent).toBe("Bold");
+	expect(callout?.querySelector(".canvas-callout-title a.wiki-link")?.textContent).toBe("Note");
+	expect(callout?.querySelector(".canvas-callout-body")?.textContent).toContain("Body");
+});
+
+test("renders foldable callouts as details, closed for - and open for +", () => {
+	const closed = dom(renderMarkdown("> [!faq]- Why?\n> Because."));
+	const details = closed.querySelector("details.canvas-callout.canvas-callout-faq");
+	expect(details).not.toBeNull();
+	expect(details?.hasAttribute("open")).toBe(false);
+	expect(details?.querySelector("summary.canvas-callout-title")?.textContent).toBe("Why?");
+	expect(details?.querySelector(".canvas-callout-body")?.textContent).toContain("Because.");
+
+	const open = dom(renderMarkdown("> [!faq]+ Why?\n> Because."));
+	expect(open.querySelector("details")?.hasAttribute("open")).toBe(true);
+});
+
+test("defaults a callout title to its type", () => {
+	expect(renderMarkdown("> [!warning]\n> Careful")).toContain(
+		'<div class="canvas-callout-title">warning</div>',
+	);
 });
 
 test("keeps plain blockquotes as blockquotes", () => {
@@ -387,9 +433,20 @@ test("keeps plain blockquotes as blockquotes", () => {
 });
 
 test("renders inline tags", () => {
-	const html = renderMarkdown("see #hello/world and #plain");
-	expect(html).toContain('<span class="canvas-tag">#hello/world</span>');
-	expect(html).toContain('<span class="canvas-tag">#plain</span>');
+	const html = renderMarkdown("see #hello/world and #Plain");
+	expect(html).toContain('<span class="canvas-tag" data-tag="hello/world">#hello/world</span>');
+	expect(html).toContain('<span class="canvas-tag" data-tag="plain">#Plain</span>');
+});
+
+test("takes tags only from prose, never from links, code or numbers", () => {
+	const root = dom(
+		renderMarkdown(
+			"[[#Heading]] `#code` [x](https://e.com/#frag) [#inlink](https://e.com) #1984 a#b #real",
+		),
+	);
+	const tags = [...root.querySelectorAll(".canvas-tag")].map((tag) => tag.textContent);
+	expect(tags).toEqual(["#real"]);
+	expect(root.querySelector("a.wiki-link")?.textContent).toBe("#Heading");
 });
 
 test("does not tagify code spans or code fences", () => {
@@ -401,13 +458,28 @@ test("does not tagify code spans or code fences", () => {
 	expect(fence).not.toContain("canvas-tag");
 });
 
-test("renders inline and display math", () => {
-	const inline = renderMarkdown("energy $E = mc^2$ here");
-	expect(inline).toContain("canvas-math");
-	expect(inline).toContain("katex");
+test("emits math placeholders for the client to typeset", () => {
+	const root = dom(
+		renderMarkdown("energy $E = mc^2$ here, \\$5 and $6, `$x$`\n\n$$\n\\frac{a}{b}\n$$"),
+	);
+	const inline = root.querySelector("span.canvas-math");
+	expect(inline?.getAttribute("data-tex")).toBe("E = mc^2");
+	expect(inline?.textContent).toBe("E = mc^2");
+	const display = root.querySelector("div.canvas-math.canvas-math-display");
+	expect(display?.getAttribute("data-tex")).toBe("\\frac{a}{b}");
+	expect(display?.getAttribute("data-display")).toBe("true");
+	expect(root.querySelectorAll(".canvas-math")).toHaveLength(2);
+	expect(root.textContent).toContain("$5 and $6");
+	expect(root.querySelector("code")?.textContent).toBe("$x$");
+	// Typesetting is the client's job; the renderer never pulls KaTeX in.
+	expect(root.innerHTML).not.toContain("katex");
+});
 
-	const display = renderMarkdown("$$\nE = mc^2\n$$");
-	expect(display).toContain("canvas-math-display");
+test("keeps TeX inert inside its placeholder", () => {
+	const root = dom(renderMarkdown('$\\text{<img src=x onerror=alert(1)>}$ and $$"><b>$$'));
+	expect(root.querySelector("img")).toBeNull();
+	expect(attributeNames(root).some((name) => name.startsWith("on"))).toBe(false);
+	expect(root.querySelectorAll(".canvas-math")).toHaveLength(2);
 });
 
 test("renders footnotes", () => {
@@ -489,4 +561,259 @@ test("embeds only the block a `^id` subpath names", () => {
 	expect(block).toContain("The wanted block");
 	expect(block).not.toContain("Not wanted.");
 	expect(block).not.toContain("Intro paragraph.");
+});
+
+test("renders allowlisted attribute-less HTML and escapes everything else", () => {
+	const root = dom(
+		renderMarkdown(
+			"<u>under</u> H<sub>2</sub>O <kbd>Ctrl</kbd> line<br>break<br/> <img src=x onerror=alert(1)> <b class=x>b</b> <!-- <b>c</b> -->",
+		),
+	);
+	expect(root.querySelector("u")?.textContent).toBe("under");
+	expect(root.querySelector("sub")?.textContent).toBe("2");
+	expect(root.querySelector("kbd")?.textContent).toBe("Ctrl");
+	expect(root.querySelectorAll("br").length).toBeGreaterThanOrEqual(2);
+	expect(root.querySelector("img")).toBeNull();
+	expect(root.querySelector("b")).toBeNull();
+	expect(root.textContent).toContain("<img src=x onerror=alert(1)>");
+	expect(root.textContent).toContain("<b class=x>");
+	expect(root.textContent).toContain("<!-- <b>c</b> -->");
+	expect(attributeNames(root).some((name) => name.startsWith("on"))).toBe(false);
+});
+
+test("sanitizes a fence language and keeps mermaid source escaped", () => {
+	const html = renderMarkdown('```js"><img src=x onerror=alert(1)>\nx\n```');
+	expect(dom(html).querySelector("img")).toBeNull();
+	expect(dom(html).querySelector("code")?.className).toBe("language-jsimg");
+
+	const mermaid = dom(
+		renderMarkdown('```mermaid\ngraph TD\nA["<img src=x onerror=alert(1)>"]-->B\n```'),
+	);
+	const block = mermaid.querySelector("pre.obsidian-mermaid-block");
+	expect(block?.getAttribute("data-code")).toContain("<img src=x onerror=alert(1)>");
+	expect(mermaid.querySelector("img")).toBeNull();
+});
+
+// Regression: the old renderer substituted built HTML into placeholder tokens
+// after marked ran, so HTML could land inside an attribute marked had built.
+test("never lets a wikilink inside image alt text build markup", () => {
+	const root = dom(renderMarkdown("![x [[a onerror=alert(1) b]]](https://e.invalid/x.png)"));
+	expect([...root.querySelectorAll("p *")].map((element) => element.tagName)).toEqual(["IMG"]);
+	const image = root.querySelector("img");
+	expect(image?.getAttribute("src")).toBe("https://e.invalid/x.png");
+	expect(image?.getAttribute("alt")).toBe("x a onerror=alert(1) b");
+	expect(attributeNames(root).some((name) => name.startsWith("on"))).toBe(false);
+});
+
+test("keeps wikilinks, placeholder-shaped URLs and code alt text inert", () => {
+	const linked = dom(
+		renderMarkdown("[[a onmouseover=alert(1) b]] [click](https://e.com/OBS_CANVAS_REPLACEMENT_0)"),
+	);
+	const anchors = [...linked.querySelectorAll("a")];
+	expect(anchors).toHaveLength(2);
+	expect(anchors[0]?.textContent).toBe("a onmouseover=alert(1) b");
+	expect(anchors[1]?.getAttribute("href")).toBe("https://e.com/OBS_CANVAS_REPLACEMENT_0");
+	expect(anchors[1]?.textContent).toBe("click");
+	expect(attributeNames(linked).some((name) => name.startsWith("on"))).toBe(false);
+
+	const mermaid = dom(renderMarkdown("[[Note]]\n\n```mermaid\ngraph TD\nA-->B\n```"));
+	expect(mermaid.querySelector("a.wiki-link")?.textContent).toBe("Note");
+	expect(mermaid.querySelector("pre.obsidian-mermaid-block")?.getAttribute("data-code")).toBe(
+		"graph TD\nA-->B",
+	);
+
+	const code = dom(renderMarkdown("![`code`](x.png)", { assets: { "x.png": "/x.png" } }));
+	expect([...code.querySelectorAll("p *")].map((element) => element.tagName)).toEqual(["IMG"]);
+	expect(code.querySelector("img")?.getAttribute("alt")).toBe("code");
+});
+
+test("renders many wikilinks and code spans in order", () => {
+	const links = Array.from({ length: 12 }, (_, index) => `[[Note ${index}]]`).join(" ");
+	const anchors = [...dom(renderMarkdown(links)).querySelectorAll("a.wiki-link")];
+	expect(anchors.map((anchor) => anchor.getAttribute("href"))).toEqual(
+		Array.from({ length: 12 }, (_, index) => `/Note ${index}`),
+	);
+	expect(anchors.map((anchor) => anchor.textContent)).toEqual(
+		Array.from({ length: 12 }, (_, index) => `Note ${index}`),
+	);
+
+	const spans = Array.from({ length: 11 }, (_, index) => `\`c${index}\``).join(" ");
+	const codes = [...dom(renderMarkdown(spans)).querySelectorAll("code")];
+	expect(codes.map((code) => code.textContent)).toEqual(
+		Array.from({ length: 11 }, (_, index) => `c${index}`),
+	);
+});
+
+const LINKS: CanvasLinks = {
+	"": {
+		Loose: { href: "/vault/notes/loose", label: "Loose" },
+		"pic.png": { asset: "vault/assets/pic.png" },
+		Gone: {},
+		"Draft|x": {},
+		rel: { href: "/vault/card-rel" },
+		"sub/page.md": { href: "/vault/sub/page" },
+		"img/photo.png": { asset: "vault/img/photo.png" },
+		Nested: { note: "vault/notes/nested.md", href: "/vault/notes/nested" },
+	},
+	"vault/notes/nested.md": {
+		rel: { href: "/vault/notes/rel" },
+	},
+};
+const ASSETS = {
+	"vault/assets/pic.png": "/vault/assets/pic.png",
+	"vault/img/photo.png": "/vault/img/photo.png",
+};
+
+test("resolves wikilinks and embeds through the build-time links map", () => {
+	const root = dom(
+		renderMarkdown("[[Loose]] [[Loose|alias]] ![[pic.png]] [[Gone]]", {
+			links: LINKS,
+			assets: ASSETS,
+			base: "/docs/",
+		}),
+	);
+	const [loose, aliased] = root.querySelectorAll("a.wiki-link");
+	expect(loose?.getAttribute("href")).toBe("/docs/vault/notes/loose");
+	expect(loose?.getAttribute("data-href")).toBe("/vault/notes/loose");
+	expect(loose?.textContent).toBe("Loose");
+	expect(aliased?.textContent).toBe("alias");
+	expect(root.querySelector("img.obsidian-embed-image")?.getAttribute("src")).toBe(
+		"/docs/vault/assets/pic.png",
+	);
+	const unresolved = root.querySelector("span.canvas-unresolved-link");
+	expect(unresolved?.textContent).toBe("Gone");
+	expect(root.querySelectorAll("a")).toHaveLength(2);
+});
+
+test("resolves markdown links and images through the links map", () => {
+	const root = dom(
+		renderMarkdown(
+			"[page](sub/page.md) ![photo](img/photo.png) [ext](https://e.com/x) [none](Draft%7Cx)",
+			{
+				links: { "": { ...LINKS[""], "Draft|x": {} } },
+				assets: ASSETS,
+				base: "/docs/",
+			},
+		),
+	);
+	const anchors = [...root.querySelectorAll("a")];
+	expect(anchors.map((anchor) => anchor.getAttribute("href"))).toEqual([
+		"/docs/vault/sub/page",
+		"https://e.com/x",
+	]);
+	expect(root.querySelector("img")?.getAttribute("src")).toBe("/docs/vault/img/photo.png");
+	expect(root.querySelector("span.canvas-unresolved-link")?.textContent).toBe("none");
+});
+
+test("resolves a relative target in the scope it was written in", () => {
+	expect(
+		dom(renderMarkdown("[[rel]]", { links: LINKS }))
+			.querySelector("a")
+			?.getAttribute("href"),
+	).toBe("/vault/card-rel");
+	expect(
+		dom(renderMarkdown("[[rel]]", { links: LINKS, scope: "vault/notes/nested.md" }))
+			.querySelector("a")
+			?.getAttribute("href"),
+	).toBe("/vault/notes/rel");
+
+	// A transcluded note renders in its own scope, not the card's.
+	const root = dom(
+		renderMarkdown("![[Nested]]", {
+			links: LINKS,
+			notes: { "vault/notes/nested.md": "Inside [[rel]]" },
+		}),
+	);
+	expect(root.querySelector(".obsidian-embed-note a")?.getAttribute("href")).toBe(
+		"/vault/notes/rel",
+	);
+});
+
+test("transcludes a nested section with its fence intact", () => {
+	const notes = {
+		"deep.md": [
+			"# Deep",
+			"",
+			"## Child",
+			"",
+			"```md",
+			"# not a heading",
+			"```",
+			"",
+			"### Grand",
+			"",
+			"Nested body.",
+			"",
+			"## Sibling",
+			"",
+			"Not wanted.",
+		].join("\n"),
+	};
+	const root = dom(renderMarkdown("![[Deep#Child]]", { notes }));
+	const embed = root.querySelector(".obsidian-embed-note");
+	expect(embed?.parentElement).toBe(root);
+	expect(embed?.querySelector("pre code")?.textContent).toBe("# not a heading\n");
+	expect(embed?.querySelector("h3")?.textContent).toBe("Grand");
+	expect(embed?.querySelectorAll("h1")).toHaveLength(0);
+	expect(embed?.textContent).toContain("Nested body.");
+	expect(embed?.textContent).not.toContain("Not wanted.");
+});
+
+test("prefixes footnote ids with the card's idPrefix", () => {
+	const root = dom(renderMarkdown("A[^n]\n\n[^n]: Body", { idPrefix: "card-7-" }));
+	expect(root.querySelector("sup")?.id).toBe("card-7-canvas-fnref-1");
+	expect(root.querySelector("sup a")?.getAttribute("href")).toBe("#card-7-canvas-fn-1");
+	expect(root.querySelector("li")?.id).toBe("card-7-canvas-fn-1");
+	expect(root.querySelector(".canvas-footnote-backref")?.getAttribute("href")).toBe(
+		"#card-7-canvas-fnref-1",
+	);
+});
+
+test("finds a footnote definition after a fence and links inside an inline footnote", () => {
+	const root = dom(
+		renderMarkdown("Ref[^a] and ^[see [[Note]]]\n\n```\n[^a]: not a def\n```\n\n[^a]: Real def"),
+	);
+	const items = [...root.querySelectorAll(".canvas-footnotes li")];
+	expect(items.map((item) => item.textContent?.replace(" ↩", ""))).toEqual([
+		"Real def",
+		"see Note",
+	]);
+	expect(items[1]?.querySelector("a.wiki-link")?.getAttribute("href")).toBe("/Note");
+	expect(root.querySelector("pre code")?.textContent).toContain("[^a]: not a def");
+});
+
+test("leaves a reference without a definition as text", () => {
+	const html = renderMarkdown("Text[^missing]");
+	expect(html).toContain("[^missing]");
+	expect(html).not.toContain("canvas-footnotes");
+});
+
+test("collects wikilink and vault-relative targets, skipping code and math", () => {
+	const targets = collectMarkdownTargets(
+		[
+			"[[A#b|c]] ![[p.png|300]] [x](rel/y.md) ![i](https://e.com/i.png) [y](#f) [m](mailto:a@b.c)",
+			"`[[no]]` $[[nomath]]$ ![d](data:image/png;base64,AA) [p](//host/x)",
+			"",
+			"> [!note] [[Title]]",
+			"> [[Body]] ![img](my%20image.png)",
+			"",
+			"^[[[Inline]]] x[^1] ==[[Hi]]==",
+			"",
+			"```",
+			"[[fenced]]",
+			"```",
+			"",
+			"[^1]: [[Def]]",
+		].join("\n"),
+	);
+	expect(targets.wikilinks).toEqual([
+		{ target: "A#b", embed: false },
+		{ target: "p.png", embed: true },
+		{ target: "Title", embed: false },
+		{ target: "Body", embed: false },
+		{ target: "Inline", embed: false },
+		{ target: "Hi", embed: false },
+		{ target: "Def", embed: false },
+	]);
+	expect(targets.urls).toEqual(["rel/y.md", "my%20image.png"]);
 });

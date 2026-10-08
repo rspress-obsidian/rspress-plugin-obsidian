@@ -12,6 +12,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { memo } from "react";
 import type { CanvasData, CanvasFileData } from "../types";
 import type { MarkdownOptions } from "../utils/markdown";
 
@@ -44,12 +45,36 @@ mock.module("../../mermaid/blocks", () => ({
 	},
 }));
 
+// Count the renders that get past each memo: the wrappers compare props the
+// same way the real components do, so a render counted here is one the real
+// component would also have done.
+const cardRenders: string[] = [];
+const edgeRenders: string[] = [];
+const nodeModule = { ...(await import("./CanvasNode")) };
+const edgeModule = { ...(await import("./CanvasEdge")) };
+mock.module("./CanvasNode", () => ({
+	...nodeModule,
+	CanvasNodeComponent: memo((props: Parameters<typeof nodeModule.CanvasNodeComponent>[0]) => {
+		cardRenders.push(props.node.id);
+		return <nodeModule.CanvasNodeComponent {...props} />;
+	}),
+}));
+mock.module("./CanvasEdge", () => ({
+	...edgeModule,
+	CanvasEdge: memo((props: Parameters<typeof edgeModule.CanvasEdge>[0]) => {
+		edgeRenders.push(props.edge.id);
+		return <edgeModule.CanvasEdge {...props} />;
+	}),
+}));
+
 const { CanvasRenderer } = await import("./CanvasRenderer");
-const { CanvasNodeComponent } = await import("./CanvasNode");
+const { CanvasNodeComponent } = nodeModule;
 
 afterEach(() => {
 	cleanup();
 	parsed.length = 0;
+	cardRenders.length = 0;
+	edgeRenders.length = 0;
 	mermaid.scans = 0;
 	mermaid.retained = 0;
 	mermaid.released = 0;
@@ -67,12 +92,15 @@ function board(): CanvasData {
 				width: 200,
 				height: 100,
 				file: "Note.md",
-				fileContent: "# Beta",
+				resolvedFile: { kind: "note", key: "note.md" },
 			},
+			{ id: "c", type: "text", x: 600, y: 0, width: 200, height: 100, text: "Gamma" },
 		],
-		edges: [],
-		assets: { "note.md": "/note.md" },
-		notes: { "note.md": "body" },
+		edges: [
+			{ id: "ab", fromNode: "a", toNode: "b" },
+			{ id: "bc", fromNode: "b", toNode: "c" },
+		],
+		notes: { "note.md": "# Beta" },
 	};
 }
 
@@ -84,24 +112,40 @@ function pick<T extends Element>(container: HTMLElement, selector: string): T {
 
 test("a drag re-parses no card's markdown", () => {
 	const { container } = render(<CanvasRenderer data={board()} editable />);
-	expect(parsed).toEqual(["Alpha", "# Beta"]);
+	expect(parsed).toEqual(["Alpha", "# Beta", "Gamma"]);
 
 	const viewport = pick<HTMLElement>(container, ".canvas-viewport");
-	const wrapper = pick<HTMLElement>(container, ".canvas-editor-node-wrapper");
+	const wrapper = pick<HTMLElement>(container, ".canvas-node-frame");
 
 	fireEvent.pointerDown(wrapper, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
 	fireEvent.pointerMove(viewport, { clientX: 60, clientY: 40, pointerId: 1 });
 	fireEvent.pointerMove(viewport, { clientX: 120, clientY: 90, pointerId: 1 });
 	expect(wrapper.style.left).toBe("120px");
 
-	// The dragged card moved and the other one was untouched. Neither re-parsed:
+	// The dragged card moved and the others were untouched. None re-parsed:
 	// a drag patches a single node object and leaves assets/notes/edges alone.
-	expect(parsed).toEqual(["Alpha", "# Beta"]);
+	expect(parsed).toEqual(["Alpha", "# Beta", "Gamma"]);
+});
+
+test("a drag frame re-renders only the moving card and the edges touching it", () => {
+	const { container } = render(<CanvasRenderer data={board()} editable />);
+	const viewport = pick<HTMLElement>(container, ".canvas-viewport");
+	const wrapper = pick<HTMLElement>(container, ".canvas-node-frame");
+	fireEvent.pointerDown(wrapper, { button: 0, clientX: 0, clientY: 0, pointerId: 3 });
+	fireEvent.pointerMove(viewport, { clientX: 60, clientY: 40, pointerId: 3 });
+	cardRenders.length = 0;
+	edgeRenders.length = 0;
+
+	fireEvent.pointerMove(viewport, { clientX: 90, clientY: 70, pointerId: 3 });
+	fireEvent.pointerMove(viewport, { clientX: 120, clientY: 90, pointerId: 3 });
+
+	expect(new Set(cardRenders)).toEqual(new Set(["a"]));
+	expect(new Set(edgeRenders)).toEqual(new Set(["ab"]));
 });
 
 test("reuses a file card's markdown while its node, assets and notes are unchanged", () => {
 	const assets = { "note.md": "/note.md" };
-	const notes = { "note.md": "body" };
+	const notes = { "note.md": "# Hello" };
 	const node: CanvasFileData = {
 		id: "f",
 		type: "file",
@@ -110,7 +154,7 @@ test("reuses a file card's markdown while its node, assets and notes are unchang
 		width: 200,
 		height: 100,
 		file: "Note.md",
-		fileContent: "# Hello",
+		resolvedFile: { kind: "note", key: "note.md" },
 	};
 
 	const { rerender } = render(<CanvasNodeComponent node={node} assets={assets} notes={notes} />);
@@ -127,11 +171,11 @@ test("scans for mermaid diagrams on mount and when a card's markdown changes", (
 	expect(mermaid.scans).toBe(1);
 
 	const viewport = pick<HTMLElement>(container, ".canvas-viewport");
-	const wrapper = pick<HTMLElement>(container, ".canvas-editor-node-wrapper");
+	const wrapper = pick<HTMLElement>(container, ".canvas-node-frame");
 	fireEvent.pointerDown(wrapper, { button: 0, clientX: 0, clientY: 0, pointerId: 2 });
 	fireEvent.pointerMove(viewport, { clientX: 60, clientY: 40, pointerId: 2 });
-	fireEvent.pointerUp(wrapper, { pointerId: 2 });
-	fireEvent.mouseEnter(pick<HTMLElement>(container, '[aria-label="Text node"]'));
+	fireEvent.pointerUp(viewport, { pointerId: 2 });
+	fireEvent.pointerEnter(pick<HTMLElement>(container, '[aria-label="Gamma"]'));
 
 	// Coordinates and highlight state do not change any rendered markdown, so the
 	// diagrams already in the DOM are left alone.

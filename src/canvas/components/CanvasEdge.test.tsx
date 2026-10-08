@@ -6,7 +6,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { CanvasEdgeData, CanvasNode } from "../types";
-import { CanvasEdge } from "./CanvasEdge";
+import { CanvasEdge, markerIds } from "./CanvasEdge";
 
 // Two non-square nodes so a half-width / half-height mistake changes the geometry.
 const nodeA: CanvasNode = { id: "a", type: "text", x: 0, y: 0, width: 200, height: 60, text: "A" };
@@ -24,6 +24,13 @@ const nodeMap = new Map<string, CanvasNode>([
 	[nodeB.id, nodeB],
 ]);
 
+function endpoints(edge: CanvasEdgeData, nodes: Map<string, CanvasNode>) {
+	const fromNode = nodes.get(edge.fromNode);
+	const toNode = nodes.get(edge.toNode);
+	if (!fromNode || !toNode) throw new Error("test edge names a missing node");
+	return { fromNode, toNode };
+}
+
 const baseEdge: CanvasEdgeData = { id: "e1", fromNode: "a", toNode: "b" };
 
 afterEach(cleanup);
@@ -33,12 +40,13 @@ function renderEdge(
 	props: { isHighlighted?: boolean; isSelected?: boolean; onSelect?: (id: string) => void } = {},
 	nodes: Map<string, CanvasNode> = nodeMap,
 ) {
+	const edge = { ...baseEdge, ...edgeOverrides };
 	const { container } = render(
 		<svg role="img" aria-label="canvas edges">
-			<CanvasEdge edge={{ ...baseEdge, ...edgeOverrides }} nodeMap={nodes} {...props} />
+			<CanvasEdge edge={edge} {...endpoints(edge, nodes)} markerPrefix="m" {...props} />
 		</svg>,
 	);
-	const path = container.querySelector("path");
+	const path = container.querySelector("path.canvas-edge-path");
 	if (!path) throw new Error("CanvasEdge rendered no <path>");
 	const group = container.querySelector<SVGGElement>("g");
 	if (!group) throw new Error("CanvasEdge rendered no <g>");
@@ -69,16 +77,17 @@ test("anchors a bottom-to-top edge (upward curve) to the facing sides", () => {
 	expect(path.getAttribute("d")).toBe("M 100 60 C 100 180, 440 180, 440 300");
 });
 
-test("falls back to node centres when sides are absent, curving rightwards for a rightward edge", () => {
+test("attaches to the facing sides when sides are absent, not the node centres", () => {
+	// b sits mostly below a: |dy| 290 > |dx| 340? no — dx 340 dominates, so
+	// a.right = (200, 30) and b.left = (400, 320), as Obsidian draws it.
 	const { path } = renderEdge();
-	// a centre = (100, 30), b centre = (440, 320); tension 120
-	expect(path.getAttribute("d")).toBe("M 100 30 C 220 30, 320 320, 440 320");
+	expect(path.getAttribute("d")).toBe("M 200 30 C 320 30, 280 320, 400 320");
 });
 
-test("falls back to node centres and curves leftwards when the target sits to the left", () => {
+test("picks the facing sides in reverse when the target sits to the left", () => {
 	const { path } = renderEdge({ fromNode: "b", toNode: "a" });
-	// b centre = (440, 320), a centre = (100, 30); tension 120
-	expect(path.getAttribute("d")).toBe("M 440 320 C 320 320, 220 30, 100 30");
+	// b.left = (400, 320), a.right = (200, 30)
+	expect(path.getAttribute("d")).toBe("M 400 320 C 280 320, 320 30, 200 30");
 });
 
 test("scales the curve tension with short edges instead of always using the cap", () => {
@@ -89,13 +98,6 @@ test("scales the curve tension with short edges instead of always using the cap"
 	const { path } = renderEdge({ fromSide: "right", toSide: "left" }, {}, near);
 	// a.right = (100, 50), b.left = (140, 50); dist 40 -> tension 20, not 120
 	expect(path.getAttribute("d")).toBe("M 100 50 C 120 50, 120 50, 140 50");
-});
-
-test("degenerates a zero-length self edge to a flat path at the node centre", () => {
-	const solo = new Map<string, CanvasNode>([["a", nodeA]]);
-	const { path } = renderEdge({ fromNode: "a", toNode: "a" }, {}, solo);
-	// start == end == (100, 30) -> dist 0 -> tension 0
-	expect(path.getAttribute("d")).toBe("M 100 30 C 100 30, 100 30, 100 30");
 });
 
 test("draws a self loop between opposite sides of the same node", () => {
@@ -109,30 +111,22 @@ test("draws a self loop between opposite sides of the same node", () => {
 	expect(path.getAttribute("d")).toBe("M 200 30 C 300 30, -100 30, 0 30");
 });
 
-test("renders nothing when either endpoint node is missing from the map", () => {
-	const partial = new Map<string, CanvasNode>([["a", nodeA]]);
-	const { container } = render(
-		<CanvasEdge edge={{ ...baseEdge, toNode: "ghost" }} nodeMap={partial} />,
-	);
-	expect(container.querySelector("path")).toBeNull();
-});
-
 test("adds an end marker only when the target end is an arrow", () => {
 	const plain = renderEdge({ fromEnd: "none", toEnd: "none" });
 	expect(plain.path.getAttribute("marker-end")).toBeNull();
 	expect(plain.path.getAttribute("marker-start")).toBeNull();
 
 	const arrowEnd = renderEdge({ toEnd: "arrow" });
-	expect(arrowEnd.path.getAttribute("marker-end")).toBe("url(#arrowhead-e1)");
+	expect(arrowEnd.path.getAttribute("marker-end")).toBe("url(#m-arrow-e1)");
 	expect(arrowEnd.path.getAttribute("marker-start")).toBeNull();
 
 	const arrowStart = renderEdge({ fromEnd: "arrow", toEnd: "none" });
-	expect(arrowStart.path.getAttribute("marker-start")).toBe("url(#arrowhead-start-e1)");
+	expect(arrowStart.path.getAttribute("marker-start")).toBe("url(#m-arrow-start-e1)");
 	expect(arrowStart.path.getAttribute("marker-end")).toBeNull();
 });
 
 test("defaults to an end arrow when toEnd is omitted", () => {
-	expect(renderEdge().path.getAttribute("marker-end")).toBe("url(#arrowhead-e1)");
+	expect(renderEdge().path.getAttribute("marker-end")).toBe("url(#m-arrow-e1)");
 });
 
 test("strokes the edge with its resolved colour", () => {
@@ -144,16 +138,16 @@ test("strokes the edge with its resolved colour", () => {
 	expect(renderEdge().path.getAttribute("stroke")).toBe("var(--canvas-edge-color)");
 });
 
-test("draws a muted hairline edge normally and a brighter, thicker one when highlighted", () => {
+test("draws a muted edge normally and a brighter, thicker one when highlighted", () => {
 	const plain = renderEdge();
 	expect(plain.path.getAttribute("stroke-width")).toBe("2");
-	expect(plain.path.getAttribute("stroke-opacity")).toBe("0.6");
+	expect(plain.path.getAttribute("stroke-opacity")).toBe("0.75");
 	expect(plain.group.getAttribute("class")).toBe("canvas-edge");
 
 	const highlighted = renderEdge({}, { isHighlighted: true });
 	expect(highlighted.path.getAttribute("stroke-width")).toBe("3");
 	expect(highlighted.path.getAttribute("stroke-opacity")).toBe("1");
-	expect(highlighted.group.getAttribute("class")).toBe("canvas-edge-highlighted");
+	expect(highlighted.group.getAttribute("class")).toBe("canvas-edge canvas-edge-highlighted");
 });
 
 test("emphasises the selected edge over the hover highlight", () => {
@@ -163,30 +157,29 @@ test("emphasises the selected edge over the hover highlight", () => {
 
 	const both = renderEdge({}, { isSelected: true, isHighlighted: true });
 	expect(both.path.getAttribute("stroke-width")).toBe("4");
-	expect(both.path.getAttribute("stroke-opacity")).toBe("1");
 });
 
-test("places the label at the edge midpoint, above the line", () => {
-	const { container } = renderEdge({ label: "depends on" });
-	const text = container.querySelector("text");
-	expect(text?.textContent).toBe("depends on");
-	// midpoint of a centre (100, 30) and b centre (440, 320)
-	expect(text?.getAttribute("x")).toBe("270");
-	expect(text?.getAttribute("y")).toBe("167");
-	expect(text?.getAttribute("fill")).toBe("#666666");
-	expect(text?.getAttribute("font-weight")).toBe("400");
-});
-
-test("darkens and bolds the label on a highlighted edge", () => {
-	const { container } = renderEdge({ label: "depends on" }, { isHighlighted: true });
-	const text = container.querySelector("text");
-	expect(text?.getAttribute("fill")).toBe("#333333");
-	expect(text?.getAttribute("font-weight")).toBe("500");
+test("centres the label on the curve's own midpoint, in a themed box that wraps", () => {
+	const { container } = renderEdge({ label: "depends\non" });
+	const box = container.querySelector("foreignObject");
+	const label = container.querySelector(".canvas-edge-label");
+	expect(label?.textContent).toBe("depends\non");
+	// B(0.5) of M 200 30 C 320 30, 280 320, 400 320 is (300, 175); the 240x120
+	// box is centred on it.
+	expect(box?.getAttribute("x")).toBe("180");
+	expect(box?.getAttribute("y")).toBe("115");
+	// Colours come from the theme variables, not hard-coded greys.
+	expect(container.innerHTML).not.toContain("#666666");
 });
 
 test("renders no label element when the edge has no label", () => {
 	const { container } = renderEdge();
-	expect(container.querySelector("text")).toBeNull();
+	expect(container.querySelector(".canvas-edge-label")).toBeNull();
+});
+
+test("prefixes marker ids per renderer instance so two boards on a page never share one", () => {
+	expect(markerIds("one", "edge-1")).not.toEqual(markerIds("two", "edge-1"));
+	expect(markerIds("one", "edge 1").end).toBe("one-arrow-edge_1");
 });
 
 test("selects the edge on click without triggering the parent canvas handler", () => {
@@ -195,11 +188,16 @@ test("selects the edge on click without triggering the parent canvas handler", (
 	const { container } = render(
 		<button type="button" onClick={parentClick}>
 			<svg role="img" aria-label="canvas edges">
-				<CanvasEdge edge={baseEdge} nodeMap={nodeMap} onSelect={onSelect} />
+				<CanvasEdge
+					edge={baseEdge}
+					{...endpoints(baseEdge, nodeMap)}
+					markerPrefix="m"
+					onSelect={onSelect}
+				/>
 			</svg>
 		</button>,
 	);
-	const path = container.querySelector("path");
+	const path = container.querySelector("path.canvas-edge-path");
 	if (!path) throw new Error("CanvasEdge rendered no <path>");
 	fireEvent.click(path);
 	expect(onSelect).toHaveBeenCalledTimes(1);

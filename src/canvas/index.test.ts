@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
 import { findCanvasBoardByPath, setCanvasRoutes } from "../shared/canvas-routes.js";
+import { setPublishedContent } from "../shared/published-content.js";
 import { canvas } from "./index";
+import { parseCanvas } from "./parser";
 import type { CanvasData, CanvasFileData, CanvasGroupData } from "./types";
 
 /**
@@ -42,6 +44,7 @@ afterEach(async () => {
 	// The route registry is process-wide state shared with the markdown
 	// plugin's resolver; a temp vault's routes must not leak into other test files.
 	setCanvasRoutes([]);
+	setPublishedContent(undefined);
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -50,6 +53,7 @@ interface VaultFixture {
 	vault: string;
 	docs: string;
 	outside: string;
+	out: string;
 }
 
 async function createVaultFixture(): Promise<VaultFixture> {
@@ -58,20 +62,31 @@ async function createVaultFixture(): Promise<VaultFixture> {
 	const vault = path.join(root, "vault");
 	const docs = path.join(root, "docs");
 	const outside = path.join(root, "outside");
+	const out = path.join(root, "out");
 	await mkdir(path.join(vault, "Notes"), { recursive: true });
 	await mkdir(outside, { recursive: true });
 	await mkdir(docs, { recursive: true });
-	return { root, vault, docs, outside };
+	return { root, vault, docs, outside, out };
 }
 
-async function publishBoard(board: CanvasData, { vault, docs }: VaultFixture) {
-	await writeFile(path.join(vault, "Board.canvas"), JSON.stringify(board));
-	const plugin = canvas({ vaultRoot: vault, fileRoutePrefix: "/vault" });
-	const pages = await plugin.addPages?.({ root: docs }, false);
-	const published = JSON.parse(
-		await readFile(path.join(docs, "public", "__canvases__", "Board.json"), "utf-8"),
-	) as CanvasData;
-	return { pages, published };
+function vaultPlugin({ vault, out }: VaultFixture) {
+	return canvas({ vaultRoot: vault, fileRoutePrefix: "/vault", outDir: out });
+}
+
+async function readPublished(fixture: VaultFixture, name = "Board"): Promise<CanvasData> {
+	return parseCanvas(
+		await readFile(path.join(fixture.out, "__canvases__", `${name}.json`), "utf-8"),
+		{
+			enriched: true,
+		},
+	);
+}
+
+async function publishBoard(board: CanvasData, fixture: VaultFixture) {
+	await writeFile(path.join(fixture.vault, "Board.canvas"), JSON.stringify(board));
+	const pages = await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
+	const raw = await readFile(path.join(fixture.out, "__canvases__", "Board.json"), "utf-8");
+	return { pages, published: await readPublished(fixture), raw };
 }
 
 function fileCard(id: string, file: string, subpath?: string): CanvasFileData {
@@ -109,9 +124,10 @@ describe("canvas vault containment", () => {
 				fixture,
 			);
 
-			expect(publishedFileNode(published, "direct").fileContent).toContain("inside");
-			expect(publishedFileNode(published, "linked").fileContent).toContain("inside");
-			expect(published.notes?.["linked-inside.md"]).toContain("inside");
+			// The index skips symlinks, so only the real file is published.
+			expect(publishedFileNode(published, "direct").resolvedFile?.kind).toBe("note");
+			expect(published.notes?.["notes/welcome.md"]).toContain("inside");
+			expect(publishedFileNode(published, "linked").resolvedFile?.kind).not.toBe("note");
 		},
 	);
 
@@ -130,7 +146,7 @@ describe("canvas vault containment", () => {
 				path.join(fixture.vault, "linked-outside.png"),
 			);
 
-			const { pages, published } = await publishBoard(
+			const { pages, published, raw } = await publishBoard(
 				{
 					nodes: [
 						fileCard("leak-note", "Linked-Outside.md"),
@@ -141,13 +157,13 @@ describe("canvas vault containment", () => {
 				fixture,
 			);
 
-			expect(publishedFileNode(published, "leak-note").fileContent).toBeUndefined();
-			expect(publishedFileNode(published, "leak-asset").assetUrl).toBeUndefined();
+			expect(publishedFileNode(published, "leak-note").resolvedFile?.key).toBeUndefined();
+			expect(publishedFileNode(published, "leak-asset").resolvedFile?.key).toBeUndefined();
 			expect(published.notes).toBeUndefined();
 			expect(published.assets).toBeUndefined();
-			// The page prop embeds the same JSON the public file carries.
 			expect(JSON.stringify(pages?.map((page) => page.content))).not.toContain("OUTSIDE-CONTENT");
-			expect(JSON.stringify(pages?.map((page) => page.content))).not.toContain("OUTSIDE-BYTES");
+			expect(raw).not.toContain("OUTSIDE");
+			expect(existsSync(path.join(fixture.out, "vault", "linked-outside.png"))).toBe(false);
 		},
 	);
 
@@ -169,8 +185,7 @@ describe("canvas vault containment", () => {
 				JSON.stringify({ nodes: [], edges: [] }),
 			);
 
-			const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
-			const pages = await plugin.addPages?.({ root: fixture.docs }, false);
+			const pages = await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
 
 			expect(pages?.map((page) => page.routePath)).toEqual(["/canvas/board"]);
 		},
@@ -187,8 +202,7 @@ describe("canvas vault containment", () => {
 			JSON.stringify({ nodes: [], edges: [] }),
 		);
 
-		const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
-		const pages = await plugin.addPages?.({ root: fixture.docs }, false);
+		const pages = await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
 
 		expect(pages).toHaveLength(2);
 		expect(findCanvasBoardByPath(path.join(fixture.vault, "Demo.canvas"))?.routePath).toBe(
@@ -203,7 +217,7 @@ describe("canvas vault containment", () => {
 	});
 });
 
-describe("canvas enrichment", () => {
+describe("canvas publishing", () => {
 	const WELCOME_NOTE = [
 		"---",
 		"title: Welcome",
@@ -220,37 +234,28 @@ describe("canvas enrichment", () => {
 
 	async function writeVaultFiles(fixture: VaultFixture): Promise<void> {
 		await writeFile(path.join(fixture.vault, "Notes", "Welcome.md"), WELCOME_NOTE);
-		await writeFile(path.join(fixture.vault, "pic.png"), "PNG-BYTES");
+		await mkdir(path.join(fixture.vault, "attachments"), { recursive: true });
+		await writeFile(path.join(fixture.vault, "attachments", "pic.png"), "PNG-BYTES");
 		await writeFile(path.join(fixture.vault, "clip.mp3"), "MP3-BYTES");
-		await writeFile(path.join(fixture.vault, "movie.mp4"), "MP4-BYTES");
+		await writeFile(path.join(fixture.vault, "movie.mkv"), "MKV-BYTES");
 		await writeFile(path.join(fixture.vault, "doc.pdf"), "PDF-BYTES");
-		await writeFile(path.join(fixture.vault, "archive.bin"), "BIN-BYTES");
+		await writeFile(path.join(fixture.vault, "archive.zip"), "ZIP-BYTES");
+		await writeFile(path.join(fixture.vault, "photo.bmp"), "BMP-BYTES");
 	}
 
-	test("enriches markdown notes, subpaths, media assets and group backgrounds", async () => {
+	test("publishes media as files referenced by URL, each stored once", async () => {
 		const fixture = await createVaultFixture();
 		await writeVaultFiles(fixture);
 
-		const { published } = await publishBoard(
+		const { published, raw, pages } = await publishBoard(
 			{
 				nodes: [
-					{
-						id: "text",
-						type: "text",
-						x: 0,
-						y: 0,
-						width: 200,
-						height: 100,
-						text: "See ![[pic.png]] and ![alt](pic.png) and ![web](https://cdn.example/x.png) and ![abs](/x.png) and ![data](data:image/png;base64,AAAA)",
-					},
-					fileCard("heading", "Notes/Welcome.md", "#Getting Started"),
-					fileCard("block", "Notes/Welcome.md", "#^intro"),
-					fileCard("missing-heading", "Notes/Welcome.md", "#Nope"),
-					fileCard("image", "pic.png"),
+					fileCard("image", "attachments/pic.png"),
+					fileCard("bmp", "photo.bmp"),
 					fileCard("audio", "clip.mp3"),
-					fileCard("video", "movie.mp4"),
+					fileCard("video", "movie.mkv"),
 					fileCard("pdf", "doc.pdf"),
-					fileCard("unknown-mime", "archive.bin"),
+					fileCard("zip", "archive.zip"),
 					{
 						id: "group",
 						type: "group",
@@ -259,7 +264,7 @@ describe("canvas enrichment", () => {
 						width: 300,
 						height: 300,
 						label: "Zone",
-						background: "pic.png",
+						background: "attachments/pic.png",
 						backgroundStyle: "repeat",
 					},
 				],
@@ -268,80 +273,197 @@ describe("canvas enrichment", () => {
 			fixture,
 		);
 
-		// Frontmatter is stripped before the note is published.
-		expect(published.notes?.["notes/welcome.md"]).not.toContain("title: Welcome");
-		expect(published.notes?.["notes/welcome.md"]).toContain("# Getting Started");
-
-		// A heading subpath slices that section, and a `#^block` subpath its block.
-		expect(publishedFileNode(published, "heading").fileContent).toContain("Body text here.");
-		expect(publishedFileNode(published, "block").fileContent).toBe("Body text here.");
-		expect(publishedFileNode(published, "missing-heading").isError).toBe(true);
-		expect(publishedFileNode(published, "missing-heading").fileContent).toContain("Unable to find");
-
-		// Media nodes carry the data URL and the flags the card switches on.
-		expect(publishedFileNode(published, "image").assetUrl).toMatch(/^data:image\/png;base64,/);
-		expect(publishedFileNode(published, "image").isImage).toBe(true);
-		expect(publishedFileNode(published, "image").imageUrl).toBe(
-			publishedFileNode(published, "image").assetUrl,
+		expect(
+			Object.fromEntries(
+				["image", "bmp", "audio", "video", "pdf", "zip"].map((id) => [
+					id,
+					publishedFileNode(published, id).resolvedFile,
+				]),
+			),
+		).toEqual({
+			image: { kind: "image", key: "attachments/pic.png" },
+			bmp: { kind: "image", key: "photo.bmp" },
+			audio: { kind: "audio", key: "clip.mp3" },
+			video: { kind: "video", key: "movie.mkv" },
+			pdf: { kind: "pdf", key: "doc.pdf" },
+			zip: { kind: "file", key: "archive.zip" },
+		});
+		expect(publishedGroupNode(published, "group").resolvedBackground).toBe("attachments/pic.png");
+		expect(published.assets?.["attachments/pic.png"]).toBe("/vault/attachments/pic.png");
+		// The bytes are copied to the URL they are served at, never inlined.
+		expect(await readFile(path.join(fixture.out, "vault", "attachments", "pic.png"), "utf-8")).toBe(
+			"PNG-BYTES",
 		);
-		expect(publishedFileNode(published, "audio").isAudio).toBe(true);
-		expect(publishedFileNode(published, "video").isVideo).toBe(true);
-		expect(publishedFileNode(published, "pdf").isPdf).toBe(true);
-		// No MIME type for the extension, so there is nothing to inline.
-		expect(publishedFileNode(published, "unknown-mime").assetUrl).toBeUndefined();
-
-		// The group background and the two markdown embeds resolve to the same asset;
-		// the remote, absolute and data URLs are left alone.
-		expect(publishedGroupNode(published, "group").backgroundUrl).toMatch(
-			/^data:image\/png;base64,/,
+		expect(await readFile(path.join(fixture.out, "vault", "archive.zip"), "utf-8")).toBe(
+			"ZIP-BYTES",
 		);
-		// Every inlined asset is keyed by its lower-cased vault path; the remote,
-		// absolute and data URLs in the text card are left alone, and the extension
-		// with no MIME type contributes nothing.
-		expect(Object.keys(published.assets ?? {}).sort()).toEqual([
-			"clip.mp3",
-			"doc.pdf",
-			"movie.mp4",
-			"pic.png",
-		]);
+		expect(raw).not.toContain("base64");
+		// The image is used twice and listed once.
+		expect(raw.split("/vault/attachments/pic.png")).toHaveLength(2);
+		// The route page names the board; it does not carry it.
+		expect(pages?.[0]?.content).toContain('src={"Board.canvas"}');
+		expect(pages?.[0]?.content).not.toContain("nodes");
 	});
 
-	test("inlines an asset a text card references with a subpath", async () => {
-		// `#page=2` is a location inside the document, not part of its name. Kept
-		// whole it was read as a file called `doc.pdf#page=2`, which does not exist,
-		// so the board shipped without the asset and the card fell back to a URL
-		// nothing served.
+	test("rebuilds its output each time, so removed boards and files stop being published", async () => {
 		const fixture = await createVaultFixture();
 		await writeVaultFiles(fixture);
-		const { published } = await publishBoard(
-			{
+		await writeFile(
+			path.join(fixture.vault, "Old.canvas"),
+			JSON.stringify({ nodes: [fileCard("img", "attachments/pic.png")] }),
+		);
+		await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
+		expect(existsSync(path.join(fixture.out, "__canvases__", "Old.json"))).toBe(true);
+		expect(existsSync(path.join(fixture.out, "vault", "attachments", "pic.png"))).toBe(true);
+
+		await rm(path.join(fixture.vault, "Old.canvas"));
+		// A previous version of the plugin wrote board JSON into the site's public/.
+		await mkdir(path.join(fixture.docs, "public", "__canvases__"), { recursive: true });
+		await writeFile(path.join(fixture.docs, "public", "__canvases__", "Stale.json"), "{}");
+		await writeFile(path.join(fixture.vault, "New.canvas"), JSON.stringify({ nodes: [] }));
+		await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
+
+		expect(existsSync(path.join(fixture.out, "__canvases__", "Old.json"))).toBe(false);
+		expect(existsSync(path.join(fixture.out, "vault", "attachments", "pic.png"))).toBe(false);
+		expect(existsSync(path.join(fixture.out, "__canvases__", "New.json"))).toBe(true);
+		expect(existsSync(path.join(fixture.docs, "public", "__canvases__"))).toBe(false);
+	});
+
+	test("serves its output as a public directory and learns the site base", async () => {
+		const fixture = await createVaultFixture();
+		await writeFile(path.join(fixture.vault, "Board.canvas"), JSON.stringify({ nodes: [] }));
+		const plugin = vaultPlugin(fixture);
+		await plugin.addPages?.({ root: fixture.docs, base: "/docs/" }, false);
+		const server = plugin.builderConfig?.server as { publicDir?: { name: string }[] };
+		expect(server.publicDir?.map((entry) => entry.name)).toEqual([fixture.out]);
+		expect(plugin.builderConfig?.source?.define).toEqual({
+			__RSPRESS_OBSIDIAN_CANVAS_BASE__: JSON.stringify("/docs/"),
+		});
+	});
+
+	test("resolves card links like Obsidian: shortest path, relative, and per note", async () => {
+		const fixture = await createVaultFixture();
+		await writeVaultFiles(fixture);
+		await mkdir(path.join(fixture.vault, "notes"), { recursive: true });
+		await writeFile(path.join(fixture.vault, "notes", "Loose.md"), "Loose body [[Welcome]]");
+		await mkdir(path.join(fixture.vault, "Boards"), { recursive: true });
+		await writeFile(path.join(fixture.vault, "Boards", "Sibling.md"), "sibling");
+		await writeFile(
+			path.join(fixture.vault, "Boards", "Board.canvas"),
+			JSON.stringify({
 				nodes: [
 					{
-						id: "text",
+						id: "t",
 						type: "text",
 						x: 0,
 						y: 0,
-						width: 200,
-						height: 100,
-						text: "![[doc.pdf#page=2]] ![[pic.png|300]] ![[clip.mp3#t=1]]",
+						width: 10,
+						height: 10,
+						text: "![[pic.png]] [[Loose]] ![[Loose]] [[./Sibling]] [[Nowhere]] ![](my%20pic.png) [x](https://e.com)",
+					},
+				],
+			}),
+		);
+		await writeFile(path.join(fixture.vault, "my pic.png"), "PNG");
+		await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
+		const published = await readPublished(fixture, "Boards/Board");
+		const links = published.links?.[""] ?? {};
+
+		expect(links["pic.png"]).toMatchObject({ asset: "attachments/pic.png" });
+		expect(links.Loose?.href).toMatch(/^\/vault\/notes\/loose$/i);
+		expect(links.Loose?.note).toBe("notes/loose.md");
+		expect(links["./Sibling"]?.href).toMatch(/^\/vault\/boards\/sibling$/i);
+		expect(links.Nowhere).toEqual({});
+		expect(links["my pic.png"]).toMatchObject({ asset: "my pic.png" });
+		expect(links["https://e.com"]).toBeUndefined();
+		expect(published.assets?.["my pic.png"]).toBe("/vault/my%20pic.png");
+		// The transcluded note's own links resolve in its own scope.
+		expect(published.links?.["notes/loose.md"]?.Welcome?.href).toMatch(
+			/^\/vault\/notes\/welcome$/i,
+		);
+	});
+
+	test("never publishes a publish: false note, by file node or by transclusion", async () => {
+		const fixture = await createVaultFixture();
+		await writeFile(
+			path.join(fixture.vault, "Private.md"),
+			"---\npublish: false\n---\nSECRET-BODY",
+		);
+		const { published, raw } = await publishBoard(
+			{
+				nodes: [
+					fileCard("file", "Private.md"),
+					{
+						id: "t",
+						type: "text",
+						x: 0,
+						y: 0,
+						width: 1,
+						height: 1,
+						text: "![[Private]] [[Private]]",
 					},
 				],
 				edges: [],
 			},
 			fixture,
 		);
-
-		expect(Object.keys(published.assets ?? {}).sort()).toEqual(["clip.mp3", "doc.pdf", "pic.png"]);
-		expect(published.assets?.["doc.pdf"]).toMatch(/^data:application\/pdf;base64,/);
+		expect(publishedFileNode(published, "file").resolvedFile).toEqual({ kind: "private" });
+		expect(published.links?.[""]?.Private).toEqual({});
+		expect(published.notes).toBeUndefined();
+		expect(raw).not.toContain("SECRET-BODY");
 	});
 
-	test("warns and renders the card without content when a note cannot be read", async () => {
+	test("file-node subpaths use the shared slicer and fall back to the whole note", async () => {
 		const fixture = await createVaultFixture();
-		// A directory where a note and an asset are expected: the path resolves, the
-		// read does not.
-		await mkdir(path.join(fixture.vault, "Notes", "Folder.md"), { recursive: true });
-		await mkdir(path.join(fixture.vault, "broken.png"), { recursive: true });
+		await writeVaultFiles(fixture);
+		await writeFile(
+			path.join(fixture.vault, "Notes", "Deep.md"),
+			"# Parent\n\n## Child\n\n```bash\n# not a heading\n```\n\nchild body\n\n# Other\n",
+		);
+		const { published } = await publishBoard(
+			{
+				nodes: [
+					fileCard("nested", "Notes/Deep.md", "#Parent#Child"),
+					fileCard("block", "Notes/Welcome.md", "#^intro"),
+					fileCard("missing", "Notes/Welcome.md", "#Nope"),
+				],
+				edges: [],
+			},
+			fixture,
+		);
+		// Frontmatter is stripped before the note is published.
+		expect(published.notes?.["notes/welcome.md"]).not.toContain("title: Welcome");
+		expect(publishedFileNode(published, "nested").resolvedFile).toMatchObject({
+			kind: "note",
+			key: "notes/deep.md",
+		});
+		expect(publishedFileNode(published, "nested").resolvedFile?.missingSubpath).toBeUndefined();
+		expect(publishedFileNode(published, "block").resolvedFile?.missingSubpath).toBeUndefined();
+		expect(publishedFileNode(published, "missing").resolvedFile).toMatchObject({
+			kind: "note",
+			missingSubpath: true,
+		});
+		expect(publishedFileNode(published, "missing").resolvedFile?.href).toMatch(
+			/^\/vault\/notes\/welcome$/i,
+		);
+	});
 
+	test("a file node naming another board links to that board's page", async () => {
+		const fixture = await createVaultFixture();
+		await writeFile(path.join(fixture.vault, "Other.canvas"), JSON.stringify({ nodes: [] }));
+		const { published } = await publishBoard(
+			{ nodes: [fileCard("board", "Other.canvas"), fileCard("gone", "Gone.canvas")], edges: [] },
+			fixture,
+		);
+		expect(publishedFileNode(published, "board").resolvedFile).toEqual({
+			kind: "canvas",
+			href: "/canvas/other",
+		});
+		expect(publishedFileNode(published, "gone").resolvedFile).toEqual({ kind: "missing" });
+	});
+
+	test("warns and marks the card when a file is missing", async () => {
+		const fixture = await createVaultFixture();
 		const warnings: string[] = [];
 		const originalWarn = console.warn;
 		console.warn = (...args: unknown[]) => {
@@ -350,25 +472,19 @@ describe("canvas enrichment", () => {
 		try {
 			const { published } = await publishBoard(
 				{
-					nodes: [
-						fileCard("gone", "Notes/Missing.md"),
-						fileCard("unreadable", "Notes/Folder.md"),
-						fileCard("unreadable-asset", "broken.png"),
-					],
+					nodes: [fileCard("gone", "Notes/Missing.md"), fileCard("gone-asset", "broken.png")],
 					edges: [],
 				},
 				fixture,
 			);
-			expect(publishedFileNode(published, "gone").fileContent).toBeUndefined();
-			expect(publishedFileNode(published, "unreadable").fileContent).toBeUndefined();
-			expect(publishedFileNode(published, "unreadable-asset").assetUrl).toBeUndefined();
+			expect(publishedFileNode(published, "gone").resolvedFile).toEqual({ kind: "missing" });
+			expect(publishedFileNode(published, "gone-asset").resolvedFile).toEqual({ kind: "missing" });
 			expect(published.assets).toBeUndefined();
 		} finally {
 			console.warn = originalWarn;
 		}
-
 		expect(warnings.join("\n")).toContain("Notes/Missing.md");
-		expect(warnings.join("\n")).toContain("Notes/Folder.md");
+		expect(warnings.join("\n")).toContain("broken.png");
 	});
 
 	// A document-level failure (unparseable JSON) leaves nothing to render, so
@@ -383,8 +499,7 @@ describe("canvas enrichment", () => {
 		let routePaths: string[] = [];
 		try {
 			await writeFile(path.join(fixture.vault, "Board.canvas"), "{ not json");
-			const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
-			const pages = await plugin.addPages?.({ root: fixture.docs }, false);
+			const pages = await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
 			routePaths = pages?.map((page) => page.routePath) ?? [];
 		} finally {
 			console.error = originalError;
@@ -415,8 +530,7 @@ describe("canvas enrichment", () => {
 					edges: [],
 				}),
 			);
-			const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
-			const pages = await plugin.addPages?.({ root: fixture.docs }, false);
+			const pages = await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
 			routePaths = pages?.map((page) => page.routePath) ?? [];
 		} finally {
 			console.warn = originalWarn;
@@ -439,47 +553,30 @@ describe("canvas enrichment", () => {
 				JSON.stringify({ nodes: [], edges: [] }),
 			);
 
-			const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
-
-			await expect(plugin.addPages?.({ root: fixture.docs }, false)).rejects.toThrow(
+			await expect(vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false)).rejects.toThrow(
 				/route collision/,
 			);
 		},
 	);
-
-	test("reports a failure to write the embed JSON", async () => {
-		const fixture = await createVaultFixture();
-		await writeFile(
-			path.join(fixture.vault, "Board.canvas"),
-			JSON.stringify({ nodes: [], edges: [] }),
-		);
-		// A file where the public directory belongs makes `mkdir` fail.
-		await writeFile(path.join(fixture.docs, "public"), "not a directory");
-
-		const errors: string[] = [];
-		const originalError = console.error;
-		console.error = (...args: unknown[]) => {
-			errors.push(args.join(" "));
-		};
-		let routePaths: string[] = [];
-		try {
-			const plugin = canvas({ vaultRoot: fixture.vault, fileRoutePrefix: "/vault" });
-			const pages = await plugin.addPages?.({ root: fixture.docs }, false);
-			routePaths = pages?.map((page) => page.routePath) ?? [];
-		} finally {
-			console.error = originalError;
-		}
-
-		expect(errors.join("\n")).toContain("Failed to write embed JSON");
-		// The page is still generated; only the embed's JSON is missing.
-		expect(routePaths).toEqual(["/canvas/board"]);
-	});
 });
 
 describe("canvas plugin options", () => {
 	test("injects the canvas stylesheet by default", () => {
 		expect(typeof canvas().globalStyles).toBe("string");
 		expect(typeof canvas({ vaultRoot: "/tmp/vault" }).globalStyles).toBe("string");
+	});
+
+	test("link nodes preview the site by default, like Obsidian", async () => {
+		const fixture = await createVaultFixture();
+		await writeFile(path.join(fixture.vault, "Board.canvas"), JSON.stringify({ nodes: [] }));
+		const pages = await vaultPlugin(fixture).addPages?.({ root: fixture.docs }, false);
+		expect(pages?.[0]?.content).toContain("linkPreview={true}");
+		const off = await canvas({
+			vaultRoot: fixture.vault,
+			outDir: fixture.out,
+			linkPreview: false,
+		}).addPages?.({ root: fixture.docs }, false);
+		expect(off?.[0]?.content).toContain("linkPreview={false}");
 	});
 
 	test("enableDefaultStyles: false leaves the stylesheet out", () => {
@@ -521,7 +618,7 @@ describe("canvas defaults", () => {
 	test("vaults the Rspress content root when vaultRoot is not set", async () => {
 		const fixture = await createVaultFixture();
 		await writeCanvas(path.join(fixture.docs, "Board.canvas"));
-		const pages = await canvas().addPages?.({ root: fixture.docs }, false);
+		const pages = await canvas({ outDir: fixture.out }).addPages?.({ root: fixture.docs }, false);
 		expect(routePaths(pages)).toEqual(["/canvas/board"]);
 	});
 
@@ -531,7 +628,7 @@ describe("canvas defaults", () => {
 		const cwd = process.cwd();
 		process.chdir(fixture.root);
 		try {
-			const pages = await canvas().addPages?.({ root: "docs" }, false);
+			const pages = await canvas({ outDir: fixture.out }).addPages?.({ root: "docs" }, false);
 			expect(routePaths(pages)).toEqual(["/canvas/board"]);
 		} finally {
 			process.chdir(cwd);
@@ -544,7 +641,7 @@ describe("canvas defaults", () => {
 		for (const dir of ["node_modules/pkg", "dist", ".git/hooks", "coverage", "doc_build"]) {
 			await writeCanvas(path.join(fixture.docs, dir, "Stray.canvas"));
 		}
-		const pages = await canvas().addPages?.({ root: fixture.docs }, false);
+		const pages = await canvas({ outDir: fixture.out }).addPages?.({ root: fixture.docs }, false);
 		expect(routePaths(pages)).toEqual(["/canvas/keep"]);
 	});
 
@@ -553,7 +650,7 @@ describe("canvas defaults", () => {
 		await writeCanvas(path.join(fixture.docs, "Keep.canvas"));
 		await writeCanvas(path.join(fixture.docs, "drafts", "Idea.canvas"));
 		await writeCanvas(path.join(fixture.docs, "node_modules", "Stray.canvas"));
-		const pages = await canvas({ exclude: ["**/drafts/**"] }).addPages?.(
+		const pages = await canvas({ exclude: ["**/drafts/**"], outDir: fixture.out }).addPages?.(
 			{ root: fixture.docs },
 			false,
 		);

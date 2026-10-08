@@ -1,9 +1,9 @@
-import { useMemo } from "react";
-import { parseCanvas } from "../parser.js";
 import { CanvasRenderer } from "./CanvasRenderer.js";
+import { useCanvasBoard } from "./useCanvasBoard.js";
 
-interface CanvasViewerProps {
-	canvasJson: string;
+export interface CanvasViewerProps {
+	/** Vault path of the published board; the page the plugin generates sets it. */
+	src: string;
 	fileRoutePrefix?: string;
 	linkPreview?: boolean;
 	editable?: boolean;
@@ -11,33 +11,42 @@ interface CanvasViewerProps {
 	iframeSandbox?: string;
 }
 
+/**
+ * The full-page board a canvas route renders. It fetches the published JSON
+ * instead of receiving it as a prop, so the board is stored once (in
+ * `__canvases__/`) rather than also inlined into the route's JavaScript.
+ */
 export default function CanvasViewer({
-	canvasJson,
+	src,
 	fileRoutePrefix,
 	linkPreview,
 	editable,
 	editorTitle,
 	iframeSandbox,
 }: CanvasViewerProps) {
-	const data = useMemo(() => {
-		try {
-			return parseCanvas(canvasJson);
-		} catch (error) {
-			console.error("Failed to parse canvas:", error);
-			return null;
-		}
-	}, [canvasJson]);
+	const board = useCanvasBoard(src);
 
-	if (!data) {
-		return <div className="canvas-error">Failed to load canvas. Check console for details.</div>;
+	if (board.status === "loading") {
+		return (
+			<div className="canvas-container canvas-loading" role="status">
+				<div className="canvas-embed-spinner" />
+				<span>Loading canvas…</span>
+			</div>
+		);
+	}
+	if (board.status === "error") {
+		return (
+			<div className="canvas-error" role="alert">
+				Failed to load canvas <code>{src}</code>. Check the console for details.
+			</div>
+		);
 	}
 
 	return (
 		<CanvasRenderer
-			// The renderer seeds its editor state from `data` once, so a new canvas must
-			// remount it: without the key a swapped-in canvas would show the old cards.
-			key={canvasJson}
-			data={data}
+			key={board.url}
+			data={board.data}
+			boardId={src}
 			fileRoutePrefix={fileRoutePrefix}
 			linkPreview={linkPreview}
 			editable={editable}

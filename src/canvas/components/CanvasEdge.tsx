@@ -1,85 +1,30 @@
 import { memo } from "react";
 import type { CanvasEdgeData, CanvasNode } from "../types.js";
 import { resolveColor } from "../utils/color.js";
+import { edgeCurve } from "../utils/geometry.js";
 
-interface Point {
-	x: number;
-	y: number;
+/** The marker ids an edge's arrowheads use, unique per renderer instance. */
+export function markerIds(prefix: string, edgeId: string): { end: string; start: string } {
+	const safe = edgeId.replace(/[^A-Za-z0-9_-]/g, "_");
+	return { end: `${prefix}-arrow-${safe}`, start: `${prefix}-arrow-start-${safe}` };
 }
 
-function getEdgePoint(node: CanvasNode, side: string | undefined): Point {
-	switch (side) {
-		case "top":
-			return { x: node.x + node.width / 2, y: node.y };
-		case "right":
-			return { x: node.x + node.width, y: node.y + node.height / 2 };
-		case "bottom":
-			return { x: node.x + node.width / 2, y: node.y + node.height };
-		case "left":
-			return { x: node.x, y: node.y + node.height / 2 };
-		default:
-			return { x: node.x + node.width / 2, y: node.y + node.height / 2 };
-	}
-}
-
-function getControlPoints(
-	start: Point,
-	end: Point,
-	fromSide: string | undefined,
-	toSide: string | undefined,
-): [Point, Point] {
-	const dx = Math.abs(end.x - start.x);
-	const dy = Math.abs(end.y - start.y);
-	const dist = Math.sqrt(dx * dx + dy * dy);
-	const tension = Math.min(dist * 0.5, 120);
-
-	const cp1: Point = { x: start.x, y: start.y };
-	const cp2: Point = { x: end.x, y: end.y };
-
-	switch (fromSide) {
-		case "top":
-			cp1.y -= tension;
-			break;
-		case "right":
-			cp1.x += tension;
-			break;
-		case "bottom":
-			cp1.y += tension;
-			break;
-		case "left":
-			cp1.x -= tension;
-			break;
-		default:
-			cp1.x += end.x > start.x ? tension : -tension;
-	}
-
-	switch (toSide) {
-		case "top":
-			cp2.y -= tension;
-			break;
-		case "right":
-			cp2.x += tension;
-			break;
-		case "bottom":
-			cp2.y += tension;
-			break;
-		case "left":
-			cp2.x -= tension;
-			break;
-		default:
-			cp2.x += end.x > start.x ? -tension : tension;
-	}
-
-	return [cp1, cp2];
-}
-
-function edgeColor(color: string | undefined): string {
+export function edgeColor(color: string | undefined): string {
 	return resolveColor(color, "var(--canvas-edge-color)");
 }
 
+/** Room the label box gets around the curve midpoint; the text wraps inside it. */
+const LABEL_BOX = { width: 240, height: 120 };
+
 interface CanvasEdgeProps {
 	edge: CanvasEdgeData;
-	nodeMap: Map<string, CanvasNode>;
+	/**
+	 * Only the two endpoints, not the whole node map: a drag then re-renders the
+	 * edges that touch the moving card, and every other edge keeps its memo.
+	 */
+	fromNode: CanvasNode;
+	toNode: CanvasNode;
+	markerPrefix: string;
 	isHighlighted?: boolean;
 	isSelected?: boolean;
 	onSelect?: (edgeId: string) => void;
@@ -87,37 +32,37 @@ interface CanvasEdgeProps {
 
 export const CanvasEdge = memo(function CanvasEdge({
 	edge,
-	nodeMap,
+	fromNode,
+	toNode,
+	markerPrefix,
 	isHighlighted,
 	isSelected,
 	onSelect,
 }: CanvasEdgeProps) {
-	const fromNode = nodeMap.get(edge.fromNode);
-	const toNode = nodeMap.get(edge.toNode);
-
-	if (!fromNode || !toNode) return null;
-
-	const start = getEdgePoint(fromNode, edge.fromSide);
-	const end = getEdgePoint(toNode, edge.toSide);
-	const [cp1, cp2] = getControlPoints(start, end, edge.fromSide, edge.toSide);
-
+	const { start, end, cp1, cp2, mid } = edgeCurve(fromNode, toNode, edge.fromSide, edge.toSide);
 	const color = edgeColor(edge.color);
 	const hasArrow = edge.toEnd !== "none";
 	const hasStartArrow = edge.fromEnd === "arrow";
-	const strokeWidth = isHighlighted ? 3 : 2;
-	const strokeOpacity = isHighlighted ? 1 : 0.6;
-
+	const ids = markerIds(markerPrefix, edge.id);
 	const pathD = `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;
+	const className = [
+		"canvas-edge",
+		isHighlighted ? "canvas-edge-highlighted" : "",
+		isSelected ? "canvas-edge-selected" : "",
+	]
+		.filter(Boolean)
+		.join(" ");
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: edges are selectable in editor mode; role=button conveys interactivity
 		<g
-			className={isHighlighted ? "canvas-edge-highlighted" : "canvas-edge"}
+			className={className}
 			role={onSelect ? "button" : undefined}
 			// SVG elements take no focus by default, so a mouse-free user could not
 			// reach an edge to select or delete it.
 			tabIndex={onSelect ? 0 : undefined}
 			aria-label={onSelect ? (edge.label ?? "Canvas edge") : undefined}
+			data-edge-id={edge.id}
 			onKeyDown={(event) => {
 				if (!onSelect) return;
 				if (event.key === "Enter" || event.key === " ") {
@@ -133,27 +78,30 @@ export const CanvasEdge = memo(function CanvasEdge({
 			}}
 			style={{ cursor: onSelect ? "pointer" : undefined }}
 		>
+			{/* A wide invisible stroke so a 2px line is a usable click target. */}
+			{onSelect && <path d={pathD} stroke="transparent" strokeWidth={14} fill="none" />}
 			<path
+				className="canvas-edge-path"
 				d={pathD}
 				stroke={color}
-				strokeWidth={isSelected ? 4 : strokeWidth}
-				strokeOpacity={isSelected ? 1 : strokeOpacity}
+				strokeWidth={isSelected ? 4 : isHighlighted ? 3 : 2}
+				strokeOpacity={isSelected || isHighlighted ? 1 : 0.75}
 				fill="none"
-				markerEnd={hasArrow ? `url(#arrowhead-${edge.id})` : undefined}
-				markerStart={hasStartArrow ? `url(#arrowhead-start-${edge.id})` : undefined}
+				markerEnd={hasArrow ? `url(#${ids.end})` : undefined}
+				markerStart={hasStartArrow ? `url(#${ids.start})` : undefined}
 			/>
 			{edge.label && (
-				<text
-					x={(start.x + end.x) / 2}
-					y={(start.y + end.y) / 2 - 8}
-					fill={isHighlighted ? "#333333" : "#666666"}
-					fontSize={12}
-					fontWeight={isHighlighted ? 500 : 400}
-					textAnchor="middle"
-					style={{ pointerEvents: "none" }}
+				<foreignObject
+					x={mid.x - LABEL_BOX.width / 2}
+					y={mid.y - LABEL_BOX.height / 2}
+					width={LABEL_BOX.width}
+					height={LABEL_BOX.height}
+					style={{ pointerEvents: "none", overflow: "visible" }}
 				>
-					{edge.label}
-				</text>
+					<div className="canvas-edge-label-box">
+						<span className="canvas-edge-label">{edge.label}</span>
+					</div>
+				</foreignObject>
 			)}
 		</g>
 	);

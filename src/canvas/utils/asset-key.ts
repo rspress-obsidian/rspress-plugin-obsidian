@@ -21,3 +21,18 @@ export function normalizeAssetKey(value: string): string {
 	}
 	return segments.join("/").toLowerCase();
 }
+
+/**
+ * Key a card link target is resolved under in `CanvasData.links`. The build
+ * (which resolves every target it finds) and the browser renderer (which looks
+ * them up) both call this, so `![](my%20image.png)` and `![[my image.png]]`
+ * name one entry and stray whitespace never splits a target in two.
+ */
+export function canvasLinkKey(target: string): string {
+	const trimmed = target.trim();
+	try {
+		return decodeURI(trimmed);
+	} catch {
+		return trimmed;
+	}
+}
