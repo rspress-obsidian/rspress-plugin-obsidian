@@ -389,7 +389,9 @@ describe("denial of service", () => {
 		const distinct = Array.from({ length: 20_000 }, (_, index) => index);
 		expect(() => run("unique(items)", { items: distinct })).toThrow("ran more than");
 		expect(run("length(unique(items))", { items: distinct.slice(0, 1000) })).toBe(1000);
-	});
+		// Each case spends the whole 50M-step budget: about 3 s locally, up to 11 s
+		// on CI runners, past Bun's 5 s default.
+	}, 30_000);
 
 	test("an unsafe pattern is refused at every regex function", () => {
 		for (const source of [

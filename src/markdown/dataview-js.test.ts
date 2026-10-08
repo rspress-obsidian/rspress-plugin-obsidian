@@ -379,7 +379,9 @@ describe("denial of service", () => {
 				'const s = "x".repeat(9000000)\nfor (const i of "x".repeat(100).split("")) dv.paragraph(s)',
 			).error,
 		).toContain("ran more than 50000000 steps");
-	});
+		// Each case spends the whole 50M-step budget: under 2 s locally, up to 6 s
+		// on CI runners, past Bun's 5 s default.
+	}, 30_000);
 
 	test("huge strings and lists are refused with a clear error", () => {
 		expect(js('dv.paragraph("x".repeat(1e9))').error).toContain(
