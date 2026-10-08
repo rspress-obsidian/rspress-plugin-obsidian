@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 
 const { mock } = require("bun:test");
@@ -18,16 +18,20 @@ const mockPageContentData = [
 	// The build ships one character past the budget when it truncated the body.
 	{ routePath: "/guide/long", title: "Long", content: "x".repeat(301) },
 	{ routePath: "/guide/exact", title: "Exact", content: "y".repeat(300) },
+	// Route ids are Rspress's decoded routes; hrefs arrive percent-encoded.
+	{ routePath: "/Deep Note", title: "Deep Note", content: "Spaces in the name." },
+	{ routePath: "/日本語ノート", title: "日本語ノート", content: "CJK route." },
 ];
 
 mock.module("virtual-page-content-data", () => ({
+	base: "/",
 	pageContentData: mockPageContentData,
 	default: mockPageContentData,
 }));
 
 // Re-import the component under test AFTER mocks are registered — a static
 // import would bind to the unmocked virtual module.
-const { default: HoverPreview } = await import("../HoverPreview");
+const { default: HoverPreview, previewKeyForHref } = await import("../HoverPreview");
 
 const HOVER_DELAY = 300;
 
@@ -103,6 +107,30 @@ describe("HoverPreview link resolution", () => {
 		expect(content).not.toContain("…");
 	});
 
+	test("resolves percent-encoded hrefs to routes with spaces and CJK", async () => {
+		render(<HoverPreview />);
+
+		await hoverHref("/Deep%20Note");
+		expect(previewTitle()).toBe("Deep Note");
+
+		cleanup();
+		render(<HoverPreview />);
+		await hoverHref("/%E6%97%A5%E6%9C%AC%E8%AA%9E%E3%83%8E%E3%83%BC%E3%83%88.html");
+		expect(previewTitle()).toBe("日本語ノート");
+	});
+
+	test("strips the site base and ignores other origins", () => {
+		const location = new URL("https://docs.example/site/guide") as unknown as Location;
+		expect(previewKeyForHref("/site/Deep%20Note/", "/site/", location)).toBe("/Deep Note");
+		expect(previewKeyForHref("/site/", "/site/", location)).toBe("/");
+		expect(
+			previewKeyForHref("https://elsewhere.example/site/x", "/site/", location),
+		).toBeUndefined();
+		expect(previewKeyForHref("#heading", "/site/", location)).toBeUndefined();
+		// An href the URL parser rejects is not a route.
+		expect(previewKeyForHref("http://[bad", "/site/", location)).toBeUndefined();
+	});
+
 	test("shows nothing for a link with no collected page", async () => {
 		render(<HoverPreview />);
 
@@ -111,22 +139,64 @@ describe("HoverPreview link resolution", () => {
 		expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
 	});
 
-	test("clears the pending hover timer on unmount", () => {
-		const clearSpy = spyOn(globalThis, "clearTimeout");
-		const { unmount } = render(<HoverPreview />);
-
+	test("moving the pointer off the link closes the preview", async () => {
+		render(<HoverPreview />);
 		const link = document.createElement("a");
 		link.setAttribute("href", "/guide/advanced");
 		document.body.appendChild(link);
-		link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 5, clientY: 5 }));
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setTimeout(resolve, HOVER_DELAY + 50);
+		await act(async () => {
+			link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 10, clientY: 10 }));
+			await promise;
+		});
+		expect(previewTitle()).toBe("Advanced");
 
-		clearSpy.mockClear();
-		unmount();
+		act(() => {
+			link.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+		});
+		expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
+	});
 
-		// A pending 300ms timer must not outlive the component.
-		expect(clearSpy).toHaveBeenCalledTimes(1);
-		clearSpy.mockRestore();
-		link.remove();
+	test("leaving the link before the hover delay opens no preview", async () => {
+		render(<HoverPreview />);
+		const link = document.createElement("a");
+		link.setAttribute("href", "/guide/advanced");
+		document.body.appendChild(link);
+		const { promise, resolve } = Promise.withResolvers<void>();
+		setTimeout(resolve, HOVER_DELAY + 50);
+		await act(async () => {
+			link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 10, clientY: 10 }));
+			await Promise.resolve();
+			link.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+			await promise;
+		});
+		expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
+	});
+
+	test("a hover still pending when the component unmounts never opens a popup", async () => {
+		vi.useFakeTimers();
+		try {
+			const { unmount } = render(<HoverPreview />);
+
+			const link = document.createElement("a");
+			link.setAttribute("href", "/guide/advanced");
+			document.body.appendChild(link);
+			link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 5, clientY: 5 }));
+			unmount();
+
+			// Let the preview data finish loading, then run out every hover delay.
+			await import("virtual-page-content-data");
+			await act(async () => {
+				await Promise.resolve();
+			});
+			vi.advanceTimersByTime(HOVER_DELAY * 2);
+
+			expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
+			link.remove();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	test("re-clamps the popup when the viewport resizes", async () => {

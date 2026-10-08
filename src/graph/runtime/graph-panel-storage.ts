@@ -9,8 +9,12 @@
 export const LOCAL_STORAGE_KEY_OPEN = "rspress-graph-view-open";
 export const LOCAL_STORAGE_KEY_POS = "rspress-graph-view-pos";
 /**
- * Depth and visibility toggles, persisted so a reader's filter choices
- * survive closing the panel. The search query is deliberately not stored:
- * it describes a moment, not a preference.
+ * Scope, depth, link directions and visibility toggles, persisted so a
+ * reader's filter choices survive closing the panel. The search query is
+ * deliberately not stored: it describes a moment, not a preference.
  */
 export const LOCAL_STORAGE_KEY_FILTERS = "rspress-graph-view-filters";
+/** Display settings: arrows, text fade threshold, node size, link thickness. */
+export const LOCAL_STORAGE_KEY_DISPLAY = "rspress-graph-view-display";
+/** Force settings: center, repel, link force, link distance. */
+export const LOCAL_STORAGE_KEY_FORCES = "rspress-graph-view-forces";

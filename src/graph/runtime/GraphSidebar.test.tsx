@@ -7,6 +7,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
+import { graphDataModule, graphNode } from "./__tests__/graph-fixture";
 
 // The graph runtime reads the path from the document; this test renders a
 // panel anchored on /guide.
@@ -15,15 +16,12 @@ history.replaceState({}, "", "/guide");
 const { mock } = require("bun:test");
 
 // `virtual-graph-data` is a build-time module; provide a stable fixture.
-const mockGraphData = {
-	nodes: [
-		{ id: "/", label: "Home", routePath: "/" },
-		{ id: "/guide", label: "Guide", routePath: "/guide" },
-	],
-	links: [{ source: "/", target: "/guide" }],
-};
-
-mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
+mock.module("virtual-graph-data", () =>
+	graphDataModule(
+		[graphNode("/", "Home"), graphNode("/guide", "Guide")],
+		[{ source: "/", target: "/guide" }],
+	),
+);
 
 // The panel navigates through the shared seam rather than `window.location`
 // directly, which is what makes it observable here.
@@ -108,7 +106,7 @@ describe("GraphSidebar", () => {
 		render(<GraphSidebar />);
 		await settle();
 
-		act(() => graphHandler("onNodeClick")({ routePath: "/guide" }));
+		act(() => graphHandler("onNodeClick")(graphNode("/guide", "Guide")));
 
 		expect(navigateSpy).toHaveBeenCalledWith("/guide");
 	});

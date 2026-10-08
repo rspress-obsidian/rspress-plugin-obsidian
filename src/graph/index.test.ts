@@ -1,134 +1,152 @@
 // The graph plugin factory is what `rspress.config.ts` hands Rspress, so these
-// tests drive the two hooks Rspress calls and assert what they publish: the
-// `virtual-graph-data` module (and, with hover previews on, the page-content
-// module) for routes built from a real temp docs root, plus the disk cache a
-// rebuild is meant to lean on.
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+// tests drive its hooks in Rspress's own order — `config`, then
+// `routeServiceGenerated` for every plugin, then `addRuntimeModules` — and
+// assert what it publishes.
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { RouteMeta, RspressPlugin } from "@rspress/core";
-import { graphview } from "./index";
-
-interface GraphNode {
-	id: string;
-	label: string;
-	routePath: string;
-}
-
-interface GraphLink {
-	source: string;
-	target: string;
-}
+import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
+import { markdown } from "../markdown/index.js";
+import { setPublishedContent } from "../shared/published-content.js";
+import { decodeGraphPayload } from "./graph-payload.js";
+import { graphview } from "./index.js";
+import type { GraphData, GraphPayload } from "./types.js";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+	setPublishedContent(undefined);
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-interface DocsFixture {
-	root: string;
-	cacheDir: string;
-	routes: RouteMeta[];
-}
-
-/** A two-page docs root whose home page links to the guide, so the edge is real. */
-async function createDocsFixture(): Promise<DocsFixture> {
-	const root = await mkdtemp(path.join(tmpdir(), "graph-plugin-"));
-	tempDirs.push(root);
-	const cacheDir = path.join(root, "graph-cache");
-	await mkdir(path.join(root, "guide"), { recursive: true });
-	await writeFile(path.join(root, "index.md"), "# Home\n\nRead [Guide](./guide/index.md).\n");
-	await writeFile(path.join(root, "guide", "index.md"), "# Guide\n");
-
-	const routeTable: Array<[routePath: string, relativePath: string]> = [
-		["/", "index.md"],
-		["/guide", "guide/index.md"],
-	];
-
+/** A stand-in for Rspress's RouteService: the route map plugins read and edit. */
+function createRouteService(routes: RouteMeta[]) {
+	const routeData = new Map(routes.map((routeMeta) => [routeMeta.routePath, { routeMeta }]));
 	return {
-		root,
-		cacheDir,
-		routes: routeTable.map(([routePath, relativePath]) => ({
-			routePath,
-			pureRoutePath: routePath,
-			absolutePath: path.join(root, relativePath),
-			relativePath,
-			pageName: relativePath.replace(/\/index\.md$/, "").replace(/\.md$/, "") || "index",
-			lang: "",
-			version: "",
-		})),
+		routeData,
+		getRoutes: () => [...routeData.values()].map((entry) => entry.routeMeta),
 	};
 }
 
-/** Drive the plugin the way Rspress does: routes first, then the module map. */
-async function buildModules(
-	plugin: RspressPlugin,
-	fixture: DocsFixture,
-): Promise<Record<string, string>> {
-	plugin.routeGenerated?.(fixture.routes, false);
-	const modules = await plugin.addRuntimeModules?.({ root: fixture.root }, false);
-	if (!modules) throw new Error("addRuntimeModules published nothing");
-	return modules;
-}
-
-/** The graph data the module source hands the client. */
-function graphDataFrom(source: string): { nodes: GraphNode[]; links: GraphLink[] } {
-	const match = source.match(/^export const graphData = (.*); export default graphData;$/s);
-	if (!match) throw new Error(`unexpected module source: ${source}`);
-	return JSON.parse(match[1] ?? "");
-}
-
-/**
- * The hook fires the cache write without awaiting it, so yield to the event loop
- * until the file is there *and complete* rather than guessing a delay —
- * `writeFile` creates the file before filling it, so a bare `stat` can observe
- * an empty file and the subsequent parse fails with an unexpected EOF.
- */
-async function waitForCacheFile(cacheDir: string): Promise<void> {
-	const cacheFile = path.join(cacheDir, "cache.json");
-	for (let attempt = 0; attempt < 500; attempt += 1) {
-		try {
-			JSON.parse(await readFile(cacheFile, "utf8"));
-			return;
-		} catch {
-			const { promise, resolve } = Promise.withResolvers<void>();
-			setImmediate(resolve);
-			await promise;
-		}
+async function createDocs(
+	files: Record<string, string>,
+): Promise<{ root: string; routes: RouteMeta[] }> {
+	const root = await mkdtemp(path.join(tmpdir(), "graph-plugin-"));
+	tempDirs.push(root);
+	const routes: RouteMeta[] = [];
+	for (const [relativePath, content] of Object.entries(files)) {
+		const absolutePath = path.join(root, relativePath);
+		await mkdir(path.dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, content);
+		const routePath = `/${relativePath.replace(/\.mdx?$/, "").replace(/(^|\/)index$/, "")}`;
+		routes.push({
+			routePath,
+			pureRoutePath: routePath,
+			absolutePath,
+			relativePath,
+			pageName: relativePath.replace(/\.mdx?$/, ""),
+			lang: "",
+			version: "",
+		});
 	}
-	throw new Error("the graph plugin never wrote its disk cache");
+	return { root, routes };
+}
+
+/** Run the hooks Rspress runs, in its order, for every plugin given. */
+async function runRspress(
+	plugins: RspressPlugin[],
+	routes: RouteMeta[],
+	config: UserConfig,
+	isProd = true,
+): Promise<{ modules: Record<string, string>; config: UserConfig }> {
+	let current = config;
+	for (const plugin of plugins) {
+		current =
+			(await plugin.config?.(current, { addPlugin: () => {}, removePlugin: () => {} }, isProd)) ??
+			current;
+	}
+	const routeService = createRouteService(routes);
+	await Promise.all(
+		plugins.map((plugin) => plugin.routeGenerated?.(routeService.getRoutes(), isProd)),
+	);
+	await Promise.all(plugins.map((plugin) => plugin.routeServiceGenerated?.(routeService, isProd)));
+	const modules: Record<string, string> = {};
+	for (const plugin of plugins)
+		Object.assign(modules, await plugin.addRuntimeModules?.(current, isProd));
+	return { modules, config: current };
+}
+
+function graphFrom(source: string | undefined): GraphData {
+	const json = source?.match(/JSON\.parse\((".*")\)/s)?.[1];
+	if (!json) throw new Error(`unexpected module source: ${source}`);
+	return decodeGraphPayload(JSON.parse(JSON.parse(json)) as GraphPayload);
 }
 
 describe("graphview", () => {
 	test("publishes a node per route and an edge per resolved link", async () => {
-		const fixture = await createDocsFixture();
+		const { root, routes } = await createDocs({
+			"index.md": "# Home\n\nRead [Guide](./guide/index.md).\n",
+			"guide/index.md": "# Guide\n",
+		});
 
-		const modules = await buildModules(graphview({ cacheDir: fixture.cacheDir }), fixture);
+		const { modules } = await runRspress([graphview()], routes, { root });
 
-		const graphData = graphDataFrom(modules["virtual-graph-data"] ?? "");
-		expect(graphData.nodes).toEqual([
-			{ id: "/", label: "Home", routePath: "/" },
-			{ id: "/guide", label: "Guide", routePath: "/guide" },
+		const graph = graphFrom(modules["virtual-graph-data"]);
+		expect(graph.nodes.map((node) => [node.id, node.label])).toEqual([
+			["/", "Home"],
+			["/guide", "Guide"],
 		]);
-		expect(graphData.links).toEqual([{ source: "/", target: "/guide" }]);
+		expect(graph.links).toEqual([{ source: "/", target: "/guide" }]);
 	});
 
-	test("adds the hover-preview module only when hover previews are enabled", async () => {
-		const fixture = await createDocsFixture();
+	test("a publish: false page never reaches the graph, the previews or the search data", async () => {
+		const { root, routes } = await createDocs({
+			"index.md": "Public page linking [[secret]].\n",
+			"secret.md": "---\ntitle: Secret Plans\npublish: false\n---\nThe launch code is 0000.\n",
+		});
 
-		const plain = await buildModules(graphview({ cacheDir: fixture.cacheDir }), fixture);
-		expect(plain["virtual-page-content-data"]).toBeUndefined();
-
-		const withPreviews = await buildModules(
-			graphview({ cacheDir: fixture.cacheDir, enableHoverPreviews: true }),
-			fixture,
+		// The markdown plugin removes the unpublished route in its own
+		// `routeServiceGenerated`, after Rspress fired `routeGenerated` with it.
+		const { modules } = await runRspress(
+			[graphview({ enableHoverPreviews: true }), markdown()],
+			routes,
+			{ root },
 		);
-		const previewSource = withPreviews["virtual-page-content-data"];
-		expect(previewSource).toContain("export const pageContentData =");
-		expect(previewSource).toContain('"routePath":"/guide"');
-		expect(previewSource).toContain('"title":"Guide"');
+
+		const graph = graphFrom(modules["virtual-graph-data"]);
+		// The link to it is what the public page itself shows — an unresolved
+		// node named by the link text — never the page, its title or its body.
+		expect(graph.nodes.filter((node) => node.kind === "page").map((node) => node.id)).toEqual([
+			"/",
+		]);
+		expect(graph.nodes.find((node) => node.id !== "/")).toMatchObject({
+			kind: "unresolved",
+			label: "secret",
+			navigable: false,
+		});
+		const published = [
+			modules["virtual-graph-data"],
+			modules["virtual-page-content-data"],
+			modules["virtual-graph-search-data"],
+		].join("\n");
+		expect(published).not.toContain("Secret Plans");
+		expect(published).not.toContain("launch code");
+	});
+
+	test("hover-preview data is its own module, published only when previews are on", async () => {
+		const { root, routes } = await createDocs({ "index.md": "x\n", "guide.md": "# Guide\nBody\n" });
+
+		const plain = await runRspress([graphview()], routes, { root });
+		expect(plain.modules["virtual-page-content-data"]).toBeUndefined();
+
+		const withPreviews = await runRspress([graphview({ enableHoverPreviews: true })], routes, {
+			root,
+		});
+		const previewSource = withPreviews.modules["virtual-page-content-data"] ?? "";
+		expect(previewSource).toContain("export const pageContentData");
+		expect(previewSource).toContain("/guide");
+		expect(previewSource).toContain("Body");
 	});
 
 	test("hands colour groups to the lazy panel as a runtime prop", () => {
@@ -141,68 +159,25 @@ describe("graphview", () => {
 		expect(panelEntry?.[1]).toMatchObject({ groups });
 	});
 
-	test("reuses the parsed documents on a second build instead of reading them again", async () => {
-		const fixture = await createDocsFixture();
-		const infoSpy = spyOn(console, "info").mockImplementation(() => {});
+	test("under rspress dev the modules re-export live in-memory files a watcher refreshes", async () => {
+		const { root, routes } = await createDocs({ "index.md": "x\n" });
+		const plugin = graphview();
 
-		const plugin = graphview({ cacheDir: fixture.cacheDir, profileBuild: true });
-		let logs: string[] = [];
-		try {
-			await buildModules(plugin, fixture);
-			await buildModules(plugin, fixture);
-		} finally {
-			// Read the calls before restoring: `mockRestore` clears them.
-			logs = infoSpy.mock.calls.map((call) => String(call[0]));
-			infoSpy.mockRestore();
-		}
+		const { modules, config } = await runRspress([plugin], routes, { root }, false);
 
-		expect(logs[0]).toContain("cacheMisses=2");
-		expect(logs[0]).toContain("reusedModule=false");
-		// Second build: both documents came back from the cache, and the module
-		// source was reused rather than rebuilt.
-		expect(logs[1]).toContain("cacheHits=2");
-		expect(logs[1]).toContain("reusedModule=true");
+		expect(modules["virtual-graph-data"]).toContain("export * from");
+		const registered = (config.builderConfig?.plugins ?? []).flat();
+		expect(
+			registered.some((entry) => entry && "name" in entry && entry.name.includes("graph-dev-data")),
+		).toBe(true);
 	});
 
-	test("writes the cache file a later build reads back", async () => {
-		const fixture = await createDocsFixture();
+	test("a production build publishes the data itself and registers no dev plugin", async () => {
+		const { root, routes } = await createDocs({ "index.md": "x\n" });
 
-		await buildModules(graphview({ cacheDir: fixture.cacheDir }), fixture);
-		await waitForCacheFile(fixture.cacheDir);
+		const { modules, config } = await runRspress([graphview()], routes, { root }, true);
 
-		const persisted = JSON.parse(
-			await readFile(path.join(fixture.cacheDir, "cache.json"), "utf8"),
-		) as { documents: Record<string, { inferredTitle?: string; rawLinks: string[] }> };
-		expect(Object.keys(persisted.documents).sort()).toEqual([
-			path.join(fixture.root, "guide", "index.md"),
-			path.join(fixture.root, "index.md"),
-		]);
-		expect(persisted.documents[path.join(fixture.root, "index.md")]?.rawLinks).toEqual([
-			"./guide/index.md",
-		]);
-	});
-
-	test("a fresh instance with an explicit cacheDir reads the file a previous one wrote", async () => {
-		const fixture = await createDocsFixture();
-		const infoSpy = spyOn(console, "info").mockImplementation(() => {});
-		let profiled: string | undefined;
-		try {
-			await buildModules(graphview({ cacheDir: fixture.cacheDir }), fixture);
-			await waitForCacheFile(fixture.cacheDir);
-
-			// Brand-new instance: its in-memory cache starts empty, so every hit
-			// in this build has to come from the file on disk. Before the fix an
-			// explicit `cacheDir` skipped the load entirely and this build
-			// re-parsed both documents.
-			await buildModules(graphview({ cacheDir: fixture.cacheDir, profileBuild: true }), fixture);
-			profiled = infoSpy.mock.calls
-				.map((call) => String(call[0]))
-				.find((line) => line.includes("graph build"));
-		} finally {
-			infoSpy.mockRestore();
-		}
-
-		expect(profiled).toContain("cacheHits=2");
-		expect(profiled).toContain("cacheMisses=0");
+		expect(modules["virtual-graph-data"]).toContain("export const graphPayload");
+		expect(config.builderConfig?.plugins ?? []).toHaveLength(0);
 	});
 });

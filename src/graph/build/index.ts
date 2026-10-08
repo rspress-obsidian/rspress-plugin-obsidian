@@ -1,150 +1,127 @@
-import { readFile, stat } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
-import {
-	createGraphSignature,
-	type GraphBuildCache,
-	hashContent,
-	maybeLogGraphBuild,
-	pruneStaleDocuments,
-	type ScannedRouteDocument,
-} from "./cache.js";
+import { encodeGraphPayload, graphPayloadModuleSource } from "../graph-payload.js";
+import { loadGraphDocuments, planGraphDocuments } from "./documents.js";
 import { buildGraphData } from "./graph-builder.js";
-import {
-	extractDisplayTitle,
-	extractFrontmatterNames,
-	extractMarkdownLinks,
-} from "./link-extractor.js";
-import type { CollectedRoute, GraphBuildOptions, GraphBuildResult } from "./types.js";
+import { collectPageTexts, pageContentModuleSource, searchModuleSource } from "./page-content.js";
+import type {
+	CollectedRoute,
+	GraphBuildOptions,
+	GraphBuildResult,
+	GraphBuildState,
+} from "./types.js";
 
-export { createGraphBuildCache, loadDiskCache, saveDiskCache } from "./cache.js";
 export type {
 	CollectedRoute,
 	GraphBuildDiagnostics,
 	GraphBuildOptions,
 	GraphBuildResult,
+	GraphBuildState,
+	GraphModules,
 } from "./types.js";
 
-export async function buildGraphModule(
+export const GRAPH_DATA_MODULE = "virtual-graph-data";
+export const GRAPH_SEARCH_MODULE = "virtual-graph-search-data";
+export const PAGE_CONTENT_MODULE = "virtual-page-content-data";
+
+/**
+ * Build the graph's virtual modules for the routes Rspress publishes.
+ *
+ * An unchanged site — same routes, same content-index objects, same untracked
+ * files — reuses the previous modules without resolving a link or reading a
+ * file, which is what a dev-server refresh relies on to stay cheap.
+ */
+export async function buildGraphModules(
 	routes: CollectedRoute[],
-	cache: GraphBuildCache,
-	options: GraphBuildOptions = {},
+	state: GraphBuildState,
+	options: GraphBuildOptions,
 ): Promise<GraphBuildResult> {
-	pruneStaleDocuments(cache, routes);
-
-	const diagnostics: GraphBuildResult["diagnostics"] = {
-		routeCount: routes.length,
-		linkCount: 0,
-		cacheHits: 0,
-		cacheMisses: 0,
-		reusedModule: false,
-		totalMs: 0,
-		statMs: 0,
-		parseMs: 0,
-		resolveMs: 0,
-		serializeMs: 0,
-	};
-
-	const shouldProfile = options.profile ?? false;
 	const totalStart = performance.now();
-	const scannedDocuments = await Promise.all(
-		routes.map(async (route) => {
-			const statStart = shouldProfile ? performance.now() : 0;
-			const fileStat = await stat(route.absolutePath);
-			if (shouldProfile) {
-				diagnostics.statMs += performance.now() - statStart;
-			}
-
-			const cachedDocument = cache.documents.get(route.absolutePath);
-			if (
-				cachedDocument &&
-				cachedDocument.mtimeMs === fileStat.mtimeMs &&
-				cachedDocument.size === fileStat.size
-			) {
-				diagnostics.cacheHits += 1;
-				return {
-					route,
-					mtimeMs: fileStat.mtimeMs,
-					size: fileStat.size,
-					contentHash: cachedDocument.contentHash,
-					inferredTitle: cachedDocument.inferredTitle,
-					names: cachedDocument.names,
-					rawLinks: cachedDocument.rawLinks,
-				} satisfies ScannedRouteDocument;
-			}
-
-			const content = await readFile(route.absolutePath, "utf8");
-			const parseStart = shouldProfile ? performance.now() : 0;
-			const inferredTitle = extractDisplayTitle(content);
-			const names = extractFrontmatterNames(content);
-			const rawLinks = extractMarkdownLinks(content, route.absolutePath);
-			const contentHash = hashContent(content);
-			if (shouldProfile) {
-				diagnostics.parseMs += performance.now() - parseStart;
-			}
-			diagnostics.cacheMisses += 1;
-
-			const scannedDocument = {
-				route,
-				mtimeMs: fileStat.mtimeMs,
-				size: fileStat.size,
-				contentHash,
-				inferredTitle,
-				names,
-				rawLinks,
-			} satisfies ScannedRouteDocument;
-
-			cache.documents.set(route.absolutePath, {
-				mtimeMs: fileStat.mtimeMs,
-				size: fileStat.size,
-				contentHash,
-				inferredTitle,
-				names,
-				rawLinks,
-			});
-
-			return scannedDocument;
-		}),
-	);
-
-	const signature = createGraphSignature(scannedDocuments);
-	if (cache.lastResult?.signature === signature) {
-		diagnostics.reusedModule = true;
-		diagnostics.linkCount = cache.lastResult.graphData.links.length;
-		diagnostics.totalMs = performance.now() - totalStart;
-		maybeLogGraphBuild(diagnostics, options.logger, shouldProfile);
-
-		return {
-			graphData: cache.lastResult.graphData,
-			moduleSource: cache.lastResult.moduleSource,
-			diagnostics,
+	const plan = await planGraphDocuments(routes, options.docsRoot);
+	const key = JSON.stringify([
+		routes.map((route) => [route.routePath, route.absolutePath]),
+		plan.untrackedSignature,
+		options.base,
+		options.hoverPreviews === true,
+		options.onUnresolvedLink ?? "warn",
+	]);
+	const last = state.last;
+	if (
+		last &&
+		last.key === key &&
+		last.indexes.length === plan.indexes.length &&
+		last.indexes.every((index, position) => index === plan.indexes[position])
+	) {
+		const diagnostics = {
+			routeCount: routes.length,
+			nodeCount: last.result.graphData.nodes.length,
+			linkCount: last.result.graphData.links.length,
+			resolvedLinks: 0,
+			filesRead: 0,
+			reusedModule: true,
+			totalMs: performance.now() - totalStart,
 		};
+		logBuild(diagnostics, options);
+		return { ...last.result, diagnostics };
 	}
 
-	const resolveStart = shouldProfile ? performance.now() : 0;
-	const graphData = buildGraphData(routes, scannedDocuments, options.onUnresolvedLink);
-	if (shouldProfile) {
-		diagnostics.resolveMs = performance.now() - resolveStart;
-	}
-	diagnostics.linkCount = graphData.links.length;
+	const { documents, filesRead: documentReads } = await loadGraphDocuments(plan);
+	const { graph, unresolved, resolvedLinks } = buildGraphData(documents);
+	reportUnresolved(unresolved, options.onUnresolvedLink ?? "warn");
+	state.texts ??= new Map();
+	const texts = await collectPageTexts(documents, options.hoverPreviews === true, state.texts);
 
-	const serializeStart = shouldProfile ? performance.now() : 0;
-	const moduleSource = `export const graphData = ${JSON.stringify(graphData)}; export default graphData;`;
-	if (shouldProfile) {
-		diagnostics.serializeMs = performance.now() - serializeStart;
-	}
-	diagnostics.totalMs = performance.now() - totalStart;
-
-	cache.lastResult = {
-		signature,
-		graphData,
-		moduleSource,
+	const modules: Record<string, string> = {
+		[GRAPH_DATA_MODULE]: graphPayloadModuleSource(encodeGraphPayload(graph, options.base)),
+		[GRAPH_SEARCH_MODULE]: searchModuleSource(texts.search),
 	};
+	if (options.hoverPreviews) {
+		modules[PAGE_CONTENT_MODULE] = pageContentModuleSource(texts.previews, options.base);
+	}
 
-	maybeLogGraphBuild(diagnostics, options.logger, shouldProfile);
-
-	return {
-		graphData,
-		moduleSource,
-		diagnostics,
+	const result = { graphData: graph, modules };
+	state.last = { indexes: plan.indexes, key, result };
+	const diagnostics = {
+		routeCount: routes.length,
+		nodeCount: graph.nodes.length,
+		linkCount: graph.links.length,
+		resolvedLinks,
+		filesRead: documentReads + texts.filesRead,
+		reusedModule: false,
+		totalMs: performance.now() - totalStart,
 	};
+	logBuild(diagnostics, options);
+	return { ...result, diagnostics };
+}
+
+function reportUnresolved(
+	unresolved: Map<string, Set<string>>,
+	mode: "error" | "warn" | "ignore",
+): void {
+	if (unresolved.size === 0 || mode === "ignore") return;
+	const lines: string[] = [];
+	for (const [source, targets] of unresolved) {
+		for (const target of targets) lines.push(`  ${source} -> ${target}`);
+	}
+	// The markdown plugin reports the same links through `onBrokenLink` on the
+	// pages themselves; a site that already hears about them there can set
+	// `onUnresolvedLink: "ignore"`.
+	const message = `[rspress-plugin-obsidian:graph] ${unresolved.size} page(s) reference ${lines.length} unresolved internal link(s):\n${lines.join("\n")}`;
+	if (mode === "error") throw new Error(message);
+	console.warn(message);
+}
+
+function logBuild(diagnostics: GraphBuildResult["diagnostics"], options: GraphBuildOptions): void {
+	if (!options.profile) return;
+	(options.logger ?? console.info)(
+		[
+			"[rspress-plugin-obsidian:graph] graph build",
+			`routes=${diagnostics.routeCount}`,
+			`nodes=${diagnostics.nodeCount}`,
+			`links=${diagnostics.linkCount}`,
+			`resolvedLinks=${diagnostics.resolvedLinks}`,
+			`filesRead=${diagnostics.filesRead}`,
+			`reusedModule=${diagnostics.reusedModule}`,
+			`total=${diagnostics.totalMs.toFixed(1)}ms`,
+		].join(" | "),
+	);
 }

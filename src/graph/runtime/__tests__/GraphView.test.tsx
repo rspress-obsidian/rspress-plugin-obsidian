@@ -4,10 +4,13 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 if (!globalThis.document) GlobalRegistrator.register();
 
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { createRef } from "react";
 import { hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import type { GraphViewHandle } from "../GraphView";
 import { DARK_COLORS, LIGHT_COLORS } from "../palette/colors";
+import { graphDataModule, graphNode } from "./graph-fixture";
 
 // The graph runtime reads the path from the document; this test renders a
 // panel anchored on /guide.
@@ -16,26 +19,32 @@ history.replaceState({}, "", "/guide");
 const { mock } = require("bun:test");
 
 // `virtual-graph-data` is a build-time module; provide a stable fixture.
-const mockGraphData = {
-	nodes: [
-		{ id: "/", label: "Home", routePath: "/" },
-		{ id: "/guide", label: "Guide", routePath: "/guide" },
-		{ id: "/api", label: "API", routePath: "/api" },
-	],
-	links: [
-		{ source: "/", target: "/guide" },
-		{ source: "/guide", target: "/api" },
-	],
-};
+mock.module("virtual-graph-data", () =>
+	graphDataModule(
+		[graphNode("/", "Home"), graphNode("/guide", "Guide"), graphNode("/api", "API")],
+		[
+			{ source: "/", target: "/guide" },
+			{ source: "/guide", target: "/api" },
+		],
+	),
+);
 
-mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
+/** Every `graphData` object the renderer was handed, in render order. */
+const graphDataSeen: unknown[] = [];
+let lastProps: Record<string, unknown> = {};
+
 // `react-force-graph-2d` renders to a canvas, so it has no DOM of its own and
 // the palette it is handed would otherwise be invisible to a test. Echo it back
 // as an attribute so a paint's resolved theme can be read from the DOM.
 mock.module("react-force-graph-2d", () => ({
-	default: ({ nodeColor }: { nodeColor?: (node: { isCurrent?: boolean }) => string }) => (
-		<div data-testid="force-graph" data-node-color={nodeColor?.({}) ?? ""} />
-	),
+	default: (props: {
+		nodeColor?: (node: { isCurrent?: boolean }) => string;
+		graphData?: unknown;
+	}) => {
+		graphDataSeen.push(props.graphData);
+		lastProps = props;
+		return <div data-testid="force-graph" data-node-color={props.nodeColor?.({}) ?? ""} />;
+	},
 }));
 
 // Re-import the component under test AFTER mocks are registered.
@@ -62,9 +71,9 @@ describe("GraphView error boundary", () => {
 			</GraphErrorBoundary>,
 		);
 
-		// The fallback names the package to install: without it the reader has a
-		// dead panel and no actionable information.
-		expect(textIn(container, "Graph view unavailable — install react-force-graph-2d")).toBe(true);
+		// A missing package fails the site build, so what reaches a reader is a
+		// renderer that failed to load or crashed — the text must say that.
+		expect(textIn(container, "Graph renderer failed to load")).toBe(true);
 		errorSpy.mockRestore();
 	});
 
@@ -76,7 +85,65 @@ describe("GraphView error boundary", () => {
 		);
 
 		expect(textIn(container, "working child")).toBe(true);
-		expect(textIn(container, "Graph view unavailable")).toBe(false);
+		expect(textIn(container, "Graph renderer failed to load")).toBe(false);
+	});
+});
+
+describe("GraphView renderer props", () => {
+	beforeEach(() => {
+		cleanup();
+		graphDataSeen.length = 0;
+	});
+
+	test("re-rendering without a data change hands the renderer the same graphData object", async () => {
+		// force-graph reheats the simulation whenever `graphData` changes identity,
+		// so hover-driven re-renders must not create a new one.
+		const ref = createRef<GraphViewHandle>();
+		const { rerender } = render(<GraphView ref={ref} width={400} height={300} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+		const onNodeHover = lastProps.onNodeHover as (node: unknown) => void;
+		await act(async () => {
+			onNodeHover({ id: "/api", label: "API" });
+		});
+		rerender(<GraphView ref={ref} width={420} height={300} />);
+
+		const seen = graphDataSeen.filter(Boolean);
+		expect(seen.length).toBeGreaterThan(2);
+		expect(new Set(seen).size).toBe(1);
+	});
+
+	test("hovering changes the painter identity, so the canvas repaints after the engine cools", async () => {
+		render(<GraphView width={400} height={300} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+		const before = lastProps.nodeCanvasObject;
+		await act(async () => {
+			(lastProps.onNodeHover as (node: unknown) => void)({ id: "/api", label: "API" });
+		});
+		expect(lastProps.nodeCanvasObject).not.toBe(before);
+	});
+
+	test("lists the visible pages as links for keyboard and screen-reader users", async () => {
+		const { container } = render(<GraphView width={400} height={300} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+		const nav = container.querySelector("nav[aria-label='Pages in this graph']");
+		const links = [...(nav?.querySelectorAll("a") ?? [])];
+		expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
+			["Guide", "/guide"],
+			["API", "/api"],
+			["Home", "/"],
+		]);
+		expect(links[0]?.getAttribute("aria-current")).toBe("page");
+
+		// Focus reveals the list over the graph so a sighted keyboard user sees it.
+		fireEvent.focus(links[1] as HTMLAnchorElement);
+		expect((nav as HTMLElement).style.position).toBe("absolute");
+		expect((nav as HTMLElement).style.width).not.toBe("1px");
 	});
 });
 

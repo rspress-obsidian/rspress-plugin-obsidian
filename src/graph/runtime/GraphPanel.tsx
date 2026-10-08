@@ -1,23 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigateTo, usePathname } from "../../shared/usePathname.js";
+import { usePathname } from "../../shared/usePathname.js";
 import type { GraphViewGroup } from "../types.js";
 import GraphIcon from "./components/GraphIcon.js";
 import ZoomButton from "./components/ZoomButton.js";
-import { type GraphScope, MAX_DEPTH } from "./deriveGraphViewData.js";
+import { DEFAULT_GRAPH_FILTERS, MAX_DEPTH } from "./deriveGraphViewData.js";
+import GraphSettings, { type GraphFilterSettings } from "./GraphSettings.js";
 import GraphView, {
 	type GraphViewColors,
-	type GraphViewFilters,
 	type GraphViewHandle,
 	type GraphViewStats,
 } from "./GraphView.js";
 import {
+	LOCAL_STORAGE_KEY_DISPLAY,
 	LOCAL_STORAGE_KEY_FILTERS,
+	LOCAL_STORAGE_KEY_FORCES,
 	LOCAL_STORAGE_KEY_OPEN,
 	LOCAL_STORAGE_KEY_POS,
 } from "./graph-panel-storage.js";
+import { parseGraphQuery } from "./graph-query.js";
+import { loadGraphSearchText } from "./graph-search-data.js";
+import {
+	DEFAULT_DISPLAY_SETTINGS,
+	DEFAULT_FORCE_SETTINGS,
+	type GraphDisplaySettings,
+	type GraphForceSettings,
+	readDisplaySettings,
+	readForceSettings,
+} from "./graph-settings.js";
 
 interface GraphPanelProps {
 	defaultOpen?: boolean;
+	/**
+	 * The reader asked for the panel (FAB click or `g`) before this chunk
+	 * loaded. The panel then takes focus on open, as it does when opened after
+	 * loading; a `defaultOpen` panel leaves focus alone.
+	 */
+	readerRequested?: boolean;
 	colors?: GraphViewColors;
 	groups?: readonly GraphViewGroup[];
 }
@@ -26,6 +44,49 @@ const STYLE_ID = "graph-panel-keyframes";
 const PANEL_ID = "rspress-graph-view-panel";
 const PANEL_TITLE_ID = "rspress-graph-view-title";
 const GRAPH_REGION_ID = "rspress-graph-view-region";
+const SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+/** Secondary text: `--rp-c-text-2` is ≥ 4.5:1 on Rspress's light and dark backgrounds. */
+const SECONDARY_TEXT = "var(--rp-c-text-2, #475569)";
+
+const DEFAULT_FILTER_SETTINGS: GraphFilterSettings = {
+	scope: DEFAULT_GRAPH_FILTERS.scope,
+	depth: DEFAULT_GRAPH_FILTERS.depth,
+	incoming: DEFAULT_GRAPH_FILTERS.incoming,
+	outgoing: DEFAULT_GRAPH_FILTERS.outgoing,
+	neighborLinks: DEFAULT_GRAPH_FILTERS.neighborLinks,
+	showTags: DEFAULT_GRAPH_FILTERS.showTags,
+	showAttachments: DEFAULT_GRAPH_FILTERS.showAttachments,
+	existingOnly: DEFAULT_GRAPH_FILTERS.existingOnly,
+	showOrphans: DEFAULT_GRAPH_FILTERS.showOrphans,
+};
+
+/** Stored filter toggles, each validated; unknown or malformed fields keep their default. */
+function readFilterSettings(value: unknown): GraphFilterSettings {
+	const stored: Record<string, unknown> = value && typeof value === "object" ? { ...value } : {};
+	const flag = (key: keyof GraphFilterSettings) => {
+		const raw = stored[key];
+		return typeof raw === "boolean" ? raw : (DEFAULT_FILTER_SETTINGS[key] as boolean);
+	};
+	return {
+		scope: stored.scope === "global" ? "global" : "local",
+		depth:
+			typeof stored.depth === "number" && Number.isFinite(stored.depth)
+				? Math.min(MAX_DEPTH, Math.max(1, Math.round(stored.depth)))
+				: DEFAULT_FILTER_SETTINGS.depth,
+		incoming: flag("incoming"),
+		outgoing: flag("outgoing"),
+		neighborLinks: flag("neighborLinks"),
+		showTags: flag("showTags"),
+		showAttachments: flag("showAttachments"),
+		existingOnly: flag("existingOnly"),
+		showOrphans: flag("showOrphans"),
+	};
+}
+
+function readStoredJson(key: string): unknown {
+	const raw = localStorage.getItem(key);
+	return raw ? JSON.parse(raw) : undefined;
+}
 
 function injectKeyframes() {
 	if (typeof document === "undefined") return;
@@ -61,9 +122,16 @@ function injectKeyframes() {
 	document.head.appendChild(style);
 }
 
-export default function GraphPanel({ defaultOpen = false, colors, groups }: GraphPanelProps) {
+/** Screens too narrow for the floating panel to sit beside the article. */
+const NARROW_VIEWPORT_QUERY = "(max-width: 639px)";
+
+export default function GraphPanel({
+	defaultOpen = false,
+	readerRequested = false,
+	colors,
+	groups,
+}: GraphPanelProps) {
 	const pathname = usePathname();
-	const navigateTo = useNavigateTo();
 	const [isHydrated, setIsHydrated] = useState(false);
 	const [isOpen, setIsOpen] = useState(defaultOpen);
 	const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -74,10 +142,12 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 	const [stats, setStats] = useState<GraphViewStats | null>(null);
 	const [filtersOpen, setFiltersOpen] = useState(false);
 	const [query, setQuery] = useState("");
-	const [depth, setDepth] = useState(1);
-	const [showTags, setShowTags] = useState(true);
-	const [showOrphans, setShowOrphans] = useState(true);
-	const [scope, setScope] = useState<GraphScope>("local");
+	const [filterSettings, setFilterSettings] = useState(DEFAULT_FILTER_SETTINGS);
+	const [display, setDisplay] = useState<GraphDisplaySettings>(DEFAULT_DISPLAY_SETTINGS);
+	const [forces, setForces] = useState<GraphForceSettings>(DEFAULT_FORCE_SETTINGS);
+	const [searchText, setSearchText] = useState<ReadonlyMap<string, string>>();
+	const [timelapseRun, setTimelapseRun] = useState(0);
+	const [isAnimating, setIsAnimating] = useState(false);
 	const panelRef = useRef<HTMLDivElement>(null);
 	const wrapperRef = useRef<HTMLDivElement>(null);
 	const graphViewRef = useRef<GraphViewHandle>(null);
@@ -86,7 +156,7 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 	// True when the reader opened the panel themselves. Only then does the panel
 	// take focus on open, and only then does closing it hand focus back to the FAB:
 	// a `defaultOpen` panel must not move focus the reader never asked it to move.
-	const readerOpenedRef = useRef(false);
+	const readerOpenedRef = useRef(readerRequested);
 
 	const isDragging = useRef(false);
 	const dragStart = useRef({ x: 0, y: 0, posX: 0, posY: 0 });
@@ -96,20 +166,19 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 		try {
 			const storedOpen = localStorage.getItem(LOCAL_STORAGE_KEY_OPEN);
 			if (storedOpen !== null) setIsOpen(storedOpen === "true");
+			// On a phone the open panel covers about half the article, so
+			// `defaultOpen` does not apply there; the reader opens it from the FAB
+			// or `g`, and that choice is remembered as on any screen.
+			else if (!readerOpenedRef.current && window.matchMedia?.(NARROW_VIEWPORT_QUERY).matches) {
+				setIsOpen(false);
+			}
 
 			const storedPos = localStorage.getItem(LOCAL_STORAGE_KEY_POS);
 			if (storedPos) setPos(JSON.parse(storedPos));
 
-			const storedFilters = localStorage.getItem(LOCAL_STORAGE_KEY_FILTERS);
-			if (storedFilters) {
-				const parsed = JSON.parse(storedFilters) as Partial<GraphViewFilters>;
-				if (typeof parsed.depth === "number") {
-					setDepth(Math.min(MAX_DEPTH, Math.max(1, Math.round(parsed.depth))));
-				}
-				if (typeof parsed.showTags === "boolean") setShowTags(parsed.showTags);
-				if (typeof parsed.showOrphans === "boolean") setShowOrphans(parsed.showOrphans);
-				if (parsed.scope === "global" || parsed.scope === "local") setScope(parsed.scope);
-			}
+			setFilterSettings(readFilterSettings(readStoredJson(LOCAL_STORAGE_KEY_FILTERS)));
+			setDisplay(readDisplaySettings(readStoredJson(LOCAL_STORAGE_KEY_DISPLAY)));
+			setForces(readForceSettings(readStoredJson(LOCAL_STORAGE_KEY_FORCES)));
 		} catch {
 			// localStorage may be unavailable (private mode, SSR, storage disabled)
 		}
@@ -125,14 +194,35 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 		try {
 			localStorage.setItem(LOCAL_STORAGE_KEY_OPEN, String(isOpen));
 			localStorage.setItem(LOCAL_STORAGE_KEY_POS, JSON.stringify(pos));
-			localStorage.setItem(
-				LOCAL_STORAGE_KEY_FILTERS,
-				JSON.stringify({ depth, showTags, showOrphans, scope }),
-			);
+			localStorage.setItem(LOCAL_STORAGE_KEY_FILTERS, JSON.stringify(filterSettings));
+			localStorage.setItem(LOCAL_STORAGE_KEY_DISPLAY, JSON.stringify(display));
+			localStorage.setItem(LOCAL_STORAGE_KEY_FORCES, JSON.stringify(forces));
 		} catch {
 			// localStorage may be unavailable (private mode, SSR, storage disabled)
 		}
-	}, [isOpen, pos, depth, showTags, showOrphans, scope, isHydrated]);
+	}, [isOpen, pos, filterSettings, display, forces, isHydrated]);
+
+	// Note text loads only once a query (or a colour group) reads it.
+	const needsSearchText = useMemo(
+		() =>
+			parseGraphQuery(query).needsText ||
+			(groups ?? []).some((group) => parseGraphQuery(group.query).needsText),
+		[query, groups],
+	);
+	useEffect(() => {
+		if (!needsSearchText || searchText) return;
+		let active = true;
+		loadGraphSearchText()
+			.then((text) => {
+				if (active) setSearchText(text);
+			})
+			.catch(() => {
+				// Without the text, text terms keep matching names and paths only.
+			});
+		return () => {
+			active = false;
+		};
+	}, [needsSearchText, searchText]);
 
 	const handlePointerDown = useCallback(
 		(e: React.PointerEvent<HTMLDivElement>) => {
@@ -211,26 +301,36 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && isOpen) {
+			const focusInPanel =
+				panelRef.current?.contains(document.activeElement) === true ||
+				document.activeElement === fabRef.current;
+
+			// Escape belongs to whatever has focus: the panel answers it only when
+			// focus is in the panel (or on the FAB that controls it), so it cannot
+			// steal Escape from the search modal or another widget.
+			if (e.key === "Escape" && isOpen && focusInPanel) {
 				// A non-empty search clears first — a filter bar you cannot
 				// backspace out of with Escape is a trap — and only the next
 				// Escape closes the panel.
+				e.preventDefault();
 				if (query) {
-					e.preventDefault();
 					setQuery("");
 					return;
 				}
-				e.preventDefault();
 				// A panel the reader opened hands focus back to the FAB; an auto-opened
 				// one leaves focus wherever it is (another plugin's dialog, say).
 				const readerOpened = readerOpenedRef.current;
 				setIsOpen(false);
 				setIsFullscreen(false);
-				if (readerOpened) fabRef.current?.focus();
+				if (readerOpened || panelRef.current?.contains(document.activeElement)) {
+					fabRef.current?.focus();
+				}
 				return;
 			}
 
-			if (e.key === "Tab" && isOpen && panelRef.current) {
+			// Only the fullscreen view is modal; the floating panel lets Tab move on
+			// to the page like any other non-modal dialog.
+			if (e.key === "Tab" && isOpen && isFullscreen && panelRef.current) {
 				const focusableElements = panelRef.current.querySelectorAll<HTMLElement>(
 					"button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
 				);
@@ -269,20 +369,17 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 		};
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [isOpen, query]);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: stats track route and filter changes; graphViewRef is stable
-	useEffect(() => {
-		const s = graphViewRef.current?.getStats();
-		if (s) setStats(s);
-	}, [pathname, depth, showTags, showOrphans, scope, query]);
+	}, [isOpen, isFullscreen, query]);
 
 	// Stable identity: GraphView re-derives only when a filter value changes,
 	// not on every panel re-render (position drags, stats ticks).
-	const filters = useMemo(
-		() => ({ query, depth, showTags, showOrphans, scope }),
-		[query, depth, showTags, showOrphans, scope],
-	);
+	const filters = useMemo(() => ({ ...filterSettings, query }), [filterSettings, query]);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: stats track route, filter and data changes; graphViewRef is stable
+	useEffect(() => {
+		const s = graphViewRef.current?.getStats();
+		if (s) setStats(s);
+	}, [pathname, filters, searchText]);
 
 	const handleToggle = useCallback(() => {
 		readerOpenedRef.current = true;
@@ -296,7 +393,17 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 		fabRef.current?.focus();
 	}, []);
 
-	const handleNodeClick = useCallback((routePath: string) => navigateTo(routePath), [navigateTo]);
+	const handleAnimate = useCallback(() => {
+		setIsAnimating(true);
+		setTimelapseRun((run) => run + 1);
+	}, []);
+	const handleAnimateEnd = useCallback(() => setIsAnimating(false), []);
+
+	const handleReset = useCallback(() => {
+		setFilterSettings(DEFAULT_FILTER_SETTINGS);
+		setDisplay(DEFAULT_DISPLAY_SETTINGS);
+		setForces(DEFAULT_FORCE_SETTINGS);
+	}, []);
 
 	const FOOTER_HEIGHT = 22;
 	const HEADER_HEIGHT = 34;
@@ -308,8 +415,8 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 		stats && stats.neighborCount < stats.neighborTotal
 			? `${stats.neighborCount} of ${stats.neighborTotal} neighbors`
 			: null;
-	// The global scope caps the drawn nodes so d3-force stays usable; say how
-	// many were left out rather than presenting a partial vault as the whole one.
+	// The render cap keeps d3-force usable; say how many nodes it left out
+	// rather than presenting a partial graph as the whole one.
 	const truncationShown =
 		stats && stats.truncatedCount > 0 ? `${stats.truncatedCount} more not drawn` : null;
 	const graphHeight =
@@ -412,7 +519,7 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 						id={PANEL_ID}
 						ref={panelRef}
 						role="dialog"
-						aria-modal="false"
+						aria-modal={isFullscreen ? "true" : "false"}
 						aria-labelledby={PANEL_TITLE_ID}
 						aria-describedby={GRAPH_REGION_ID}
 						style={{
@@ -487,8 +594,7 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 									display: "flex",
 									alignItems: "center",
 									gap: 6,
-									color: "var(--rp-c-text-1, #d0d0d0)",
-									opacity: 0.9,
+									color: "var(--rp-c-text-1, #1f2937)",
 									userSelect: "none",
 								}}
 							>
@@ -498,10 +604,10 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 									style={{
 										fontSize: 11,
 										fontWeight: 600,
-										fontFamily:
-											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+										fontFamily: SYSTEM_FONT,
 										letterSpacing: "0.05em",
 										textTransform: "uppercase",
+										whiteSpace: "nowrap",
 									}}
 								>
 									Graph View
@@ -649,7 +755,7 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 										borderRadius: 6,
 										border: "none",
 										background: "transparent",
-										color: "color-mix(in srgb, var(--rp-c-text-2, #64748b) 70%, transparent)",
+										color: SECONDARY_TEXT,
 										cursor: "pointer",
 										display: "flex",
 										alignItems: "center",
@@ -660,12 +766,11 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 									onMouseEnter={(e) => {
 										e.currentTarget.style.background =
 											"color-mix(in srgb, #ef4444 10%, transparent)";
-										e.currentTarget.style.color = "#ef4444";
+										e.currentTarget.style.color = "#b91c1c";
 									}}
 									onMouseLeave={(e) => {
 										e.currentTarget.style.background = "transparent";
-										e.currentTarget.style.color =
-											"color-mix(in srgb, var(--rp-c-text-2, #64748b) 70%, transparent)";
+										e.currentTarget.style.color = SECONDARY_TEXT;
 									}}
 									aria-label="Close graph view"
 								>
@@ -705,7 +810,7 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 									type="search"
 									value={query}
 									onChange={(event) => setQuery(event.target.value)}
-									placeholder="Search… (path:, file:, tag:)"
+									placeholder="Search… (path:, tag:, content:, OR, /re/)"
 									aria-label="Filter graph nodes"
 									style={{
 										flex: 1,
@@ -716,186 +821,20 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 										border:
 											"1px solid color-mix(in srgb, var(--rp-c-divider, #e2e8f0) 60%, transparent)",
 										background: "color-mix(in srgb, var(--rp-c-bg, #ffffff) 70%, transparent)",
-										color: "var(--rp-c-text-1, #334155)",
-										fontFamily:
-											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+										color: "var(--rp-c-text-1, #1f2937)",
+										fontFamily: SYSTEM_FONT,
 										outline: "none",
 									}}
 								/>
-								{/* Local is the neighborhood of the current page; global is the
-								    whole vault with the current page highlighted. */}
-								<div
-									role="group"
-									aria-label="Graph scope"
-									style={{
-										display: "flex",
-										alignItems: "center",
-										gap: 1,
-										flexShrink: 0,
-										border:
-											"1px solid color-mix(in srgb, var(--rp-c-divider, #e8e8f0) 50%, transparent)",
-										borderRadius: 6,
-										padding: "1px",
-									}}
-								>
-									{(["local", "global"] as const).map((value) => {
-										const active = scope === value;
-										return (
-											<button
-												key={value}
-												type="button"
-												aria-label={`${value === "local" ? "Local" : "Global"} graph`}
-												aria-pressed={active}
-												onClick={() => setScope(value)}
-												style={{
-													border: "none",
-													borderRadius: 4,
-													padding: "1px 6px",
-													fontSize: 10,
-													lineHeight: "16px",
-													cursor: "pointer",
-													background: active
-														? "color-mix(in srgb, var(--rp-c-brand, #3b82f6) 18%, transparent)"
-														: "transparent",
-													color: active
-														? "var(--rp-c-text-1, #334155)"
-														: "var(--rp-c-text-2, #64748b)",
-													fontWeight: active ? 600 : 400,
-													fontFamily:
-														"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-												}}
-											>
-												{value === "local" ? "Local" : "Global"}
-											</button>
-										);
-									})}
-								</div>
-								<div
-									style={{
-										display: "flex",
-										alignItems: "center",
-										gap: 1,
-										flexShrink: 0,
-										border:
-											"1px solid color-mix(in srgb, var(--rp-c-divider, #e8e8f0) 50%, transparent)",
-										borderRadius: 6,
-										padding: "1px",
-									}}
-									// The stepper is one control; the count between the buttons
-									// announces itself when it changes. Depth sizes the local
-									// neighborhood, so the control is hidden in the global scope.
-									role="group"
-									aria-label="Neighborhood depth"
-									hidden={scope === "global"}
-								>
-									<button
-										type="button"
-										aria-label="Decrease depth"
-										disabled={depth <= 1}
-										onClick={() => setDepth((value) => Math.max(1, value - 1))}
-										style={{
-											width: 18,
-											height: 18,
-											border: "none",
-											borderRadius: 4,
-											background: "transparent",
-											color: "var(--rp-c-text-2, #64748b)",
-											cursor: depth <= 1 ? "default" : "pointer",
-											fontSize: 12,
-											lineHeight: 1,
-											padding: 0,
-											opacity: depth <= 1 ? 0.4 : 1,
-										}}
-									>
-										−
-									</button>
-									<span
-										aria-live="polite"
-										style={{
-											fontSize: 10,
-											minWidth: 12,
-											textAlign: "center",
-											color: "var(--rp-c-text-2, #64748b)",
-											fontFamily:
-												"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-											userSelect: "none",
-										}}
-									>
-										{depth}
-									</span>
-									<button
-										type="button"
-										aria-label="Increase depth"
-										disabled={depth >= MAX_DEPTH}
-										onClick={() => setDepth((value) => Math.min(MAX_DEPTH, value + 1))}
-										style={{
-											width: 18,
-											height: 18,
-											border: "none",
-											borderRadius: 4,
-											background: "transparent",
-											color: "var(--rp-c-text-2, #64748b)",
-											cursor: depth >= MAX_DEPTH ? "default" : "pointer",
-											fontSize: 12,
-											lineHeight: 1,
-											padding: 0,
-											opacity: depth >= MAX_DEPTH ? 0.4 : 1,
-										}}
-									>
-										+
-									</button>
-								</div>
-								<label
-									style={{
-										display: "flex",
-										alignItems: "center",
-										gap: 3,
-										flexShrink: 0,
-										fontSize: 10,
-										color: "var(--rp-c-text-2, #64748b)",
-										fontFamily:
-											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-										userSelect: "none",
-										cursor: "pointer",
-									}}
-								>
-									<input
-										type="checkbox"
-										checked={showTags}
-										onChange={(event) => setShowTags(event.target.checked)}
-									/>
-									Tags
-								</label>
-								<label
-									style={{
-										display: "flex",
-										alignItems: "center",
-										gap: 3,
-										flexShrink: 0,
-										fontSize: 10,
-										color: "var(--rp-c-text-2, #64748b)",
-										fontFamily:
-											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-										userSelect: "none",
-										cursor: "pointer",
-									}}
-								>
-									<input
-										type="checkbox"
-										checked={showOrphans}
-										onChange={(event) => setShowOrphans(event.target.checked)}
-									/>
-									Orphans
-								</label>
 							</div>
 						)}
 
 						<div
 							id={GRAPH_REGION_ID}
-							role="img"
+							role="group"
 							aria-label={
 								stats
-									? `Graph view showing ${stats.nodes} ${stats.nodes === 1 ? "node" : "nodes"} and ${stats.links} ${stats.links === 1 ? "link" : "links"}${neighborsShown ? ` (${neighborsShown})` : ""}${truncationShown ? ` (${truncationShown})` : ""}. Click graph nodes to navigate documentation pages.`
+									? `Graph view showing ${stats.nodes} ${stats.nodes === 1 ? "node" : "nodes"} and ${stats.links} ${stats.links === 1 ? "link" : "links"}${neighborsShown ? ` (${neighborsShown})` : ""}${truncationShown ? ` (${truncationShown})` : ""}. The pages are listed as links after the graph.`
 									: "Interactive documentation graph loading."
 							}
 							style={{ position: "relative", width: "100%", flex: 1, overflow: "hidden" }}
@@ -904,13 +843,46 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 								ref={graphViewRef}
 								width={actualWidth}
 								height={graphHeight}
-								onNodeClick={handleNodeClick}
 								colors={colors}
 								filters={filters}
 								groups={groups}
+								display={display}
+								forces={forces}
+								searchText={searchText}
+								timelapseRun={timelapseRun}
+								onTimelapseEnd={handleAnimateEnd}
 							/>
 
-							{/* Hover tooltip removed for Obsidian-like canvas-only text */}
+							{filtersOpen && (
+								<section
+									aria-label="Graph settings"
+									style={{
+										position: "absolute",
+										top: 0,
+										right: 0,
+										bottom: 0,
+										width: Math.min(220, actualWidth - 16),
+										overflowY: "auto",
+										padding: "4px 10px 10px",
+										boxSizing: "border-box",
+										background: "color-mix(in srgb, var(--rp-c-bg, #ffffff) 94%, transparent)",
+										borderLeft: "1px solid var(--rp-c-divider, #e2e8f0)",
+										zIndex: 4,
+									}}
+								>
+									<GraphSettings
+										filters={filterSettings}
+										onFiltersChange={setFilterSettings}
+										display={display}
+										onDisplayChange={setDisplay}
+										forces={forces}
+										onForcesChange={setForces}
+										onAnimate={handleAnimate}
+										isAnimating={isAnimating}
+										onReset={handleReset}
+									/>
+								</section>
+							)}
 						</div>
 
 						<div
@@ -924,89 +896,41 @@ export default function GraphPanel({ defaultOpen = false, colors, groups }: Grap
 								background: "color-mix(in srgb, var(--rp-c-bg, #ffffff) 40%, transparent)",
 								flexShrink: 0,
 								gap: 4,
+								fontSize: 10,
+								fontFamily: SYSTEM_FONT,
+								color: SECONDARY_TEXT,
+								userSelect: "none",
 							}}
 						>
 							{stats ? (
-								<>
-									<svg
-										aria-hidden="true"
-										width="10"
-										height="10"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										strokeWidth="2"
-										strokeLinecap="round"
-										style={{
-											color: "color-mix(in srgb, var(--rp-c-text-2, #a0a0a0) 60%, transparent)",
-											flexShrink: 0,
-										}}
-									>
-										<circle cx="12" cy="12" r="4" />
-									</svg>
-									<span
-										aria-live="polite"
-										style={{
-											fontSize: 10,
-											fontFamily:
-												"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-											color: "color-mix(in srgb, var(--rp-c-text-2, #64748b) 80%, transparent)",
-											userSelect: "none",
-											letterSpacing: "0.02em",
-										}}
-									>
-										{stats.nodes} {stats.nodes === 1 ? "node" : "nodes"}
-										{" · "}
-										{stats.links} {stats.links === 1 ? "link" : "links"}
-										{neighborsShown ? (
-											<>
-												{" · "}
-												{neighborsShown}
-											</>
-										) : null}
-										{truncationShown ? (
-											<>
-												{" · "}
-												{truncationShown}
-											</>
-										) : null}
-									</span>
-								</>
-							) : (
-								<span
-									style={{
-										fontSize: 10,
-										color: "color-mix(in srgb, var(--rp-c-text-2, #64748b) 40%, transparent)",
-										fontFamily:
-											"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-										userSelect: "none",
-									}}
-								>
-									Loading…
+								<span aria-live="polite" style={{ letterSpacing: "0.02em" }}>
+									{stats.nodes} {stats.nodes === 1 ? "node" : "nodes"}
+									{" · "}
+									{stats.links} {stats.links === 1 ? "link" : "links"}
+									{neighborsShown ? (
+										<>
+											{" · "}
+											{neighborsShown}
+										</>
+									) : null}
+									{truncationShown ? (
+										<>
+											{" · "}
+											{truncationShown}
+										</>
+									) : null}
 								</span>
+							) : (
+								<span>Loading…</span>
 							)}
 
-							<span
-								style={{
-									marginLeft: "auto",
-									fontSize: 10,
-									color: "color-mix(in srgb, var(--rp-c-text-2, #64748b) 40%, transparent)",
-									fontFamily:
-										"system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-									userSelect: "none",
-									display: "flex",
-									alignItems: "center",
-									gap: 3,
-								}}
-							>
+							<span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 3 }}>
 								<kbd
 									style={{
 										fontSize: 9,
 										padding: "0px 4px",
 										borderRadius: 3,
-										border:
-											"1px solid color-mix(in srgb, var(--rp-c-divider, #e2e8f0) 60%, transparent)",
-										background: "color-mix(in srgb, var(--rp-c-divider, #e2e8f0) 20%, transparent)",
+										border: "1px solid var(--rp-c-divider, #cbd5e1)",
 										lineHeight: "14px",
 										fontFamily: "inherit",
 									}}

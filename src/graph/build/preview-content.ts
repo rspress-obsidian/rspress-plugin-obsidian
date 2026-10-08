@@ -38,6 +38,9 @@ export function toPreviewText(markdown: string): string {
 			.replace(/^>\s?/gm, "")
 			.replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
 			.replace(/%%[\s\S]*?%%/g, "")
+			// Hidden on the page, so hidden in the preview — the tag rule below
+			// never matches `<!--`, and an unclosed comment hides the rest.
+			.replace(/<!--[\s\S]*?(?:-->|$)/g, "")
 			// Embeds and wikilinks differ only by the leading `!`.
 			.replace(
 				/!?\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|([^\]]*))?\]\]/g,

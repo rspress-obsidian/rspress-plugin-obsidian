@@ -37,6 +37,13 @@ describe("toPreviewText", () => {
 		expect(toPreviewText("<b>bold</b> prose")).toBe("bold prose");
 	});
 
+	test("hides HTML comments the page hides, closed or not", () => {
+		expect(toPreviewText("Visible <!-- internal: password is hunter2 --> text")).toBe(
+			"Visible text",
+		);
+		expect(toPreviewText("Visible <!-- never closed\nsecret")).toBe("Visible");
+	});
+
 	test("keeps arithmetic and snake_case intact", () => {
 		expect(toPreviewText("2 * 3 = 6")).toBe("2 * 3 = 6");
 		expect(toPreviewText("snake_case survives")).toBe("snake_case survives");

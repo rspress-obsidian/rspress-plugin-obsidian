@@ -1,5 +1,12 @@
 import * as path from "node:path";
+import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
+import { getPublishedContent } from "../shared/published-content.js";
+import { buildGraphModules, type CollectedRoute, type GraphBuildState } from "./build/index.js";
+import { createGraphDevRefresher } from "./dev-refresh.js";
+import type { GraphViewColors } from "./runtime/GraphView.js";
+import type { GraphViewGroup } from "./types.js";
+import { normalizeRoutePath } from "./utils.js";
 
 // Runtime components and styles live in `dist/graph/runtime/` when published
 // and `src/graph/runtime/` when running from source.
@@ -12,35 +19,21 @@ function findRuntimeFile(name: string): string {
 	);
 }
 
-import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
-import {
-	buildGraphModule,
-	type CollectedRoute,
-	createGraphBuildCache,
-	loadDiskCache,
-	saveDiskCache,
-} from "./build/index.js";
-import { buildPageContentModule } from "./build/page-content.js";
-import type { GraphViewColors } from "./runtime/GraphView.js";
-import type { GraphViewGroup } from "./types.js";
-import { normalizeRoutePath } from "./utils.js";
-
 export interface RspressPluginGraphViewOptions {
-	/** Panel starts expanded on first paint.
+	/** Panel starts expanded on first paint — except on screens narrower than
+	 * 640px, where it would cover the article. A visitor's own toggle wins.
 	 * @default false */
 	defaultOpen?: boolean;
-	/** Log graph build timings. Defaults to the `RSPRESS_GRAPH_VIEW_PROFILE=1`
-	 * environment variable when unset.
+	/** Log graph build counts and timings. Defaults to the
+	 * `RSPRESS_GRAPH_VIEW_PROFILE=1` environment variable when unset.
 	 * @default false */
 	profileBuild?: boolean;
 	/** Node, link and accent colours for the panel; the built-in palette is
 	 * used for whatever is omitted. */
 	colors?: GraphViewColors;
-	/** Directory holding the on-disk graph cache between builds. Defaults to
-	 * `<project>/node_modules/.cache/rspress-graph-view`. */
-	cacheDir?: string;
-	/** Ship per-page content and register the hover-preview component, so
-	 * hovering a node previews the page it names.
+	/** Ship a short plain-text preview of every published page and register
+	 * the component that shows it when the reader hovers an internal link. The
+	 * preview data loads on the first hover, not with the page.
 	 * @default false */
 	enableHoverPreviews?: boolean;
 	/** Inject the bundled panel stylesheet as a global style. Off by default —
@@ -49,52 +42,69 @@ export interface RspressPluginGraphViewOptions {
 	 * @default false */
 	enableDefaultStyles?: boolean;
 	/**
-	 * What to do about an authored link that resolves to no route: `"warn"`
+	 * What to do about an authored link that resolves to nothing: `"warn"`
 	 * (the default) reports it without failing the build, `"error"` fails the
-	 * build, `"ignore"` stays quiet.
+	 * build, `"ignore"` stays quiet. The link still appears in the graph as an
+	 * unresolved node when "Existing files only" is off.
 	 *
-	 * A site that documents unresolved links on purpose, or that has already set
-	 * the markdown plugin's `onBrokenLink` to say what it wants to hear about,
-	 * can set `"ignore"` here — the graph would otherwise report the same link a
-	 * second time.
+	 * The markdown plugin reports the same links through its `onBrokenLink`, so
+	 * a site that already hears about them there can set `"ignore"` here.
 	 * @default "warn"
 	 */
 	onUnresolvedLink?: "error" | "warn" | "ignore";
 	/** Colour groups for the panel: a node matching a group's query paints in
 	 * its colour, first match wins. The query language is the search box's
-	 * own (`path:`, `file:`, `tag:`, plain text, `-` negation), so a group
-	 * can be prototyped by typing it into the panel first. */
+	 * own, so a group can be prototyped by typing it into the panel first. */
 	groups?: readonly GraphViewGroup[];
 }
 
+interface RouteSource {
+	getRoutes(): RouteMeta[];
+}
+
 /**
- * Graph view feature: builds the wikilink graph over every generated route and
- * serves it as a lazy-mounted panel (plus optional node hover previews).
+ * Graph view feature: builds the link graph over every published route and
+ * serves it as a lazy-mounted panel (plus optional link hover previews).
  *
- * @param options - Panel defaults, build diagnostics and the graph cache; all
+ * Links resolve through the markdown plugin's content index and resolver, so
+ * the graph's edges are the page's own links and its Backlinks pane's sources.
+ *
+ * @param options - Panel defaults, build diagnostics and hover previews; all
  *   fields optional. See {@link RspressPluginGraphViewOptions} for details.
  * @returns An {@link RspressPlugin} ready to append to `plugins:`.
  */
 export function graphview(options: RspressPluginGraphViewOptions = {}): RspressPlugin {
-	let collectedRoutes: CollectedRoute[] = [];
-	const graphBuildCache = createGraphBuildCache();
-	// Resolved on the first `addRuntimeModules`, never seeded from
-	// `options.cacheDir`: an already-set value must not skip the load below,
-	// or an explicit `cacheDir` would become write-only (every build re-parses
-	// the whole vault while still burning a cache write).
-	let resolvedCacheDir: string | undefined;
+	const state: GraphBuildState = {};
 	const shouldProfileBuild = options.profileBuild ?? process.env.RSPRESS_GRAPH_VIEW_PROFILE === "1";
+	let routeSource: RouteSource | undefined;
+	// Rspress asks for runtime modules once per dev-server start; the refresher
+	// keeps them current while notes are edited.
+	const devRefresher = createGraphDevRefresher({
+		moduleDir: path.join(process.cwd(), "node_modules", ".rspress-graph-view"),
+		rebuild: async () => (await build(lastConfig)).modules,
+	});
+	let lastConfig: UserConfig = {};
 
-	function ensureDiskCache(config: UserConfig): void {
-		if (resolvedCacheDir) {
-			return;
-		}
-		const docsRoot = path.resolve(config.root ?? "docs");
-		const projectRoot = path.resolve(docsRoot, "..");
-		resolvedCacheDir =
-			options.cacheDir ?? path.join(projectRoot, "node_modules", ".cache", "rspress-graph-view");
-		loadDiskCache(graphBuildCache, resolvedCacheDir);
-	}
+	// Routes are read when the modules are built, not in `routeGenerated`:
+	// Rspress fires that hook before `routeServiceGenerated`, where the markdown
+	// plugin removes `publish: false` pages, so a snapshot taken there would put
+	// unpublished pages (titles, links and preview text) into the graph.
+	const collectRoutes = (): CollectedRoute[] =>
+		(routeSource?.getRoutes() ?? []).map((route) => ({
+			routePath: normalizeRoutePath(route.routePath),
+			absolutePath: route.absolutePath,
+			relativePath: route.relativePath,
+			pageName: route.pageName,
+		}));
+
+	const build = (config: UserConfig) =>
+		buildGraphModules(collectRoutes(), state, {
+			docsRoot: path.resolve(config.root ?? "docs"),
+			base: config.base ?? "/",
+			hoverPreviews: options.enableHoverPreviews === true,
+			profile: shouldProfileBuild,
+			onUnresolvedLink: options.onUnresolvedLink,
+		});
 
 	return {
 		name: "rspress-plugin-obsidian:graph",
@@ -103,41 +113,35 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 			globalStyles: path.join(runtimeDir, "graph-panels.css"),
 		}),
 
-		routeGenerated(routes: RouteMeta[]) {
-			collectedRoutes = routes.map((route) => ({
-				routePath: normalizeRoutePath(route.routePath),
-				absolutePath: route.absolutePath,
-				relativePath: route.relativePath,
-				pageName: route.pageName,
-			}));
-		},
-
-		async addRuntimeModules(config: UserConfig) {
-			ensureDiskCache(config);
-
-			const { moduleSource } = await buildGraphModule(collectedRoutes, graphBuildCache, {
-				profile: shouldProfileBuild,
-				onUnresolvedLink: options.onUnresolvedLink,
-			});
-
-			if (resolvedCacheDir) {
-				void saveDiskCache(graphBuildCache, resolvedCacheDir);
-			}
-
-			const modules: Record<string, string> = {
-				"virtual-graph-data": moduleSource,
+		config(config, _utils, isProd) {
+			if (isProd) return config;
+			return {
+				...config,
+				builderConfig: {
+					...config.builderConfig,
+					plugins: [...(config.builderConfig?.plugins ?? []), devRefresher.rsbuildPlugin],
+				},
 			};
-
-			if (options.enableHoverPreviews) {
-				const { moduleSource: pageContentModule } = await buildPageContentModule(
-					collectedRoutes,
-					graphBuildCache,
-				);
-				modules["virtual-page-content-data"] = pageContentModule;
-			}
-
-			return modules;
 		},
+
+		routeServiceGenerated(routeService: RouteSource) {
+			routeSource = routeService;
+		},
+
+		async addRuntimeModules(config: UserConfig, isProd: boolean) {
+			lastConfig = config;
+			const { modules } = await build(config);
+			if (isProd) return modules;
+
+			const published = getPublishedContent();
+			devRefresher.watch(
+				[path.resolve(config.root ?? "docs"), published?.vaultRoot].filter((root): root is string =>
+					Boolean(root),
+				),
+			);
+			return devRefresher.publish(modules);
+		},
+
 		globalUIComponents: [
 			[
 				findRuntimeFile("LazyGraphPanel"),

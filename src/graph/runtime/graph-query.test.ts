@@ -1,85 +1,92 @@
 import { describe, expect, test } from "bun:test";
-import { matchesGraphQuery, parseGraphQuery } from "./graph-query";
+import { matchesGraphQuery, parseGraphQuery, type QueryableNode } from "./graph-query";
 
-const node = (routePath: string, label?: string, tags?: string[]) => ({
-	routePath,
-	label: label ?? routePath.split("/").pop() ?? routePath,
+const node = (path: string, label?: string, tags?: string[]): QueryableNode => ({
+	id: `/${path.replace(/\.md$/, "")}`,
+	path,
+	label: label ?? path.split("/").pop()?.replace(/\.md$/, "") ?? path,
 	tags,
 });
+
+const matches = (query: string, target: QueryableNode, text?: string) =>
+	matchesGraphQuery(target, parseGraphQuery(query), text);
 
 describe("parseGraphQuery", () => {
 	test("empty input and stray negation match everything", () => {
 		expect(parseGraphQuery("").isEmpty).toBe(true);
 		expect(parseGraphQuery("   ").isEmpty).toBe(true);
 		expect(parseGraphQuery("-").isEmpty).toBe(true);
-		expect(matchesGraphQuery(node("/guide"), parseGraphQuery("-"))).toBe(true);
-	});
-
-	test("lowercases and trims plain terms", () => {
-		const query = parseGraphQuery("  Guide  ");
-		expect(query.terms).toEqual([{ kind: "text", value: "guide", negated: false }]);
-	});
-
-	test("recognizes path, file and tag operators, case-insensitively", () => {
-		const query = parseGraphQuery("PATH:daily file:Welcome TAG:#project");
-		expect(query.terms).toEqual([
-			{ kind: "path", value: "daily", negated: false },
-			{ kind: "file", value: "welcome", negated: false },
-			{ kind: "tag", value: "project", negated: false },
-		]);
-	});
-
-	test("drops an operator with no value instead of matching nonsense", () => {
 		expect(parseGraphQuery("path:").isEmpty).toBe(true);
+		expect(matches("-", node("guide.md"))).toBe(true);
 	});
 
-	test("quoted phrases stay text terms even where an operator would apply", () => {
-		const query = parseGraphQuery('"path:daily notes"');
-		expect(query.terms).toEqual([{ kind: "text", value: "path:daily notes", negated: false }]);
+	test("reports when the query reads note text", () => {
+		expect(parseGraphQuery("path:daily tag:x file:y").needsText).toBe(false);
+		expect(parseGraphQuery("content:x").needsText).toBe(true);
+		expect(parseGraphQuery("line:(a b)").needsText).toBe(true);
+		expect(parseGraphQuery("plain").needsText).toBe(true);
 	});
 });
 
 describe("matchesGraphQuery", () => {
-	test("a matchable query must match every term", () => {
-		const query = parseGraphQuery("guide api");
-		expect(matchesGraphQuery(node("/guide", "Guide"), query)).toBe(false);
-		expect(matchesGraphQuery(node("/api", "Guide API"), query)).toBe(true);
+	test("terms are ANDed; plain text matches the name or path, case-insensitively", () => {
+		expect(matches("guide api", node("guide.md"))).toBe(false);
+		expect(matches("Setup", node("vault/Setup Guide.md", "Untitled"))).toBe(true);
+		expect(matches("guide api", node("api.md", "Guide API"))).toBe(true);
 	});
 
-	test("plain text matches the label or the route path", () => {
-		expect(
-			matchesGraphQuery(node("/vault/Setup Guide", "Untitled"), parseGraphQuery("setup")),
-		).toBe(true);
-		expect(matchesGraphQuery(node("/vault/Setup Guide"), parseGraphQuery("untitled"))).toBe(false);
+	test("plain text also searches the note once its text has loaded", () => {
+		expect(matches("hunter", node("a.md"))).toBe(false);
+		expect(matches("hunter", node("a.md"), "the hunter's moon")).toBe(true);
 	});
 
-	test("file: matches only the last route segment", () => {
-		expect(
-			matchesGraphQuery(node("/guide/Install", "Getting Started"), parseGraphQuery("file:install")),
-		).toBe(true);
-		expect(
-			matchesGraphQuery(node("/guide/Install", "Install"), parseGraphQuery("file:guide")),
-		).toBe(false);
+	test("OR, negation and parentheses", () => {
+		expect(matches("alpha OR beta", node("beta.md"))).toBe(true);
+		expect(matches("alpha OR beta", node("gamma.md"))).toBe(false);
+		expect(matches("-path:daily", node("daily/2026.md"))).toBe(false);
+		expect(matches("-path:daily", node("notes/plan.md"))).toBe(true);
+		expect(matches("notes (plan OR idea)", node("notes/idea.md"))).toBe(true);
+		expect(matches("notes -(plan OR idea)", node("notes/idea.md"))).toBe(false);
 	});
 
-	test("tag: matches the tag page itself and its subtags", () => {
-		expect(matchesGraphQuery(node("/tags/project"), parseGraphQuery("tag:project"))).toBe(true);
-		expect(matchesGraphQuery(node("/tags/project/ideas"), parseGraphQuery("tag:project"))).toBe(
-			true,
-		);
-		expect(matchesGraphQuery(node("/tags/project/ideas"), parseGraphQuery("tag:proj"))).toBe(false);
-		expect(matchesGraphQuery(node("/tags/other"), parseGraphQuery("tag:project"))).toBe(false);
+	test("an operator applies to a whole group", () => {
+		expect(matches("path:(daily OR journal)", node("journal/x.md"))).toBe(true);
+		expect(matches("path:(daily OR journal)", node("notes/x.md", "daily"))).toBe(false);
 	});
 
-	test("tag: matches a page through the tags it links to", () => {
-		const paged = node("/notes/plan", "Plan", ["/tags/project/ideas"]);
-		expect(matchesGraphQuery(paged, parseGraphQuery("tag:project"))).toBe(true);
-		expect(matchesGraphQuery(paged, parseGraphQuery("tag:inbox"))).toBe(false);
+	test("quoted phrases are exact text, never operators", () => {
+		expect(matches('"path:daily notes"', node("x.md", "path:daily notes"))).toBe(true);
+		expect(matches('"setup guide"', node("Setup Guide.md"))).toBe(true);
+		expect(matches('"guide setup"', node("Setup Guide.md"))).toBe(false);
 	});
 
-	test("negation inverts a term", () => {
-		const query = parseGraphQuery("-path:daily");
-		expect(matchesGraphQuery(node("/daily/2026"), query)).toBe(false);
-		expect(matchesGraphQuery(node("/notes/plan"), query)).toBe(true);
+	test("/regex/ terms, and a malformed one matches nothing", () => {
+		expect(matches("/^2026-\\d\\d/", node("2026-05-01.md"))).toBe(true);
+		expect(matches("file:/^draft/", node("notes/Draft plan.md"))).toBe(true);
+		expect(matches("/[unclosed/", node("x.md"))).toBe(false);
+	});
+
+	test("file: matches the file name only", () => {
+		expect(matches("file:install", node("guide/Install.md", "Getting Started"))).toBe(true);
+		expect(matches("file:guide", node("guide/Install.md"))).toBe(false);
+	});
+
+	test("tag: matches the tag and its subtags, not a prefix of a word", () => {
+		const tagged = node("plan.md", "Plan", ["project/ideas"]);
+		expect(matches("tag:project", tagged)).toBe(true);
+		expect(matches("tag:#project/ideas", tagged)).toBe(true);
+		expect(matches("tag:proj", tagged)).toBe(false);
+		expect(matches("tag:inbox", tagged)).toBe(false);
+	});
+
+	test("content:, line: and section: search the note's text", () => {
+		const text = "# Intro\nalpha here\nbeta there\n# Next\nalpha and beta";
+		const note = node("a.md");
+		expect(matches("content:there", note, text)).toBe(true);
+		expect(matches("content:there", note)).toBe(false);
+		expect(matches("line:(alpha beta)", note, text)).toBe(true);
+		expect(matches("line:(alpha there)", note, text)).toBe(false);
+		expect(matches("section:(alpha there)", note, text)).toBe(true);
+		expect(matches("section:(here and)", note, text)).toBe(false);
 	});
 });

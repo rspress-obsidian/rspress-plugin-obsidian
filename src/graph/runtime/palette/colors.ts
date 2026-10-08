@@ -7,6 +7,12 @@ export interface CanvasColors {
 	nodeHover: string;
 	/** Fill for nodes that aren't neighbours while another node is hovered. */
 	nodeDimmed: string;
+	/** Tag nodes, as Obsidian tints them apart from notes. */
+	tagNode: string;
+	/** Attachment nodes (images, PDFs, …). */
+	attachmentNode: string;
+	/** Links to notes that do not exist yet. */
+	unresolvedNode: string;
 	label: string;
 	labelHover: string;
 	link: string;
@@ -25,6 +31,9 @@ export const LIGHT_COLORS: CanvasColors = {
 	node: "#9a9a9a",
 	nodeHover: "#4f4f4f",
 	nodeDimmed: "rgba(154, 154, 154, 0.28)",
+	tagNode: "#5f9e6e",
+	attachmentNode: "#b8913a",
+	unresolvedNode: "#c9c9c9",
 	label: "#4a4a4a",
 	labelHover: "#1a1a1a",
 	link: "rgba(218, 218, 218, 0.85)",
@@ -41,6 +50,9 @@ export const DARK_COLORS: CanvasColors = {
 	node: "#8a8a8a",
 	nodeHover: "#b8b8b8",
 	nodeDimmed: "rgba(138, 138, 138, 0.3)",
+	tagNode: "#7fbf8e",
+	attachmentNode: "#d1ad5b",
+	unresolvedNode: "#555555",
 	label: "#9a9a9a",
 	labelHover: "#ffffff",
 	link: "rgba(63, 63, 63, 0.9)",
