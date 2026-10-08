@@ -30,7 +30,9 @@
  * or ```compressed-json fence (LZString base64, wrapped across lines and
  * blank lines), under `#` or `##`, with or without the `%%` comment around it.
  */
-import { decompressFromBase64 } from "lz-string";
+// lz-string is CommonJS that Node's ESM loader cannot list named exports for,
+// so `import { decompressFromBase64 }` fails in dist/index.js under plain Node.
+import LZString from "lz-string";
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { normalizeScene, type Scene, SceneError } from "./scene.js";
 
@@ -107,7 +109,7 @@ function readScene(data: string): { scene: Scene; position: number } {
 	if (compressed) {
 		// The base64 is wrapped at a fixed width, with blank lines between rows.
 		const payload = (compressed[2] ?? "").replace(/\s+/g, "");
-		const json = payload ? decompressFromBase64(payload) : "";
+		const json = payload ? LZString.decompressFromBase64(payload) : "";
 		if (!json) throw new SceneError("the compressed drawing could not be decompressed");
 		return { scene: decodeScene(json), position: compressed.index };
 	}

@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { compressToBase64 } from "lz-string";
+import LZString from "lz-string";
 import rehypeStringify from "rehype-stringify";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
@@ -100,7 +100,7 @@ export function drawingNote(json: string, sections: NoteSections = {}): string {
 			.map(([id, value]) => suffix(id, value))
 			.join("");
 	const compressed =
-		compressToBase64(json)
+		LZString.compressToBase64(json)
 			.match(/.{1,256}/g)
 			?.join("\n\n") ?? "";
 	const fence =
