@@ -56,6 +56,17 @@ const NOT_MEASURABLE: Record<string, string> = {
 	"src/graph/build/types.ts": "types only — no executable statements to cover",
 	"src/graph/types.ts": "types only — no executable statements to cover",
 	"src/markdown/types.ts": "types only — no executable statements to cover",
+	"src/markdown/obsidian-plugins/types.ts": "types only — no executable statements to cover",
+	"src/markdown/obsidian-plugins/bases/options.ts":
+		"types only — no executable statements to cover",
+	"src/markdown/obsidian-plugins/excalidraw/options.ts":
+		"types only — no executable statements to cover",
+	"src/markdown/obsidian-plugins/kanban/options.ts":
+		"types only — no executable statements to cover",
+	"src/markdown/obsidian-plugins/tasks/options.ts":
+		"types only — no executable statements to cover",
+	"src/markdown/obsidian-plugins/templater/options.ts":
+		"types only — no executable statements to cover",
 };
 
 interface FileCoverage {

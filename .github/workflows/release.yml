@@ -1,39 +1,131 @@
 name: Release
 
-# semantic-release reads the full commit history, so this must not be a
-# shallow checkout. It only publishes when a releasable commit lands on main;
-# everything else exits after the analysis step.
+# A release starts only from a CI run that passed on a push to main, and it
+# releases exactly the commit that run verified. semantic-release refuses to
+# release when that commit is no longer the tip of main, so a run that lost the
+# race to a newer push exits without publishing — the newer push's own CI run
+# releases both.
+#
+# Two jobs, so the credentials that can publish or push never share a process
+# tree with the dependency code that builds and tests the package:
+#   build   — contents: read, no OIDC. Runs the full verification, then packs
+#             the tarball and uploads it.
+#   publish — the write token and the OIDC token. Installs without lifecycle
+#             scripts, runs no project code, and publishes the tarball `build`
+#             produced; semantic-release only stamps the version into it.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  # Required for npm trusted publishing: the workflow's OIDC token is exchanged
-  # for a short-lived, single-publish credential, and for the provenance
-  # attestation npm attaches automatically.
-  id-token: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    # `branches` above filters on the head branch name only, which a fork's PR
+    # from its own `main` also matches; the event and repository checks keep
+    # this to pushes to this repository's main.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # `packageManager` in package.json: the one Bun version that can read
+          # the committed lockfile (v2 needs Bun >= 1.4).
+          bun-version-file: package.json
+
+      # The publish test packs the tarball with `npm`.
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.x
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The same gate CI just passed, repeated here because this job's output is
+      # what ships: everything below runs before semantic-release can tag,
+      # push, or publish anything.
+      - name: Lint
+        run: bun run lint
+
+      - name: Type check
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      - name: Unit tests with coverage gate
+        run: bun run test:coverage
+
+      - name: Packed-artifact tests
+        run: bun run test:publish
+
+      - name: Public API checks
+        run: bun run test:types
+
+      - name: Type check the documented configs
+        run: bun run test:doc-examples
+
+      # The version in this tarball is the `0.0.0-development` placeholder;
+      # the publish job stamps the computed version into its package.json and
+      # nothing else.
+      - name: Pack
+        run: |
+          mkdir -p release
+          npm pack --pack-destination release
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-tarball
+          path: release/*.tgz
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # The release commit (CHANGELOG.md), the tag and the GitHub release.
+      contents: write
+      issues: write
+      pull-requests: write
+      # npm trusted publishing: the job's OIDC token is exchanged for a
+      # short-lived, single-publish credential, and for the provenance
+      # attestation npm attaches automatically.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          # semantic-release reads the full commit history and tags.
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.x
+          bun-version-file: package.json
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -41,17 +133,30 @@ jobs:
           node-version: 22.x
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      # Only semantic-release and its plugins run in this job. `--ignore-scripts`
+      # keeps every dependency's install hook out of the process tree that holds
+      # the publish and push credentials.
+      - name: Install release tooling
+        run: bun install --frozen-lockfile --ignore-scripts
 
-      # No NPM_TOKEN on purpose. `@semantic-release/npm` detects the GitHub
-      # Actions OIDC context (`id-token: write` above) and exchanges it for a
-      # short-lived publish credential, so this step — the semantic-release
-      # plugins plus the `prepublishOnly` gate (lint, typecheck, test, build,
-      # packed-tarball checks) — never holds a long-lived npm write token that
-      # project code or a compromised dependency could exfiltrate. It publishes
-      # with the `npm` it depends on (`^11.6.2`, above trusted publishing's
-      # 11.5.1 floor), not the runner's Node-bundled CLI.
+      - name: Download tarball
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: package-tarball
+          path: release
+
+      # `pkgRoot: release/package` (package.json `release` config) points
+      # @semantic-release/npm at the unpacked tarball, so `npm publish`
+      # re-packs exactly the files the build job verified.
+      - name: Unpack tarball
+        run: tar -xzf release/*.tgz -C release
+
+      # No NPM_TOKEN on purpose: @semantic-release/npm detects the OIDC context
+      # (`id-token: write` above) and publishes with the `npm` it depends on
+      # (`^11.6.2`, above trusted publishing's 11.5.1 floor).
+      # `NPM_CONFIG_IGNORE_SCRIPTS` stops `npm publish` from running the
+      # unpacked package's `prepublishOnly` — the build job already ran that gate
+      # and more, and it needs a dev install this job deliberately lacks.
       #
       # Maintainer setup, once per package on npmjs.com: Settings ->
       # Trusted publisher -> GitHub Actions, with org/user
@@ -64,4 +169,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
         run: bun run release

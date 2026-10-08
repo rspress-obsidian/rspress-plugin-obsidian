@@ -1,6 +1,6 @@
 {
 	"name": "rspress-plugin-obsidian",
-	"version": "1.0.0",
+	"version": "0.0.0-development",
 	"description": "Publish an Obsidian vault with Rspress: wikilinks, backlinks, callouts, transclusion, Dataview, daily notes (markdown); canvas; graph view.",
 	"type": "module",
 	"license": "MIT",
@@ -13,19 +13,17 @@
 	"bugs": {
 		"url": "https://github.com/rspress-obsidian/rspress-plugin-obsidian/issues"
 	},
-	"packageManager": "bun@1.3.14",
+	"packageManager": "bun@1.4.2",
 	"sideEffects": [
 		"**/*.css"
 	],
 	"files": [
 		"dist",
 		"README.md",
-		"CHANGELOG.md",
 		"LICENSE"
 	],
 	"engines": {
-		"node": ">=22.14.0",
-		"bun": ">=1.4.0"
+		"node": ">=22.14.0"
 	},
 	"main": "./dist/index.cjs",
 	"module": "./dist/index.js",
@@ -108,34 +106,58 @@
 		"bench:graph": "bun scripts/bench-graph-build.ts",
 		"generate-icons": "bun scripts/generate-icons.ts",
 		"generate-media-fixtures": "bun scripts/generate-media-fixtures.ts",
-		"prepublishOnly": "bun run lint && bun run typecheck && bun run test && bun run build && bun run test:publish && bun run test:types",
+		"prepublishOnly": "bun run build && bun run test:publish && bun run test:types",
 		"release": "semantic-release",
 		"release:dry": "semantic-release --dry-run"
 	},
 	"dependencies": {
 		"@types/mdast": "^4.0.4",
+		"chrono-node": "^2.10.2",
 		"fast-glob": "^3.3.3",
 		"github-slugger": "^2.0.0",
 		"gray-matter": "^4.0.3",
 		"katex": "^0.18.7",
+		"lz-string": "^1.5.0",
 		"marked": "^18.0.11",
-		"mermaid": "^11.17.2",
+		"mdast-util-math": "^3.0.0",
+		"micromark-extension-math": "^3.1.0",
+		"perfect-freehand": "^1.2.2",
+		"rehype-raw": "^7.0.0",
 		"rehype-stringify": "^10.0.1",
 		"remark-gfm": "^4.0.1",
 		"remark-parse": "^11.0.0",
 		"remark-rehype": "^11.1.2",
+		"roughjs": "^4.6.6",
+		"rrule": "^2.8.1",
 		"unified": "^11.0.5",
-		"unist-util-visit": "^5.1.0"
+		"unist-util-visit": "^5.1.0",
+		"yaml": "^2.9.1"
 	},
 	"peerDependencies": {
+		"@excalidraw/excalidraw": "^0.18.1",
 		"@rspress/core": "^2.0.21",
+		"lucide-static": ">=0.300.0",
+		"maplibre-gl": "^5.0.0 || ^6.0.0",
 		"mathjax-full": "^3.2.2",
+		"mermaid": "^11.17.2",
 		"react": "^18.0.0 || ^19.0.0",
 		"react-dom": "^18.0.0 || ^19.0.0",
 		"react-force-graph-2d": "^1.29.1"
 	},
 	"peerDependenciesMeta": {
+		"@excalidraw/excalidraw": {
+			"optional": true
+		},
+		"lucide-static": {
+			"optional": true
+		},
+		"maplibre-gl": {
+			"optional": true
+		},
 		"mathjax-full": {
+			"optional": true
+		},
+		"mermaid": {
 			"optional": true
 		},
 		"react": {
@@ -151,7 +173,9 @@
 	"devDependencies": {
 		"@arethetypeswrong/cli": "^0.18.5",
 		"@biomejs/biome": "^2.5.12",
+		"@excalidraw/excalidraw": "^0.18.1",
 		"@happy-dom/global-registrator": "^20.14.0",
+		"@mdx-js/mdx": "^3.1.1",
 		"@playwright/test": "^1.63.0",
 		"@semantic-release/changelog": "^7.0.0",
 		"@semantic-release/commit-analyzer": "^13.0.1",
@@ -167,9 +191,11 @@
 		"fast-check": "^4.9.0",
 		"happy-dom": "^20.14.0",
 		"lightningcss": "^1.33.0",
+		"maplibre-gl": "^5.24.0",
 		"mathjax-full": "^3.2.2",
 		"mdast-util-from-markdown": "^2.0.3",
 		"mdast-util-to-markdown": "^2.1.2",
+		"mermaid": "^11.17.2",
 		"publint": "^0.3.24",
 		"react-force-graph-2d": "^1.29.1",
 		"react-router-dom": "^7.18.3",
@@ -190,16 +216,18 @@
 			"@semantic-release/commit-analyzer",
 			"@semantic-release/release-notes-generator",
 			["@semantic-release/changelog", {
-				"changelogFile": "CHANGELOG.md"
+				"changelogFile": "CHANGELOG.md",
+				"changelogTitle": "# Changelog"
 			}],
 			["@semantic-release/npm", {
-				"npmPublish": true
+				"npmPublish": true,
+				"pkgRoot": "release/package"
 			}],
 			"@semantic-release/github",
 			[
 				"@semantic-release/git",
 				{
-					"assets": ["CHANGELOG.md", "package.json"],
+					"assets": ["CHANGELOG.md"],
 					"message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
 				}
 			]

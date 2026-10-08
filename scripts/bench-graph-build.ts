@@ -2,10 +2,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
-	buildGraphModule,
+	buildGraphModules,
 	type CollectedRoute,
-	createGraphBuildCache,
 	type GraphBuildDiagnostics,
+	type GraphBuildOptions,
+	type GraphBuildState,
 } from "../src/graph/build";
 
 type GraphShape = "sequential" | "ring" | "hub" | "clustered";
@@ -32,12 +33,8 @@ interface BenchmarkSummary {
 	scenario: string;
 	shape: GraphShape;
 	avgTotalMs: number;
-	avgStatMs: number;
-	avgParseMs: number;
-	avgResolveMs: number;
-	avgSerializeMs: number;
-	avgCacheHits: number;
-	avgCacheMisses: number;
+	avgFilesRead: number;
+	avgResolvedLinks: number;
 	moduleReuseRate: number;
 	nodes: number;
 	links: number;
@@ -53,10 +50,12 @@ interface BenchmarkReport {
 	};
 }
 
-const benchmarkBuildOptions = {
-	profile: true,
-	logger: () => {},
-} as const;
+function buildOptions(rootDir: string): GraphBuildOptions {
+	// Without `markdown()` in the process the graph indexes the docs root
+	// itself, which is exactly the work a real build shares with the markdown
+	// plugin.
+	return { docsRoot: rootDir, base: "/", profile: true, logger: () => {} };
+}
 
 await main();
 
@@ -65,10 +64,10 @@ async function main(): Promise<void> {
 	const fixture = await createSyntheticDocs(options);
 
 	try {
-		const coldRuns = await runColdBuilds(fixture.routes, options.iterations);
-		const warmRuns = await runWarmBuilds(fixture.routes, options.iterations);
+		const coldRuns = await runColdBuilds(options);
+		const warmRuns = await runWarmBuilds(fixture, options.iterations);
 		const incrementalRuns = await runIncrementalBuilds(
-			fixture.routes,
+			fixture,
 			options.iterations,
 			options.linksPerPage,
 			options.shape,
@@ -114,7 +113,7 @@ function parseArgs(argv: string[]): BenchmarkOptions {
 		iterations: 5,
 		shape: "sequential",
 		// Wikilinks are what a vault actually contains, and they take the
-		// extractor's fast path; `--style=markdown` measures the parser path.
+		// common case; `--style=markdown` measures markdown-link extraction.
 		style: "wikilink",
 	};
 
@@ -245,12 +244,13 @@ function createSyntheticMarkdown(
 	style: LinkStyle,
 ): string {
 	const links = buildSyntheticLinkTargets(pageIndex, pageCount, linksPerPage, shape).map(
-		(targetIndex) =>
-			// The wikilink form must name the file, or every edge is unresolved and
-			// the benchmark measures the unresolved-link report instead of the build.
-			style === "wikilink"
-				? `- [[page-${targetIndex}]]`
-				: `- [Page ${targetIndex}](./page-${targetIndex}.md)`,
+		(targetIndex) => {
+			// The links must name the file, or every edge is unresolved and the
+			// benchmark measures the unresolved-link report instead of the build.
+			// Page 0 is the site's `index.md`.
+			const file = targetIndex === 0 ? "index" : `page-${targetIndex}`;
+			return style === "wikilink" ? `- [[${file}]]` : `- [Page ${targetIndex}](./${file}.md)`;
+		},
 	);
 
 	return [
@@ -375,31 +375,36 @@ function buildClusteredTargets(
 	return [...targets];
 }
 
-async function runColdBuilds(
-	routes: CollectedRoute[],
-	iterations: number,
-): Promise<GraphBuildDiagnostics[]> {
+/**
+ * A cold build starts from nothing: a fresh docs tree per run, so neither the
+ * content-index cache nor the graph's own module reuse can help.
+ */
+async function runColdBuilds(options: BenchmarkOptions): Promise<GraphBuildDiagnostics[]> {
 	const diagnostics: GraphBuildDiagnostics[] = [];
 
-	for (let iteration = 0; iteration < iterations; iteration += 1) {
-		const cache = createGraphBuildCache();
-		const result = await buildGraphModule(routes, cache, benchmarkBuildOptions);
-		diagnostics.push(result.diagnostics);
+	for (let iteration = 0; iteration < options.iterations; iteration += 1) {
+		const fixture = await createSyntheticDocs(options);
+		try {
+			const result = await buildGraphModules(fixture.routes, {}, buildOptions(fixture.rootDir));
+			diagnostics.push(result.diagnostics);
+		} finally {
+			await rm(fixture.rootDir, { recursive: true, force: true });
+		}
 	}
 
 	return diagnostics;
 }
 
 async function runWarmBuilds(
-	routes: CollectedRoute[],
+	fixture: SyntheticDocsFixture,
 	iterations: number,
 ): Promise<GraphBuildDiagnostics[]> {
-	const cache = createGraphBuildCache();
-	await buildGraphModule(routes, cache, benchmarkBuildOptions);
+	const state: GraphBuildState = {};
+	await buildGraphModules(fixture.routes, state, buildOptions(fixture.rootDir));
 
 	const diagnostics: GraphBuildDiagnostics[] = [];
 	for (let iteration = 0; iteration < iterations; iteration += 1) {
-		const result = await buildGraphModule(routes, cache, benchmarkBuildOptions);
+		const result = await buildGraphModules(fixture.routes, state, buildOptions(fixture.rootDir));
 		diagnostics.push(result.diagnostics);
 	}
 
@@ -407,14 +412,15 @@ async function runWarmBuilds(
 }
 
 async function runIncrementalBuilds(
-	routes: CollectedRoute[],
+	fixture: SyntheticDocsFixture,
 	iterations: number,
 	linksPerPage: number,
 	shape: GraphShape,
 	style: LinkStyle,
 ): Promise<GraphBuildDiagnostics[]> {
-	const cache = createGraphBuildCache();
-	await buildGraphModule(routes, cache, benchmarkBuildOptions);
+	const { routes } = fixture;
+	const state: GraphBuildState = {};
+	await buildGraphModules(routes, state, buildOptions(fixture.rootDir));
 
 	const targetRoute = routes[Math.min(1, routes.length - 1)];
 	if (!targetRoute) {
@@ -437,7 +443,7 @@ async function runIncrementalBuilds(
 				style,
 			),
 		);
-		const result = await buildGraphModule(routes, cache, benchmarkBuildOptions);
+		const result = await buildGraphModules(routes, state, buildOptions(fixture.rootDir));
 		diagnostics.push(result.diagnostics);
 	}
 
@@ -459,16 +465,11 @@ function summarizeDiagnostics(
 		scenario,
 		shape,
 		avgTotalMs: average(diagnostics.map((entry) => entry.totalMs)),
-		avgStatMs: average(diagnostics.map((entry) => entry.statMs)),
-		avgParseMs: average(diagnostics.map((entry) => entry.parseMs)),
-		avgResolveMs: average(diagnostics.map((entry) => entry.resolveMs)),
-		avgSerializeMs: average(diagnostics.map((entry) => entry.serializeMs)),
-		avgCacheHits: average(diagnostics.map((entry) => entry.cacheHits)),
-		avgCacheMisses: average(diagnostics.map((entry) => entry.cacheMisses)),
-		// Share of runs where the whole module was reused (every file a cache hit),
-		// not the per-file hit rate — `cacheHits`/`cacheMisses` report that.
+		avgFilesRead: average(diagnostics.map((entry) => entry.filesRead)),
+		avgResolvedLinks: average(diagnostics.map((entry) => entry.resolvedLinks)),
+		// Share of runs where the whole module was reused (nothing changed).
 		moduleReuseRate: average(diagnostics.map((entry) => (entry.reusedModule ? 1 : 0))) * 100,
-		nodes: latest?.routeCount ?? 0,
+		nodes: latest?.nodeCount ?? 0,
 		links: latest?.linkCount ?? 0,
 	};
 }
@@ -524,12 +525,8 @@ function toCsv(summaries: BenchmarkSummary[]): string {
 		"links",
 		"shape",
 		"avgTotalMs",
-		"avgStatWaitMs",
-		"avgParseCpuMs",
-		"avgResolveMs",
-		"avgSerializeMs",
-		"avgCacheHits",
-		"avgCacheMisses",
+		"avgFilesRead",
+		"avgResolvedLinks",
 		"moduleReuseRate",
 	];
 
@@ -539,12 +536,8 @@ function toCsv(summaries: BenchmarkSummary[]): string {
 		summary.links,
 		summary.shape,
 		summary.avgTotalMs.toFixed(3),
-		summary.avgStatMs.toFixed(3),
-		summary.avgParseMs.toFixed(3),
-		summary.avgResolveMs.toFixed(3),
-		summary.avgSerializeMs.toFixed(3),
-		summary.avgCacheHits.toFixed(3),
-		summary.avgCacheMisses.toFixed(3),
+		summary.avgFilesRead.toFixed(3),
+		summary.avgResolvedLinks.toFixed(3),
 		summary.moduleReuseRate.toFixed(3),
 	]);
 
@@ -575,12 +568,8 @@ function toTableRow(summary: BenchmarkSummary): Record<string, string | number> 
 		nodes: summary.nodes,
 		links: summary.links,
 		totalMs: formatMs(summary.avgTotalMs),
-		statWaitMs: formatMs(summary.avgStatMs),
-		parseCpuMs: formatMs(summary.avgParseMs),
-		resolveMs: formatMs(summary.avgResolveMs),
-		serializeMs: formatMs(summary.avgSerializeMs),
-		cacheHits: summary.avgCacheHits.toFixed(1),
-		cacheMisses: summary.avgCacheMisses.toFixed(1),
+		filesRead: summary.avgFilesRead.toFixed(1),
+		resolvedLinks: summary.avgResolvedLinks.toFixed(1),
 		moduleReuseRate: `${summary.moduleReuseRate.toFixed(0)}%`,
 	};
 }

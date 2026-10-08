@@ -1,5 +1,38 @@
+import { readdirSync } from "node:fs";
+import path from "node:path";
 import { defineConfig } from "tsup";
 import { minifyCssFile } from "./scripts/minify-css";
+
+/**
+ * Browser components of the reproduced Obsidian plugins, one chunk each:
+ * `src/markdown/obsidian-plugins/<id>/runtime/<Name>.tsx` ships as
+ * `dist/markdown/obsidian-plugins/<id>/runtime/<Name>.js`, the path the
+ * feature resolves at runtime (`resolveRuntimeFile`). Discovered rather than
+ * listed, so a feature's components cannot drift out of the bundle. Only
+ * `.tsx` files are components; `.ts` helpers next to them are shared chunks.
+ */
+function pluginRuntimeEntries(): Record<string, string> {
+	const root = "src/markdown/obsidian-plugins";
+	const entries: Record<string, string> = {};
+	for (const feature of readdirSync(root, { withFileTypes: true })) {
+		if (!feature.isDirectory()) continue;
+		const runtimeDir = path.join(root, feature.name, "runtime");
+		let files: string[];
+		try {
+			files = readdirSync(runtimeDir);
+		} catch {
+			continue;
+		}
+		for (const file of files) {
+			if (!file.endsWith(".tsx") || file.endsWith(".test.tsx")) continue;
+			entries[`markdown/obsidian-plugins/${feature.name}/runtime/${file.slice(0, -4)}`] = path.join(
+				runtimeDir,
+				file,
+			);
+		}
+	}
+	return entries;
+}
 
 // Dist contract — the factories resolve sibling runtime chunks by path
 // (import.meta.url), so the entry NAMES below ARE the runtime layout.
@@ -29,8 +62,11 @@ export default defineConfig([
 			"marked",
 			"katex",
 			"mermaid",
+			"@excalidraw/excalidraw",
+			"maplibre-gl",
 			"fast-glob",
 			"virtual-graph-data",
+			"virtual-graph-search-data",
 		],
 	},
 	// 2. Browser component chunks (string-path loaded by Rspress:
@@ -47,6 +83,7 @@ export default defineConfig([
 			"graph/runtime/GraphSidebar": "src/graph/runtime/GraphSidebar.tsx",
 			"graph/runtime/LazyGraphPanel": "src/graph/runtime/LazyGraphPanel.tsx",
 			"graph/runtime/HoverPreview": "src/graph/runtime/HoverPreview.tsx",
+			...pluginRuntimeEntries(),
 		},
 		format: ["esm"],
 		outDir: "dist",
@@ -59,9 +96,12 @@ export default defineConfig([
 			"react",
 			"react-dom",
 			"mermaid",
+			"@excalidraw/excalidraw",
+			"maplibre-gl",
 			"react-force-graph-2d",
 			"@rspress/core",
 			"virtual-graph-data",
+			"virtual-graph-search-data",
 			"virtual-page-content-data",
 		],
 		target: "es2020",
