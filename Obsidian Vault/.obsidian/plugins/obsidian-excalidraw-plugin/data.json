@@ -1,0 +1,11 @@
+{
+  "exportWithTheme": true,
+  "exportWithBackground": true,
+  "exportPaddingSVG": 10,
+  "previewMatchObsidianTheme": true,
+  "displayExportedImageIfAvailable": false,
+  "width": "400",
+  "showLinkBrackets": false,
+  "linkPrefix": "",
+  "urlPrefix": ""
+}
