@@ -12,17 +12,21 @@ import { markdown } from "./markdown/index.js";
 // Re-exports for the three features and their public helpers/types.
 export { type CanvasPluginOptions, canvas } from "./canvas/index.js";
 // canvas helpers/types.
-export { CanvasParseError, parseCanvas } from "./canvas/parser.js";
+export { CanvasParseError, parseCanvas, serializeCanvas } from "./canvas/parser.js";
 export type {
 	BackgroundStyle,
 	CanvasColor,
 	CanvasData,
 	CanvasEdgeData,
 	CanvasFileData,
+	CanvasFileKind,
 	CanvasGroupData,
+	CanvasLink,
 	CanvasLinkData,
+	CanvasLinks,
 	CanvasNode,
 	CanvasNodeData,
+	CanvasResolvedFile,
 	CanvasTextData,
 	EdgeEnd,
 	NodeSide,
@@ -51,6 +55,7 @@ export {
 	renderDailyNavigation,
 } from "./markdown/daily-notes.js";
 export {
+	type DataviewSettings,
 	extractDataviewMetadata,
 	renderDataviewInline,
 	renderDataviewQuery,
@@ -63,6 +68,29 @@ export {
 	type MentionSource,
 	stripMentionText,
 } from "./markdown/mentions.js";
+export type {
+	BasesMapTiles,
+	BasesOptions,
+} from "./markdown/obsidian-plugins/bases/options.js";
+export type { ExcalidrawOptions } from "./markdown/obsidian-plugins/excalidraw/options.js";
+export type {
+	KanbanDateColor,
+	KanbanInlineMetadataPosition,
+	KanbanMetadataKey,
+	KanbanOptions,
+	KanbanTagColor,
+} from "./markdown/obsidian-plugins/kanban/options.js";
+export type {
+	TasksOptions,
+	TasksStatusOption,
+	TasksStatusType,
+} from "./markdown/obsidian-plugins/tasks/options.js";
+export type {
+	TemplaterFileTemplate,
+	TemplaterFolderTemplate,
+	TemplaterOptions,
+} from "./markdown/obsidian-plugins/templater/options.js";
+export { extractPageLinks, type PageLinks } from "./markdown/page-links.js";
 export { findWikilinkMatches, parseWikiLink } from "./markdown/parse-wikilink.js";
 // The remark pass itself, for users composing their own unified pipeline.
 export { remarkWikilink } from "./markdown/remark-wikilink.js";

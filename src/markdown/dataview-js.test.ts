@@ -1,579 +1,447 @@
-import { describe, expect, test } from "bun:test";
-import { renderDataviewJs } from "./dataview-js";
-import type { BacklinkRef, ContentIndex, ContentPage, DataviewTask } from "./types";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { buildContentIndex } from "./content-index";
+import { renderDataviewJs, renderDataviewJsInline } from "./dataview-js";
+import type { ContentIndex, ContentPage } from "./types";
 
-interface TaskSpec {
-	text: string;
-	completed?: boolean;
-	fields?: Record<string, unknown>;
-}
-
-interface PageSpec {
-	relativePath: string;
-	title?: string;
-	tags?: string[];
-	fields?: Record<string, unknown>;
-	tasks?: TaskSpec[];
-	links?: string[];
-}
-
-function makePage(spec: PageSpec): ContentPage {
-	const filePathKey = spec.relativePath.replace(/\.(md|mdx)$/i, "");
-	const baseName = filePathKey.split("/").pop() ?? filePathKey;
-	const collapsed = filePathKey.replace(/(^|\/)index$/, "");
-	const tasks: DataviewTask[] = (spec.tasks ?? []).map((task, index) => ({
-		text: task.text,
-		completed: task.completed ?? false,
-		line: index + 1,
-		path: spec.relativePath,
-		fields: task.fields ?? {},
-	}));
-	return {
-		absolutePath: `/vault/${spec.relativePath}`,
-		relativePath: spec.relativePath,
-		routePath: collapsed ? `/${collapsed}` : "/",
-		pathKey: collapsed,
-		filePathKey,
-		baseName,
-		title: spec.title,
-		aliases: [],
-		tags: spec.tags ?? [],
-		cssclasses: [],
-		publish: true,
-		fileCtimeMs: 0,
-		fileMtimeMs: 0,
-		fileSizeBytes: 100,
-		headings: [],
-		wikilinkTargets: spec.links ?? [],
-		headingBySlug: new Map(),
-		headingByText: new Map(),
-		blocks: [],
-		dataviewFields: spec.fields ?? {},
-		dataviewTasks: tasks,
-		dataviewLists: tasks.map(({ text, line, path: taskPath, fields }) => ({
-			text,
-			line,
-			path: taskPath,
-			fields,
-		})),
-	};
-}
-
-function makeIndex(
-	pages: ContentPage[],
-	backlinks: Array<[string, BacklinkRef[]]> = [],
-): ContentIndex {
-	const byFilePathKeyCI = new Map<string, ContentPage[]>();
-	const byBaseNameCI = new Map<string, ContentPage[]>();
-	const byPathKeyCI = new Map<string, ContentPage[]>();
-	for (const page of pages) {
-		const lookups: Array<[Map<string, ContentPage[]>, string]> = [
-			[byFilePathKeyCI, page.filePathKey.toLowerCase()],
-			[byBaseNameCI, page.baseName.toLowerCase()],
-			[byPathKeyCI, page.pathKey.toLowerCase()],
-		];
-		for (const [lookup, key] of lookups) lookup.set(key, [...(lookup.get(key) ?? []), page]);
-	}
-	return {
-		rootDir: "/vault",
-		pages,
-		assets: [],
-		byAbsolutePath: new Map(),
-		byPathKey: new Map(),
-		byFilePathKey: new Map(),
-		byBaseName: byBaseNameCI,
-		byTitle: new Map(),
-		byAlias: new Map(),
-		byTag: new Map(),
-		byAssetPath: new Map(),
-		byAssetBaseName: new Map(),
-		byPathKeyCI,
-		byFilePathKeyCI,
-		byBaseNameCI,
-		byAssetPathCI: new Map(),
-		byAssetBaseNameCI: new Map(),
-		backlinks: new Map(backlinks),
-	};
-}
-
-const alpha = makePage({
-	relativePath: "notes/alpha.md",
-	title: "Alpha",
-	tags: ["project/demo"],
-	fields: { status: "open", priority: 2 },
-	tasks: [{ text: "Ship alpha" }, { text: "Write notes", completed: true }],
-	links: ["notes/beta"],
-});
-const beta = makePage({
-	relativePath: "notes/beta.md",
-	title: "Beta",
-	tags: ["project/demo", "archive"],
-	fields: { status: "closed", priority: 1 },
-	tasks: [{ text: "Review beta" }],
-});
-const home = makePage({ relativePath: "index.md", title: "Home" });
-const daily = makePage({ relativePath: "daily/2026-09-01.md", title: "Daily" });
-
-const pages = [alpha, beta, home, daily];
-const index = makeIndex(pages);
-const dailyConfig = {
-	folder: "daily",
-	dateFormat: "YYYY-MM-DD",
-	navigation: true,
-	template: "",
-	calendar: "",
+const FILES: Record<string, string> = {
+	"Home.md": "# Home\n\nLinks [[N/Alpha]].\n\n- [ ] Home task\n    - [x] Sub task\n",
+	"N/Alpha.md": [
+		"---",
+		"status: open",
+		"due: 2026-01-09",
+		"tags: [proj/sub]",
+		"---",
+		"Alpha.",
+	].join("\n"),
+	"N/Beta.md": [
+		"---",
+		"status: closed",
+		"due: 2026-01-05",
+		"tags: [proj]",
+		"---",
+		"Links [[Home]].",
+	].join("\n"),
+	"N/Gamma.md": ["---", "status: open", "due: 2026-01-10", "---", "Gamma."].join("\n"),
 };
 
-describe("renderDataviewJs supported statements", () => {
-	test("renders a table from a filtered page collection", () => {
-		const result = renderDataviewJs(
+let root: string;
+let index: ContentIndex;
+let home: ContentPage;
+
+beforeAll(async () => {
+	root = mkdtempSync(path.join(os.tmpdir(), "obsidian-dataviewjs-"));
+	for (const [name, content] of Object.entries(FILES)) {
+		const target = path.join(root, name);
+		mkdirSync(path.dirname(target), { recursive: true });
+		writeFileSync(target, content);
+		const mtime = new Date(2026, 9, 7, 8, 0, 0);
+		utimesSync(target, mtime, mtime);
+	}
+	index = await buildContentIndex(root);
+	const found = index.pages.find((page) => page.relativePath === "Home.md");
+	if (!found) throw new Error("Home.md is not indexed");
+	home = found;
+});
+
+afterAll(() => {
+	rmSync(root, { recursive: true, force: true });
+});
+
+const js = (source: string) => renderDataviewJs(source, home, index);
+
+describe("statements", () => {
+	test("newlines separate statements without semicolons", () => {
+		expect(js('const p = dv.current()\ndv.paragraph(p.file.name + "!")').html).toBe(
+			'<p class="dataviewjs-paragraph">Home!</p>',
+		);
+	});
+
+	test("// inside a string is text, and comments are skipped", () => {
+		expect(
+			js('// a comment\ndv.paragraph("see https://example.com") /* block */\n// trailing').html,
+		).toBe(
+			'<p class="dataviewjs-paragraph">see <a href="https://example.com">https://example.com</a></p>',
+		);
+	});
+
+	test("let, reassignment, if/else, for…of and template literals", () => {
+		const html = js(
 			[
-				'const open = dv.pages("#project/demo").where(p => p.status === "open");',
-				'dv.table(["File"], open.map(p => [p.file.link]));',
+				"let open = 0",
+				"for (const p of dv.pages('\"N\"')) {",
+				'  if (p.status === "open") open += 1',
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: DataviewJS source holding a template literal
+				"  else dv.paragraph(`closed: ${p.file.name}`)",
+				"}",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: DataviewJS source holding a template literal
+				"dv.paragraph(`${open} open`)",
 			].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.error).toBeUndefined();
-		expect(result.html).toBe(
-			'<table class="dataviewjs-table"><thead><tr><th>File</th></tr></thead>' +
-				'<tbody><tr><td><a href="/notes/alpha">Alpha</a></td></tr></tbody></table>',
+		).html;
+		expect(html).toBe(
+			'<p class="dataviewjs-paragraph">closed: Beta</p>\n<p class="dataviewjs-paragraph">2 open</p>',
 		);
 	});
 
-	test("renders a list from a member chain over dv.pages", () => {
-		const result = renderDataviewJs('dv.list(dv.pages("#project/demo").file.link);', home, index);
-
-		expect(result.html).toBe(
-			'<ul class="dataviewjs-list">' +
-				'<li><a href="/notes/alpha">Alpha</a></li>' +
-				'<li><a href="/notes/beta">Beta</a></li>' +
-				"</ul>",
+	test("arrow functions with block bodies, ternaries and ??", () => {
+		const html = js(
+			'const label = (p) => { return p.status === "open" ? "o" : "c" }\ndv.paragraph(dv.pages(\'"N"\').sort(p => p.file.name).map(label).join(""))\ndv.paragraph(dv.current().missing ?? "none")',
+		).html;
+		expect(html).toBe(
+			'<p class="dataviewjs-paragraph">oco</p>\n<p class="dataviewjs-paragraph">none</p>',
 		);
 	});
 
-	test("renders paragraphs, headers, and lists from literal values", () => {
-		const result = renderDataviewJs(
-			[
-				'dv.header(3, "Title");',
-				'dv.header(9, "Clamped");',
-				'dv.header(0, "Low");',
-				"dv.list([1, 2, 3]);",
-				"dv.list(null);",
-				'dv.paragraph("plain");',
-			].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			[
-				"<h3>Title</h3>",
-				"<h6>Clamped</h6>",
-				"<h1>Low</h1>",
-				'<ul class="dataviewjs-list"><li>1</li><li>2</li><li>3</li></ul>',
-				'<ul class="dataviewjs-list"></ul>',
-				'<p class="dataviewjs-paragraph">plain</p>',
-			].join("\n"),
-		);
-	});
-
-	test("renders a task list from page tasks, marking completed items", () => {
-		const result = renderDataviewJs(
-			'dv.taskList(dv.pages("#project/demo").file.tasks);',
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			'<ul class="dataviewjs-task-list">' +
-				'<li><input type="checkbox" disabled /> Ship alpha</li>' +
-				'<li><input type="checkbox" disabled checked /> Write notes</li>' +
-				'<li><input type="checkbox" disabled /> Review beta</li>' +
-				"</ul>",
-		);
-	});
-
-	test("renders non-task values in a task list without a checkbox state", () => {
-		const result = renderDataviewJs('dv.taskList(["plain", null]);', home, index);
-
-		expect(result.html).toBe('<ul class="dataviewjs-task-list"><li>plain</li><li></li></ul>');
-	});
-
-	test("wraps non-array table rows and escapes header markup", () => {
-		const result = renderDataviewJs(
-			['dv.table(["<b>"], [[1, 2], [3]]);', 'dv.table(["A"], [1, 2]);'].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			[
-				'<table class="dataviewjs-table"><thead><tr><th>&lt;b&gt;</th></tr></thead>' +
-					"<tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td></tr></tbody></table>",
-				'<table class="dataviewjs-table"><thead><tr><th>A</th></tr></thead>' +
-					"<tbody><tr><td>1</td></tr><tr><td>2</td></tr></tbody></table>",
-			].join("\n"),
-		);
-	});
-
-	test("renders an empty table when no columns or rows are given", () => {
-		const result = renderDataviewJs("dv.table();", home, index);
-
-		expect(result.html).toBe(
-			'<table class="dataviewjs-table"><thead><tr></tr></thead><tbody></tbody></table>',
-		);
-	});
-
-	test("declares values with const, let, and var, then reads them back", () => {
-		const result = renderDataviewJs(
-			[
-				"const a = 1;",
-				'let b = "two";',
-				"var c = true;",
-				"dv.paragraph(a);",
-				"dv.paragraph(b);",
-				"dv.paragraph(c);",
-			].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			[
-				'<p class="dataviewjs-paragraph">1</p>',
-				'<p class="dataviewjs-paragraph">two</p>',
-				'<p class="dataviewjs-paragraph">true</p>',
-			].join("\n"),
-		);
-	});
-
-	test("reads object literal fields through a member chain", () => {
-		const result = renderDataviewJs(
-			[
-				'const config = { label: "Count", value: 3 };',
-				"dv.paragraph(config.label);",
-				"dv.paragraph(config.value);",
-			].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			['<p class="dataviewjs-paragraph">Count</p>', '<p class="dataviewjs-paragraph">3</p>'].join(
-				"\n",
-			),
-		);
-	});
-
-	test("reads a page field, the current page, and a named page", () => {
-		const result = renderDataviewJs(
-			[
-				"dv.paragraph(status);",
-				"dv.paragraph(dv.current().name);",
-				'dv.paragraph(dv.page("notes/beta").status);',
-				'dv.paragraph(dv.page("missing"));',
-			].join("\n"),
-			alpha,
-			index,
-		);
-
-		expect(result.html).toBe(
-			[
-				'<p class="dataviewjs-paragraph">open</p>',
-				'<p class="dataviewjs-paragraph">Alpha</p>',
-				'<p class="dataviewjs-paragraph">closed</p>',
-				'<p class="dataviewjs-paragraph"></p>',
-			].join("\n"),
-		);
-	});
-
-	test("selects pages by tag and by quoted folder", () => {
-		const result = renderDataviewJs(
-			[
-				'dv.paragraph(dv.pages("#project/demo").length);',
-				"dv.paragraph(dv.pages('\"notes\"').length);",
-				"dv.paragraph(dv.pages().length);",
-				'dv.paragraph(dv.pages("notes").length);',
-			].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			[
-				'<p class="dataviewjs-paragraph">2</p>',
-				'<p class="dataviewjs-paragraph">2</p>',
-				'<p class="dataviewjs-paragraph">4</p>',
-				// An unquoted string is not a folder filter, so it matches every page.
-				'<p class="dataviewjs-paragraph">4</p>',
-			].join("\n"),
-		);
-	});
-
-	test("maps a property across a page collection", () => {
-		const result = renderDataviewJs(
-			'dv.paragraph(dv.pages("#project/demo").file.name);',
-			home,
-			index,
-		);
-
-		expect(result.html).toBe('<p class="dataviewjs-paragraph">alpha, beta</p>');
-	});
-
-	test("renders dates, arrays, objects, and nulls as paragraph values", () => {
-		const result = renderDataviewJs(
-			[
-				'dv.paragraph(dv.date("2026-01-05"));',
-				'dv.paragraph(dv.date("not a date"));',
-				"dv.paragraph([1, 2]);",
-				"dv.paragraph({a: 1});",
-				"dv.paragraph(null);",
-			].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			[
-				'<p class="dataviewjs-paragraph">2026-01-05</p>',
-				'<p class="dataviewjs-paragraph"></p>',
-				'<p class="dataviewjs-paragraph">1, 2</p>',
-				'<p class="dataviewjs-paragraph">{"a":1}</p>',
-				'<p class="dataviewjs-paragraph"></p>',
-			].join("\n"),
-		);
-	});
-
-	test("wraps a single value in an array with dv.array", () => {
-		const result = renderDataviewJs(
-			["dv.paragraph(dv.array(7));", "dv.paragraph(dv.array([1, 2]));"].join("\n"),
-			home,
-			index,
-		);
-
-		expect(result.html).toBe(
-			['<p class="dataviewjs-paragraph">7</p>', '<p class="dataviewjs-paragraph">1, 2</p>'].join(
-				"\n",
-			),
-		);
-	});
-
-	test("exposes file.day for a daily note page", () => {
-		const result = renderDataviewJs(
-			"dv.paragraph(dv.current().file.day);",
-			daily,
-			index,
-			dailyConfig,
-		);
-
-		expect(result.html).toBe('<p class="dataviewjs-paragraph">2026-09-01</p>');
-	});
-
-	test("falls back to the raw target for an outlink with no page", () => {
-		const stray = makePage({
-			relativePath: "notes/stray.md",
-			title: "Stray",
-			links: ["notes/missing"],
-		});
-		const result = renderDataviewJs(
-			"dv.paragraph(dv.current().file.outlinks);",
-			stray,
-			makeIndex([stray]),
-		);
-
-		expect(result.html).toBe(
-			'<p class="dataviewjs-paragraph"><a href="/notes/missing">notes/missing</a></p>',
-		);
-	});
-
-	test("ignores comments and an empty source", () => {
-		expect(renderDataviewJs("// nothing to do", home, index)).toEqual({ html: "" });
-		expect(renderDataviewJs('// note\ndv.paragraph("after");', home, index)).toEqual({
-			html: '<p class="dataviewjs-paragraph">after</p>',
-		});
+	test("assigning to a constant or an undeclared name is an error", () => {
+		expect(js("const a = 1\na = 2").error).toContain('cannot assign to the constant "a"');
+		expect(js("b = 2").error).toContain('"b" is not declared');
 	});
 });
 
-describe("renderDataviewJs collection methods", () => {
-	const names = (source: string) => {
-		const result = renderDataviewJs(source, home, index);
-		expect(result.error).toBeUndefined();
-		return [...(result.html ?? "").matchAll(/<li>(.*?)<\/li>/g)].map((match) => match[1]);
+describe("dv API", () => {
+	test("dv.pages reads DQL sources: subtags, links, negation, case-insensitive folders", () => {
+		const names = (source: string) =>
+			js(`dv.paragraph(dv.pages(${JSON.stringify(source)}).file.name.sort().join(","))`).html;
+		expect(names("#proj")).toBe('<p class="dataviewjs-paragraph">Alpha,Beta</p>');
+		expect(names("[[Home]]")).toBe('<p class="dataviewjs-paragraph">Beta</p>');
+		expect(names('"n" and -"N/Beta"')).toBe('<p class="dataviewjs-paragraph">Alpha,Gamma</p>');
+		expect(js('dv.pages("bogus source")').error).toContain("Unsupported Dataview source");
+	});
+
+	test("sort orders dates by time, both directions", () => {
+		const order = (direction: string) =>
+			js(`dv.paragraph(dv.pages('"N"').sort(p => p.due, "${direction}").file.name.join(","))`).html;
+		expect(order("asc")).toBe('<p class="dataviewjs-paragraph">Beta,Alpha,Gamma</p>');
+		expect(order("desc")).toBe('<p class="dataviewjs-paragraph">Gamma,Alpha,Beta</p>');
+	});
+
+	test("dv.current() carries file.mtime and the rest of file.*", () => {
+		expect(js("dv.paragraph(dv.current().file.mtime)").html).toBe(
+			'<p class="dataviewjs-paragraph">8:00 AM - October 07, 2026</p>',
+		);
+		expect(js("dv.paragraph(dv.current().file.mtime.toFormat('yyyy-MM-dd'))").html).toBe(
+			'<p class="dataviewjs-paragraph">2026-10-07</p>',
+		);
+		expect(js("dv.paragraph(dv.current().file.inlinks.length)").html).toBe(
+			'<p class="dataviewjs-paragraph">1</p>',
+		);
+	});
+
+	test("dv.header clamps its level and defaults a non-number to 2", () => {
+		expect(js('dv.header(9, "x")').html).toBe("<h6>x</h6>");
+		expect(js('dv.header("abc", "x")').html).toBe("<h2>x</h2>");
+		expect(js('dv.header(0, "x")').html).toBe("<h1>x</h1>");
+	});
+
+	test("tables, lists, groupBy and links", () => {
+		const html = js(
+			[
+				"for (const group of dv.pages('\"N\"').groupBy(p => p.status)) {",
+				"  dv.header(3, group.key)",
+				'  dv.table(["Note", "Due"], group.rows.map(p => [p.file.link, p.due]))',
+				"}",
+			].join("\n"),
+		).html;
+		expect(html).toContain("<h3>closed</h3>");
+		expect(html).toContain('<td><a href="/N/Beta">Beta</a></td><td>January 05, 2026</td>');
+		expect(js("dv.list([1, [2, 3]])").html).toBe(
+			'<ul class="dataviewjs-list"><li>1</li><li><ul class="dataview dataview-ul dataview-result-list-ul"><li class="dataview-result-list-li">2</li><li class="dataview-result-list-li">3</li></ul></li></ul>',
+		);
+	});
+
+	test("taskList nests subtasks and groups by file unless told not to", () => {
+		const grouped = js("dv.taskList(dv.current().file.tasks)").html ?? "";
+		expect(grouped).toContain('<h4><a href="/Home">Home</a></h4>');
+		expect(grouped.match(/Sub task/g)).toHaveLength(1);
+		expect(js("dv.taskList(dv.current().file.tasks, false)").html).not.toContain("<h4>");
+	});
+
+	test("dv.func, dv.tryEvaluate, dv.execute and dv.span reuse the DQL engine", () => {
+		expect(js('dv.span(dv.func.upper("x"))').html).toBe('<span class="dataviewjs-span">X</span>');
+		expect(js('dv.paragraph(dv.tryEvaluate("1 + 2"))').html).toBe(
+			'<p class="dataviewjs-paragraph">3</p>',
+		);
+		expect(js('dv.execute(\'LIST FROM "N" WHERE status = "open"\')').html).toContain(
+			'<a href="/N/Alpha">Alpha</a>',
+		);
+	});
+
+	test("dv.el builds only plain text elements", () => {
+		expect(js('dv.el("b", "bold", { cls: "x" })').html).toBe('<b class="x">bold</b>');
+		expect(js('dv.el("script", "x")').error).toContain("does not create <script>");
+	});
+});
+
+describe("values and methods", () => {
+	const text = (source: string) => {
+		const result = js(`dv.paragraph(${source})`);
+		if (result.error) throw new Error(result.error);
+		return (result.html ?? "").replace(/^<p class="dataviewjs-paragraph">|<\/p>$/g, "");
 	};
 
-	test("filters with where and filter, including a parenthesised parameter", () => {
+	test("string methods behave like JavaScript's", () => {
 		expect(
-			names('dv.list(dv.pages("#project/demo").where((p) => p.status === "open").file.name);'),
-		).toEqual(["alpha"]);
+			text(
+				'["  Hi ".trim(), "ab".toUpperCase(), "AB".toLowerCase(), "abc".includes("b"), "abc".startsWith("a"), "abc".endsWith("x"), "abc".indexOf("c")].join("|")',
+			),
+		).toBe("Hi|AB|ab|true|true|false|2");
 		expect(
-			names('dv.list(dv.pages("#project/demo").filter(p => p.status === "closed").file.name);'),
-		).toEqual(["beta"]);
+			text(
+				'["abcdef".slice(1, 3), "abcdef".slice(-2), "abcdef".substring(4), "a,b,c".split(",").length, "a-b-a".replace("a", "x"), "a-b-a".replaceAll("a", "x")].join("|")',
+			),
+		).toBe("bc|ef|ef|3|x-b-a|x-b-x");
+		expect(
+			text(
+				'["7".padStart(3, "0"), "7".padStart(3), "7".padEnd(2, "!"), "7".padEnd(2), "ab".repeat(3), "abc".charAt(1), "x".toString(), "a".localeCompare("b")].join("|")',
+			),
+		).toBe("007|  7|7!|7 |ababab|b|x|-1");
+		// `replaceAll` with an empty pattern inserts between every character, as in JavaScript.
+		expect(text('"ab".replaceAll("", "-")')).toBe("-a-b-");
+		expect(js('dv.paragraph("x".at(0))').error).toContain(
+			"Unsupported DataviewJS method: at() on a string",
+		);
 	});
 
-	test("maps, sorts in both directions, limits, and slices", () => {
-		expect(names('dv.list(dv.pages("#project/demo").map(p => p.file.name));')).toEqual([
-			"alpha",
-			"beta",
-		]);
-		expect(names('dv.list(dv.pages("#project/demo").sort(p => p.file.name).file.name);')).toEqual([
-			"alpha",
-			"beta",
-		]);
+	test("String, Number and Boolean convert like the JavaScript functions", () => {
+		expect(text('[String(12), Number("3.5") + 1, Boolean(""), Boolean("x")].join("|")')).toBe(
+			"12|4.5|false|true",
+		);
+		expect(js("dv.paragraph(Symbol(1))").error).toContain('"Symbol" is not defined');
+	});
+
+	test("dates expose Luxon's DateTime fields", () => {
 		expect(
-			names('dv.list(dv.pages("#project/demo").sort(p => p.file.name, "desc").file.name);'),
-		).toEqual(["beta", "alpha"]);
-		expect(names('dv.list(dv.pages("#project/demo").limit(1).file.name);')).toEqual(["alpha"]);
-		expect(names('dv.list(dv.pages("#project/demo").slice(1).file.name);')).toEqual(["beta"]);
+			text(
+				'["year", "month", "day", "hour", "minute", "second", "millisecond", "weekday", "weekNumber", "weekYear"].map(k => dv.date("2026-08-20T14:05:09.250")[k]).join(",")',
+			),
+		).toBe("2026,8,20,14,5,9,250,4,34,2026");
+		// ISO week-year differs from the calendar year on 2027-01-01 (2026-W53); Sunday is 7.
+		expect(
+			text(
+				'[dv.date("2027-01-01").weekNumber, dv.date("2027-01-01").weekYear, dv.date("2026-08-23").weekday].join(",")',
+			),
+		).toBe("53,2026,7");
+		expect(text('dv.date("2026-08-20").ts === dv.date("2026-08-20").toMillis()')).toBe("true");
+		expect(text('dv.date("2026-08-20").quaternion ?? "none"')).toBe("none");
 	});
 
-	test("applies a collection method that is referenced without parentheses", () => {
-		const result = renderDataviewJs(
-			'dv.list(dv.pages("#project/demo").where.map(p => p.file.name));',
-			home,
-			index,
-		);
-
-		expect(result.html).toBe('<ul class="dataviewjs-list"><li>alpha</li><li>beta</li></ul>');
+	test("flatMap flattens one level and forEach runs for every element", () => {
+		expect(text('[1, 2].flatMap(n => [n, n * 10]).join(",")')).toBe("1,10,2,20");
+		expect(text('[1, [2]].flatMap(n => n).join(",")')).toBe("1,2");
+		expect(
+			js("let sum = 0;\n[1, 2, 3].forEach((n, i) => { sum += n * i })\ndv.paragraph(sum)").html,
+		).toBe('<p class="dataviewjs-paragraph">8</p>');
+		// As in JavaScript, a newline before `[` does not end the statement.
+		expect(
+			js("let sum = 0\n[1, 2, 3].forEach((n, i) => { sum += n * i })\ndv.paragraph(sum)").error,
+		).toBeDefined();
 	});
 
-	test("joins and flattens plain arrays", () => {
-		const result = renderDataviewJs(
-			['dv.paragraph([1, 2, 3].join("-"));', "dv.paragraph([[1, [2]], 3].flat());"].join("\n"),
-			home,
-			index,
+	test("var declares a reassignable binding; ; and newlines both end statements", () => {
+		expect(js("var x = 1\nx += 1; x += 2\ndv.paragraph(x)").html).toBe(
+			'<p class="dataviewjs-paragraph">4</p>',
 		);
+	});
 
-		expect(result.html).toBe(
-			[
-				'<p class="dataviewjs-paragraph">1-2-3</p>',
-				'<p class="dataviewjs-paragraph">1, 2, 3</p>',
-			].join("\n"),
-		);
+	test("dv.page resolves a path, a [[link]] string or a link; anything else is nothing", () => {
+		expect(text('dv.page("N/Alpha").status')).toBe("open");
+		expect(text('dv.page("[[N/Beta]]").file.name')).toBe("Beta");
+		expect(text('dv.page(dv.fileLink("N/Gamma")).status')).toBe("open");
+		expect(text('dv.page("Nowhere") === undefined')).toBe("true");
+		expect(text("dv.page(5) === undefined")).toBe("true");
 	});
 });
 
-describe("renderDataviewJs expressions", () => {
-	const value = (expression: string) => {
-		const result = renderDataviewJs(`dv.paragraph(${expression});`, home, index);
-		expect(result.error).toBeUndefined();
-		return (result.html ?? "")
-			.replace(/^<p class="dataviewjs-paragraph">/, "")
-			.replace(/<\/p>$/, "");
-	};
-
-	test("evaluates equality, comparison, and boolean operators", () => {
-		expect(value("1 === 1")).toBe("true");
-		expect(value("1 !== 2")).toBe("true");
-		expect(value("1 == 1")).toBe("true");
-		expect(value("1 != 2")).toBe("true");
-		expect(value("2 > 1")).toBe("true");
-		expect(value("1 < 2")).toBe("true");
-		expect(value("2 >= 2")).toBe("true");
-		expect(value("1 <= 2")).toBe("true");
-		expect(value("1 > 2")).toBe("false");
-		expect(value("true || false")).toBe("true");
-		expect(value("false && true")).toBe("false");
-		expect(value("!false")).toBe("true");
+describe("sandbox", () => {
+	test("host names are refused as identifiers, never inside strings", () => {
+		for (const source of [
+			"dv.paragraph(process.version)",
+			"const f = globalThis",
+			"dv.current().constructor",
+			"dv.current().__proto__",
+			"eval('1')",
+		]) {
+			expect(js(source).error).toContain("forbidden host or runtime API");
+		}
+		expect(js('dv.paragraph("Export the document from a window")').html).toBe(
+			'<p class="dataviewjs-paragraph">Export the document from a window</p>',
+		);
+		expect(js("dv.list(dv.pages('\"N/Alpha\"').map(p => p.file.link))").error).toBeUndefined();
 	});
 
-	test("compares dates by timestamp and links by href", () => {
-		expect(value('dv.date("2026-01-05") == dv.date("2026-01-05")')).toBe("true");
-		expect(value('dv.date("2026-01-05") == dv.date("2026-01-06")')).toBe("false");
-		expect(value('dv.page("notes/alpha").file.link == dv.page("notes/alpha").file.link')).toBe(
-			"true",
+	test("only a value's own fields are readable", () => {
+		expect(js('dv.paragraph(dv.current()["constructor"])').html).toBe(
+			'<p class="dataviewjs-paragraph">-</p>',
 		);
-		expect(value('dv.page("notes/alpha").file.link != dv.page("notes/beta").file.link')).toBe(
-			"true",
+		expect(js('dv.paragraph(dv.current()["toString"])').html).toBe(
+			'<p class="dataviewjs-paragraph">-</p>',
 		);
+		expect(js("dv.paragraph(Object.keys({}))").error).toContain('"Object" is not defined');
+		expect(js("dv.current().toString()").error).toContain("Unsupported DataviewJS method");
+	});
+
+	test("an object key named __proto__ is data, not a prototype", () => {
+		expect(js('const o = { "__proto__": 1 }\ndv.paragraph(o["__proto__"])').html).toBe(
+			'<p class="dataviewjs-paragraph">1</p>',
+		);
+	});
+
+	test("unsupported syntax and operators are errors, not skipped statements", () => {
+		expect(js("dv.paragraph(2 ** 3)").error).toContain("** operator is not supported");
+		expect(js("dv.paragraph(1 & 2)").error).toContain("& operator is not supported");
+		expect(js("while (true) {}").error).toContain('"while" is not supported');
+		expect(js("dv.paragraph(1) dv.paragraph(2)").error).toContain(
+			"expected the end of the statement",
+		);
+		expect(js('dv.paragraph(dv.current().file.name - "x")').error).toContain(
+			"the - operator does not apply",
+		);
+		expect(js("dv.view('x')").error).toContain("dv.view()");
+		expect(js("dv.bogus()").error).toContain("Unsupported DataviewJS function: dv.bogus");
+		expect(js("[1].bogus()").error).toContain("Unsupported DataviewJS collection method: bogus");
+	});
+
+	test("runaway recursion stops with an error", () => {
+		expect(js("const f = (x) => f(x)\nf(1)").error).toContain("too much recursion");
 	});
 });
 
-describe("renderDataviewJs rejections", () => {
-	test("refuses source that mentions a host or runtime API", () => {
-		const hostile = [
-			"dv.paragraph(process.version);",
-			'dv.paragraph(require("fs"));',
-			'dv.paragraph(fetch("/x"));',
-			'dv.paragraph(eval("1"));',
-			'dv.paragraph(Function("return 1")());',
-			"dv.paragraph(globalThis.x);",
-			"dv.paragraph(global.x);",
-			"dv.paragraph(window.location);",
-			"dv.paragraph(document.title);",
-			"dv.paragraph(setTimeout(() => 1, 0));",
-			"dv.paragraph(setInterval(() => 1, 0));",
-			'dv.paragraph(import("node:fs"));',
-			"dv.paragraph(Bun.file);",
-			"dv.paragraph(Deno.env);",
-			"dv.paragraph({}.constructor);",
-			"dv.paragraph({}.__proto__);",
-			"dv.paragraph(Object.prototype);",
-			"export const x = 1;",
-		];
+describe("escape vectors", () => {
+	test("prototype members are unreachable through computed keys and method references", () => {
+		// `'a'.toString.constructor`, spelled so the identifier check cannot see it.
+		expect(js('dv.paragraph("a"["toString"]["con" + "structor"])').error).toContain(
+			'cannot read "constructor" of undefined',
+		);
+		expect(js('dv.func["con" + "structor"]("return process")()').error).toContain(
+			"expected a function",
+		);
+		expect(js('dv.paragraph(typeof String["con" + "structor"])').html).toBe(
+			'<p class="dataviewjs-paragraph">undefined</p>',
+		);
+		expect(js('dv.paragraph(typeof [1]["con" + "structor"][0])').html).toBe(
+			'<p class="dataviewjs-paragraph">undefined</p>',
+		);
+		expect(js('dv.paragraph(typeof Math["__pro" + "to__"])').html).toBe(
+			'<p class="dataviewjs-paragraph">undefined</p>',
+		);
+	});
 
-		for (const source of hostile) {
-			const result = renderDataviewJs(source, home, index);
-
-			expect(result.html).toBeUndefined();
-			expect(result.error).toBe("DataviewJS source references a forbidden host or runtime API.");
+	test("Symbol, Reflect, Proxy and JSON do not exist", () => {
+		for (const name of ["Symbol", "Reflect", "Proxy", "JSON", "Object"]) {
+			expect(js(`dv.paragraph(typeof ${name}.x)`).error).toContain(`"${name}" is not defined`);
 		}
 	});
 
-	test("rejects an unsupported statement instead of ignoring it", () => {
-		const result = renderDataviewJs('console.log("hi");', home, index);
-
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe('Unsupported DataviewJS statement: console.log("hi")');
+	test("coercing an object never calls its toString or valueOf", () => {
+		expect(js('dv.paragraph("" + { toString: () => "called" })').html).not.toContain("called");
+		expect(js("dv.paragraph(Number({ valueOf: () => 7 }))").html).toBe(
+			'<p class="dataviewjs-paragraph">NaN</p>',
+		);
+		expect(js('dv.paragraph(String({ toString: () => "called" }))').html).not.toContain("called");
 	});
 
-	test("rejects an assignment that is not a declaration", () => {
-		const result = renderDataviewJs("x = 5;", home, index);
+	test("an object literal cannot pollute the shared prototype, nor a script mutate page values", () => {
+		expect(
+			js('const o = { "__proto__": { "polluted": 1 } }\nconst p = {}\ndv.paragraph(p.polluted)')
+				.html,
+		).toBe('<p class="dataviewjs-paragraph">-</p>');
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+		expect(js('dv.current().file.name = "x"').error).toContain("Unsupported DataviewJS syntax");
+		expect(js("dv.current().file.tasks.push(1)").error).toContain(
+			"Unsupported DataviewJS collection method: push",
+		);
+	});
+});
 
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe("Unsupported DataviewJS statement: x = 5");
+describe("denial of service", () => {
+	test("a script that never finishes is stopped by the step budget", () => {
+		const exponential = js("const f = (n) => n > 0 ? f(n - 1) + f(n - 1) : 1\ndv.paragraph(f(40))");
+		expect(exponential.error).toBe(
+			"DataviewJS: the script ran more than 50000000 steps and was stopped; Obsidian has no such limit, but a site build must finish.",
+		);
+		// Lists of the same long list are paid for as the square they render into.
+		expect(
+			js(
+				'const x = "abc".repeat(1000).split("")\nconst y = x.map(() => x)\nconst z = y.map(() => y)',
+			).error,
+		).toContain("ran more than 50000000 steps");
+		// `distinct` compares every value with every kept one.
+		expect(
+			js(
+				'const x = "x".repeat(20000).split("").map((c, i) => i)\ndv.paragraph(x.distinct().length)',
+			).error,
+		).toContain("ran more than 50000000 steps");
+		// So does rendering a huge value again and again.
+		expect(
+			js(
+				'const s = "x".repeat(9000000)\nfor (const i of "x".repeat(100).split("")) dv.paragraph(s)',
+			).error,
+		).toContain("ran more than 50000000 steps");
 	});
 
-	test("rejects an unsupported function", () => {
-		const result = renderDataviewJs("dv.paragraph(bogus(1));", home, index);
-
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe("Unsupported DataviewJS function: bogus.");
+	test("huge strings and lists are refused with a clear error", () => {
+		expect(js('dv.paragraph("x".repeat(1e9))').error).toContain(
+			"A text value would be 1000000000 characters long, over the limit of 10000000",
+		);
+		expect(js('dv.paragraph("x".padStart(1e9))').error).toContain("A text value would be");
+		expect(js('dv.paragraph("x".padEnd(1e9, "ab"))').error).toContain("A text value would be");
+		expect(js('const s = "x".repeat(6000000)\ndv.paragraph(s + s)').error).toContain(
+			"A text value would be 12000000 characters long",
+		);
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: DataviewJS source holding a template literal
+		expect(js('const s = "x".repeat(6000000)\ndv.paragraph(`${s}${s}`)').error).toContain(
+			"A text value would be",
+		);
+		expect(js('const s = "x".repeat(4000000)\ndv.paragraph([s, s, s].join())').error).toContain(
+			"A text value would be",
+		);
+		expect(
+			js('dv.paragraph("a".repeat(100000).replaceAll("a", "b".repeat(1000)))').error,
+		).toContain("A text value would be");
+		expect(js('dv.paragraph("x".repeat(2000000).split("").length)').error).toContain(
+			"A list would have 2000000 items, over the limit of 1000000",
+		);
+		const square = 'const x = "x".repeat(1001).split("")\nconst y = x.map(() => x)\n';
+		expect(js(`${square}dv.paragraph(y.flat().length)`).error).toContain("A list would have");
+		expect(js(`${square}dv.paragraph(x.flatMap(() => x).length)`).error).toContain(
+			"A list would have",
+		);
+		expect(js(`${square}dv.paragraph(y.missing.length)`).error).toContain("A list would have");
+		expect(js(`${square}dv.paragraph(y.concat(x, x).length)`).html).toBe(
+			'<p class="dataviewjs-paragraph">3003</p>',
+		);
 	});
 
-	test("rejects an unsupported collection method", () => {
-		const result = renderDataviewJs("dv.paragraph(dv.pages().bogus());", home, index);
-
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe("Unsupported DataviewJS collection method: bogus.");
+	test("regular expressions built through dv.func are checked before they run", () => {
+		expect(js('dv.paragraph(dv.func.regextest("(a+)+$", "aaaa"))').error).toContain(
+			"uses nested quantifiers (possible catastrophic backtracking detected); Obsidian would run it",
+		);
+		expect(js('dv.paragraph(dv.func.regextest("a+$", "aaaa"))').html).toBe(
+			'<p class="dataviewjs-paragraph">true</p>',
+		);
 	});
 
-	test("requires a restricted arrow callback for collection methods", () => {
-		const result = renderDataviewJs("dv.list(dv.pages().where());", home, index);
-
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe(".where() requires a restricted arrow callback.");
+	test("a stack overflow is reported, not thrown", () => {
+		const deep = `dv.paragraph(${"(".repeat(20000)}1${")".repeat(20000)})`;
+		expect(js(deep).error).toBe(
+			"DataviewJS: The expression is nested too deeply or recurses too far to evaluate (the interpreter ran out of stack).",
+		);
+		expect(
+			renderDataviewJsInline(`${"[".repeat(20000)}${"]".repeat(20000)}`, home, index).error,
+		).toContain("nested too deeply");
 	});
+});
 
-	test("rejects a collection method on a non-collection", () => {
-		const result = renderDataviewJs("dv.paragraph(dv.current().name.where(p => p));", home, index);
-
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe(".where() is only supported on Dataview collections.");
-	});
-
-	test("does not treat an unbalanced call expression as a call", () => {
-		const result = renderDataviewJs("dv.paragraph(a((b))", home, index);
-
-		expect(result.error).toBeUndefined();
-		expect(result.html).toBe('<p class="dataviewjs-paragraph"></p>');
-	});
-
-	test("rejects an object literal field without a value", () => {
-		const result = renderDataviewJs("dv.paragraph({a});", home, index);
-
-		expect(result.html).toBeUndefined();
-		expect(result.error).toBe("Invalid object field: a.");
+describe("inline DataviewJS", () => {
+	test("renders the value of the expression", () => {
+		expect(renderDataviewJsInline("dv.current().file.name", home, index).html).toBe(
+			'<span class="dataview-inline">Home</span>',
+		);
+		expect(renderDataviewJsInline("dv.pages('\"N\"').length", home, index).html).toBe(
+			'<span class="dataview-inline">3</span>',
+		);
+		expect(renderDataviewJsInline("process.exit()", home, index).error).toContain("forbidden");
 	});
 });

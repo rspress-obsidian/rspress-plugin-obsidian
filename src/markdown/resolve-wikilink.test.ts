@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "node:path";
 import { setCanvasRoutes } from "../shared/canvas-routes.js";
+import { setPublishedFileRoutes } from "../shared/file-routes.js";
 import { normalizeLookupValue } from "../shared/slug.js";
 import { buildContentIndex } from "./content-index.ts";
 import { parseWikiLink } from "./parse-wikilink.ts";
@@ -137,7 +138,8 @@ describe("resolveWikiLink note-relative targets", () => {
 
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/image.png");
-		expect(result.label).toBe("image.png");
+		// Obsidian shows the target as typed.
+		expect(result.label).toBe("./image.png");
 	});
 
 	test("reports a relative target that resolves to a directory", async () => {
@@ -152,7 +154,7 @@ describe("resolveWikiLink note-relative targets", () => {
 		expect(result.message).toContain("notes/current.md");
 	});
 
-	test("reports an ambiguous case-insensitive relative page", () => {
+	test("picks one of two case-insensitive relative pages and reports the ambiguity", () => {
 		const current = makePage({ filePathKey: "notes/other" });
 		const pageA = makePage({ filePathKey: "notes/Alpha" });
 		const pageB = makePage({ filePathKey: "notes/alpha" });
@@ -164,11 +166,13 @@ describe("resolveWikiLink note-relative targets", () => {
 			options: { enableCaseInsensitiveLookup: true },
 		});
 
-		expect(result.status).toBe("ambiguous-page");
-		expect(result.message).toContain("is ambiguous; use a more specific path instead.");
+		expect(result.status).toBe("ok");
+		// Same depth and length: the alphabetically first path wins.
+		expect(result.href).toBe("/notes/Alpha");
+		expect(result.ambiguity).toContain("notes/Alpha.md, notes/alpha.md");
 	});
 
-	test("reports ambiguous case-insensitive relative attachments", () => {
+	test("picks one of two case-insensitive relative attachments and reports it", () => {
 		const current = makePage({ filePathKey: "notes/other" });
 		const index = makeIndex(
 			[current],
@@ -181,8 +185,9 @@ describe("resolveWikiLink note-relative targets", () => {
 			options: { enableCaseInsensitiveLookup: true },
 		});
 
-		expect(result.status).toBe("ambiguous-page");
-		expect(result.message).toContain("matches multiple attachments; use a case-sensitive path.");
+		expect(result.status).toBe("ok");
+		expect(result.href).toBe("/dir/Pic.png");
+		expect(result.ambiguity).toContain("2 files");
 	});
 });
 
@@ -198,20 +203,46 @@ describe("resolveWikiLink attachments", () => {
 		expect(result.href).toBe("/image.png");
 	});
 
-	test("reports an ambiguous attachment basename", () => {
-		const current = makePage({ filePathKey: "index" });
+	test("resolves a shared attachment name like Obsidian and reports the alternatives", () => {
+		const current = makePage({ filePathKey: "notes/index" });
 		const index = makeIndex(
 			[current],
-			[makeAsset({ pathKey: "a/pic.png" }), makeAsset({ pathKey: "b/pic.png" })],
+			[
+				makeAsset({ pathKey: "a/deep/pic.png" }),
+				makeAsset({ pathKey: "b/pic.png" }),
+				makeAsset({ pathKey: "notes/pic.png" }),
+			],
 		);
 
-		const result = resolve("c/pic.png", { currentPage: current, index });
+		// Same folder as the linking note first.
+		const sameFolder = resolve("pic.png", { currentPage: current, index });
+		expect(sameFolder.status).toBe("ok");
+		expect(sameFolder.href).toBe("/notes/pic.png");
+		expect(sameFolder.ambiguity).toContain("3 files");
 
-		expect(result.status).toBe("ambiguous-page");
-		expect(result.message).toContain("matches multiple attachments; use a path-qualified link.");
+		// Otherwise the shortest path.
+		const elsewhere = resolve("pic.png", { currentPage: makePage({ filePathKey: "x/y" }), index });
+		expect(elsewhere.href).toBe("/b/pic.png");
 	});
 
-	test("reports ambiguous case-insensitive attachment paths", () => {
+	test("matches a path suffix without fuzzy matching", () => {
+		const current = makePage({ filePathKey: "index" });
+		const index = makeIndex(
+			[current, makePage({ filePathKey: "a/sub/Note" }), makePage({ filePathKey: "b/Note" })],
+			[makeAsset({ pathKey: "x/media/pic.png" }), makeAsset({ pathKey: "pic.png" })],
+		);
+
+		const page = resolve("sub/Note", { currentPage: current, index });
+		expect(page.status).toBe("ok");
+		expect(page.href).toBe("/a/sub/Note");
+		expect(page.ambiguity).toBeUndefined();
+
+		const asset = resolve("media/pic.png", { currentPage: current, index });
+		expect(asset.href).toBe("/x/media/pic.png");
+		expect(asset.ambiguity).toBeUndefined();
+	});
+
+	test("picks one of two case-insensitive attachment paths and reports it", () => {
 		const current = makePage({ filePathKey: "index" });
 		const index = makeIndex(
 			[current],
@@ -224,13 +255,14 @@ describe("resolveWikiLink attachments", () => {
 			options: { enableCaseInsensitiveLookup: true },
 		});
 
-		expect(result.status).toBe("ambiguous-page");
-		expect(result.message).toContain("matches multiple attachments; use a case-sensitive path.");
+		expect(result.status).toBe("ok");
+		expect(result.href).toBe("/Pic.png");
+		expect(result.ambiguity).toContain("Pic.png, pic.png");
 	});
 });
 
 describe("resolveWikiLink case-insensitive and fuzzy fallbacks", () => {
-	test("reports an ambiguous case-insensitive page path", () => {
+	test("picks one of two case-insensitive page paths and reports it", () => {
 		const current = makePage({ filePathKey: "index" });
 		const pageA = makePage({ filePathKey: "notes/Alpha" });
 		const pageB = makePage({ filePathKey: "notes/alpha" });
@@ -242,8 +274,9 @@ describe("resolveWikiLink case-insensitive and fuzzy fallbacks", () => {
 			options: { enableCaseInsensitiveLookup: true },
 		});
 
-		expect(result.status).toBe("ambiguous-page");
-		expect(result.message).toContain("is ambiguous; use a more specific path instead.");
+		expect(result.status).toBe("ok");
+		expect(result.href).toBe("/notes/Alpha");
+		expect(result.ambiguity).toBeDefined();
 	});
 
 	test("resolves a case-insensitive page path to a single match", () => {
@@ -276,7 +309,7 @@ describe("resolveWikiLink case-insensitive and fuzzy fallbacks", () => {
 		expect(result.href).toBe("/notes/Alpha");
 	});
 
-	test("reports an ambiguous fuzzy target when shortest suffixes tie", () => {
+	test("picks the alphabetically first fuzzy match when shortest suffixes tie", () => {
 		const current = makePage({ filePathKey: "index" });
 		const pageA = makePage({ filePathKey: "a/note", baseName: "a-note" });
 		const pageB = makePage({ filePathKey: "b/note", baseName: "b-note" });
@@ -288,9 +321,9 @@ describe("resolveWikiLink case-insensitive and fuzzy fallbacks", () => {
 			options: { enableFuzzyMatching: true },
 		});
 
-		expect(result.status).toBe("ambiguous-page");
-		expect(result.message).toContain("Fuzzy wikilink target");
-		expect(result.message).toContain("matched multiple pages");
+		expect(result.status).toBe("ok");
+		expect(result.href).toBe("/a/note");
+		expect(result.ambiguity).toContain("a/note.md, b/note.md");
 	});
 
 	test("falls back to broken-page when fuzzy matching finds nothing", () => {
@@ -388,28 +421,63 @@ describe("resolveWikiLink current-page references", () => {
 	});
 });
 
-describe("resolveWikiLink heading fallbacks", () => {
-	test("resolves a heading by emoji-preserving slug prefix", async () => {
+describe("resolveWikiLink headings", () => {
+	test("resolves a heading by its text, Obsidian's link form, or its id", async () => {
 		const index = await buildContentIndex(compatRoot);
 		const currentPage = index.byFilePathKey.get("index");
 		if (!currentPage) throw new Error("fixture page missing");
 
-		const result = resolve("shared/Concept#Punctuation", { currentPage: currentPage, index });
-
-		expect(result.status).toBe("ok");
-		expect(result.href).toBe("/shared/Concept#punctuation-ab--c");
-		expect(result.label).toBe("Punctuation");
+		for (const anchor of ["Punctuation: A/B & C", "Punctuation A/B & C", "punctuation-ab--c"]) {
+			const result = resolve(`shared/Concept#${anchor}`, { currentPage, index });
+			expect(result.status).toBe("ok");
+			expect(result.href).toBe("/shared/Concept#punctuation-ab--c");
+		}
 	});
 
-	test("resolves a heading by case-insensitive substring", async () => {
+	test("reports a heading prefix or fragment instead of guessing", async () => {
+		// `[[Concept#Punctuation]]` used to land on "Punctuation: A/B & C" and
+		// `#A/B` on the same heading by substring: a renamed heading never
+		// reached onBrokenLink.
 		const index = await buildContentIndex(compatRoot);
 		const currentPage = index.byFilePathKey.get("index");
 		if (!currentPage) throw new Error("fixture page missing");
 
-		const result = resolve("shared/Concept#A/B", { currentPage: currentPage, index });
+		for (const anchor of ["Punctuation", "A/B", "Emoji Heading"]) {
+			const result = resolve(`shared/Concept#${anchor}`, { currentPage, index });
+			expect(result.status).toBe("broken-anchor");
+			expect(result.message).toContain("Available headings:");
+		}
+	});
 
-		expect(result.status).toBe("ok");
-		expect(result.href).toBe("/shared/Concept#punctuation-ab--c");
+	test("labels a subpath link the way Obsidian displays it", async () => {
+		const index = await buildContentIndex(compatRoot);
+		const currentPage = index.byFilePathKey.get("index");
+		if (!currentPage) throw new Error("fixture page missing");
+
+		expect(resolve("shared/Concept#Duplicate", { currentPage, index }).label).toBe(
+			"shared/Concept > Duplicate",
+		);
+		expect(resolve("shared/Concept#Duplicate|Dup", { currentPage, index }).label).toBe("Dup");
+	});
+
+	test("resolves a nested heading path through the hierarchy", () => {
+		const heading = (rawText: string, depth: number, slug: string) => ({ rawText, depth, slug });
+		const target = makePage({
+			filePathKey: "N",
+			headings: [
+				heading("A", 2, "a"),
+				heading("Details", 3, "details"),
+				heading("B", 2, "b"),
+				heading("Details", 3, "details-1"),
+			],
+		});
+		const current = makePage({ filePathKey: "index" });
+		const index = makeIndex([target, current]);
+
+		expect(resolve("N#B#Details", { currentPage: current, index }).href).toBe("/N#details-1");
+		expect(resolve("N#A#Details", { currentPage: current, index }).href).toBe("/N#details");
+		expect(resolve("N#B#Details", { currentPage: current, index }).label).toBe("N > B > Details");
+		expect(resolve("N#C#Details", { currentPage: current, index }).status).toBe("broken-anchor");
 	});
 
 	test("uses the raw target as label when the page has no filename", () => {
@@ -511,7 +579,7 @@ describe("resolveWikiLink canvas boards", () => {
 
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/canvas/demo");
-		expect(result.label).toBe("Demo");
+		expect(result.label).toBe("Demo.canvas");
 		expect(result.canvasSrc).toBe("Demo.canvas");
 	});
 
@@ -555,7 +623,7 @@ describe("resolveWikiLink canvas boards", () => {
 		];
 		const index = makeIndex([currentPage], strays);
 
-		expect(resolve("Demo.canvas", { currentPage, index }).status).toBe("ambiguous-page");
+		expect(resolve("Demo.canvas", { currentPage, index }).href).not.toBe("/canvas/demo");
 
 		setCanvasRoutes([
 			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
@@ -563,7 +631,7 @@ describe("resolveWikiLink canvas boards", () => {
 		const result = resolve("Demo.canvas", { currentPage, index });
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/canvas/demo");
-		expect(result.label).toBe("Demo");
+		expect(result.label).toBe("Demo.canvas");
 		expect(result.canvasSrc).toBe("Demo.canvas");
 	});
 
@@ -576,5 +644,112 @@ describe("resolveWikiLink canvas boards", () => {
 		expect(result.href).toBe("/vault/Demo.canvas");
 		expect(result.label).toBe("Demo.canvas");
 		expect(result.canvasSrc).toBeUndefined();
+	});
+});
+
+describe("resolveWikiLink files a feature publishes as pages", () => {
+	function baseFixture() {
+		const currentPage = makePage({ filePathKey: "index" });
+		const base = makeAsset({ pathKey: "Projects.base", urlPath: "/vault/Projects.base" });
+		return { currentPage, index: makeIndex([currentPage], [base]) };
+	}
+	const route = {
+		kind: "bases",
+		absolutePath: "/vault/Projects.base",
+		routePath: "/bases/Projects",
+		source: "Projects.base",
+	};
+
+	test("opens the file's page, keeping a view subpath, instead of downloading it", () => {
+		setPublishedFileRoutes("bases", [route]);
+		const { currentPage, index } = baseFixture();
+
+		const plain = resolve("Projects.base", { currentPage, index });
+		const view = resolve("Projects.base#Open tasks", { currentPage, index });
+
+		expect(plain.href).toBe("/bases/Projects");
+		expect(plain.targetAsset).toBeUndefined();
+		expect(plain.fileRoute?.kind).toBe("bases");
+		expect(view.href).toBe("/bases/Projects#Open tasks");
+	});
+
+	test("falls back to the attachment once a rebuild no longer publishes the file", () => {
+		setPublishedFileRoutes("bases", [route]);
+		setPublishedFileRoutes("bases", []);
+		const { currentPage, index } = baseFixture();
+
+		const result = resolve("Projects.base", { currentPage, index });
+
+		expect(result.href).toBe("/vault/Projects.base");
+		expect(result.targetAsset?.pathKey).toBe("Projects.base");
+		expect(result.fileRoute).toBeUndefined();
+	});
+
+	test("keeps another feature's routes when one feature re-registers", () => {
+		setPublishedFileRoutes("bases", [route]);
+		setPublishedFileRoutes("excalidraw", []);
+		const { currentPage, index } = baseFixture();
+
+		expect(resolve("Projects.base", { currentPage, index }).href).toBe("/bases/Projects");
+	});
+});
+
+describe("resolveWikiLink display text and cross-tree fallback", () => {
+	test("keeps the target as typed instead of humanising it", () => {
+		const current = makePage({ filePathKey: "index" });
+		const index = makeIndex([
+			current,
+			makePage({ filePathKey: "daily/2024-01-15" }),
+			makePage({ filePathKey: "my_note" }),
+		]);
+
+		expect(resolve("2024-01-15", { currentPage: current, index }).label).toBe("2024-01-15");
+		expect(resolve("my_note", { currentPage: current, index }).label).toBe("my_note");
+	});
+
+	test("labels a same-page heading or block link without the page", () => {
+		const current = makePage({
+			filePathKey: "index",
+			headings: [{ rawText: "Setup", slug: "setup", depth: 2 }],
+			blocks: [{ id: "abc" }],
+		});
+		const index = makeIndex([current]);
+
+		expect(resolve("#Setup", { currentPage: current, index }).label).toBe("Setup");
+		expect(resolve("#^abc", { currentPage: current, index }).label).toBe("^abc");
+		expect(resolve("index#^abc", { currentPage: current, index }).label).toBe("index > ^abc");
+	});
+
+	test("falls back to the other published tree when its own has no match", () => {
+		const docsPage = makePage({ filePathKey: "index" });
+		const docs = makeIndex([docsPage, makePage({ filePathKey: "Shared" })]);
+		const vaultNote = makePage({ filePathKey: "Torture", routePath: "/vault/Torture" });
+		const vault = makeIndex([
+			vaultNote,
+			makePage({ filePathKey: "Shared", routePath: "/vault/Shared" }),
+		]);
+		docs.linkedIndexes = [vault];
+
+		const cross = resolve("Torture", { currentPage: docsPage, index: docs });
+		expect(cross.status).toBe("ok");
+		expect(cross.href).toBe("/vault/Torture");
+		// The page's own tree wins when both have the name.
+		expect(resolve("Shared", { currentPage: docsPage, index: docs }).href).toBe("/Shared");
+		// An explicit empty fallback list turns the fallback off.
+		expect(
+			resolve("Torture", { currentPage: docsPage, index: docs, fallbackIndexes: [] }).status,
+		).toBe("broken-page");
+	});
+
+	test("treats a note named like a media extension as a note", () => {
+		const current = makePage({ filePathKey: "index" });
+		const index = makeIndex([
+			current,
+			makePage({ filePathKey: "SVG" }),
+			makePage({ filePathKey: "PDF" }),
+		]);
+
+		expect(resolve("SVG", { currentPage: current, index }).href).toBe("/SVG");
+		expect(resolve("PDF", { currentPage: current, index }).targetPage?.filePathKey).toBe("PDF");
 	});
 });

@@ -3,7 +3,7 @@
 ```
 src/
   shared/     primitives more than one feature needs. Node-free.
-  markdown/   the `wikilink` feature — the remark pipeline.
+  markdown/   the `markdown` feature — the remark pipeline.
   canvas/     the `canvas` feature — .canvas parsing, rendering, editor.
   graph/      the `graphview` feature — build-time extraction + runtime panel.
   index.ts    the umbrella entry that composes the three plugins.
@@ -20,9 +20,11 @@ whole import graph into the client bundle — and a single `node:fs` in that gra
 is a broken build. `route-path.ts` exists as a separate module purely so the
 browser never inherits it.
 
-`test/shared-boundary.test.ts` enforces all of this: the module list, the
-node-free rule, and that a feature does not reach into another. Cross-feature
-imports are allowed through a named list that may only shrink.
+`test/shared-boundary.test.ts` enforces all of this: the node-free rule (every
+import form — static, dynamic, `require`, bare `fs`/`path` as well as `node:`),
+that `shared/` does not reach into a feature, and that only build-time code
+crosses between features — into markdown's content index and resolver, never
+from or into browser code.
 
 ## Why it is a directory and not a `utils.ts`
 

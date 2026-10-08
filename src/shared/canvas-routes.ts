@@ -43,6 +43,26 @@ export interface CanvasBoardRoute {
 const byAbsolutePath = new Map<string, CanvasBoardRoute>();
 const bySourceKey = new Map<string, CanvasBoardRoute>();
 const bySourceKeyLower = new Map<string, CanvasBoardRoute>();
+const byRoute = new Map<string, CanvasBoardRoute>();
+
+/**
+ * One spelling per published route: `/canvas/demo`, `/canvas/demo/`,
+ * `/canvas/demo.html` and `/canvas/demo/index` are the same page to Rspress.
+ */
+function normalizeBoardRoute(routePath: string): string {
+	let route = routePath.trim();
+	try {
+		route = decodeURI(route);
+	} catch {
+		// Already decoded, or a stray `%`; match it as written.
+	}
+	route = route
+		.replace(/[?#].*$/, "")
+		.replace(/\.html$/i, "")
+		.replace(/\/index$/i, "")
+		.replace(/\/+$/, "");
+	return (route.startsWith("/") ? route : `/${route}`).toLowerCase();
+}
 
 /**
  * Replace the registry with the boards published by the latest canvas scan.
@@ -53,11 +73,13 @@ export function setCanvasRoutes(boards: Iterable<CanvasBoardRoute>): void {
 	byAbsolutePath.clear();
 	bySourceKey.clear();
 	bySourceKeyLower.clear();
+	byRoute.clear();
 	for (const board of boards) {
 		const sourceKey = normalizeFilePathKey(board.source);
 		byAbsolutePath.set(normalizeFsPath(board.absolutePath), board);
 		bySourceKey.set(sourceKey, board);
 		bySourceKeyLower.set(sourceKey.toLowerCase(), board);
+		byRoute.set(normalizeBoardRoute(board.routePath), board);
 	}
 }
 
@@ -81,4 +103,14 @@ export function findCanvasBoard(
 	return (
 		bySourceKey.get(key) ?? (caseInsensitive ? bySourceKeyLower.get(key.toLowerCase()) : undefined)
 	);
+}
+
+/**
+ * The published board whose viewer page sits at `routePath`. Rspress hands
+ * route consumers the generated page, not the `.canvas` file, so the graph
+ * maps a route back to its board here. Matching ignores a trailing slash,
+ * `.html`, an `/index` suffix and case (board routes are published lowercase).
+ */
+export function findCanvasBoardByRoute(routePath: string): CanvasBoardRoute | undefined {
+	return byRoute.get(normalizeBoardRoute(routePath));
 }

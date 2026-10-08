@@ -2,6 +2,33 @@
   Import via: enableDefaultStyles: true in markdown() */
 
 @import "./media-embed.css";
+/* The reproduced Obsidian plugins: each emits its own markup, styled here so
+   one stylesheet covers a site whatever it enables. */
+@import "./obsidian-plugins/tasks/tasks.css";
+@import "./obsidian-plugins/kanban/kanban.css";
+@import "./obsidian-plugins/excalidraw/excalidraw.css";
+@import "./obsidian-plugins/bases/bases.css";
+@import "./obsidian-plugins/templater/templater.css";
+
+/* Status colour for failures (Tasks query errors, Templater errors, Mermaid
+   errors, overdue dates). Rspress has no danger token, so the pair is chosen to
+   clear WCAG AA (4.5:1) on the page, soft and mute backgrounds in each mode.
+   Links on the plugin's tinted surfaces (callouts, transclusions, the daily
+   bar, PDF bars) take the brand's darker step in light mode for the same
+   reason: the brand blue itself is under 4.5:1 there. */
+:root {
+	--obsidian-c-danger: #c62828;
+	--obsidian-c-link: var(--rp-c-brand-darker, #005fcc);
+}
+
+html.dark {
+	--obsidian-c-danger: #ff8a80;
+	--obsidian-c-link: var(--rp-c-link, #33adff);
+}
+
+:is(.callout, .obsidian-transclusion, .obsidian-daily-navigation) a {
+	color: var(--obsidian-c-link);
+}
 
 /* ─── Callouts ─────────────────────────────────────────────────────────── */
 
@@ -11,6 +38,7 @@
 	/* Custom (unrecognised) types fall back to Obsidian's note styling:
 	   blue card, pencil glyph. Known types override both below. */
 	--callout-color: #448aff;
+	--callout-bg: rgba(68, 138, 255, 0.07);
 	--callout-border: color-mix(
 		in srgb,
 		var(--callout-color, #77809a) 30%,
@@ -22,11 +50,33 @@
 	border: 1px solid var(--callout-border);
 	border-left: 4px solid var(--callout-color, #77809a);
 	border-radius: 8px;
+	/* Obsidian tints the whole card, not just the title bar. */
+	background: var(--callout-bg, transparent);
 	box-shadow: none;
 	overflow: hidden;
 }
 
-.callout-title,
+/* Block, not flex: the title holds inline markdown (`A **bold** [[link]]`) as
+   bare text nodes and elements, and as flex items each run would be split
+   apart by the gap. The icon sits in the left padding instead. */
+.callout-title {
+	position: relative;
+	display: block;
+	min-height: 2.35rem;
+	padding: 0.55rem 0.8rem 0.55rem 2.45rem;
+	color: var(--rp-c-text-1, #1f2937);
+	font-size: 0.92rem;
+	font-weight: 700;
+	line-height: 1.4;
+	letter-spacing: 0.01em;
+	text-align: start;
+	background: var(
+		--callout-title-bg,
+		color-mix(in srgb, var(--callout-color, #77809a) 12%, var(--callout-surface))
+	);
+	border-bottom: 1px solid color-mix(in srgb, var(--callout-color, #77809a) 22%, transparent);
+}
+
 .rp-callout__title {
 	display: flex;
 	align-items: center;
@@ -48,9 +98,11 @@
 }
 
 .callout-title::before {
+	position: absolute;
+	top: 0.65rem;
+	left: 0.8rem;
 	width: 1.1rem;
 	height: 1.1rem;
-	flex: 0 0 auto;
 	background-color: var(--callout-color, #77809a);
 	mask-image: var(--callout-icon, none);
 	mask-size: contain;
@@ -65,6 +117,7 @@
 
 /* <details> foldable callouts — summary doubles as the title bar */
 details.callout > summary.callout-title {
+	padding-right: 2.2rem;
 	cursor: pointer;
 	list-style: none;
 	user-select: none;
@@ -75,9 +128,11 @@ details.callout > summary.callout-title::-webkit-details-marker {
 }
 
 details.callout > summary.callout-title::after {
+	position: absolute;
+	top: 0.95rem;
+	right: 0.95rem;
 	width: 0.45rem;
 	height: 0.45rem;
-	margin-left: auto;
 	border-right: 1.5px solid currentColor;
 	border-bottom: 1.5px solid currentColor;
 	content: "";
@@ -138,11 +193,6 @@ details.callout[open] > summary.callout-title::after {
 	--callout-title-bg: rgba(100, 221, 23, 0.12);
 }
 .callout-warning {
-	--callout-color: #ff9100;
-	--callout-bg: rgba(255, 145, 0, 0.07);
-	--callout-title-bg: rgba(255, 145, 0, 0.12);
-}
-.callout-caution {
 	--callout-color: #ff9100;
 	--callout-bg: rgba(255, 145, 0, 0.07);
 	--callout-title-bg: rgba(255, 145, 0, 0.12);
@@ -316,12 +366,27 @@ html.dark .rp-callout {
 }
 
 .obsidian-backlinks h2 {
+	/* The panel draws its own divider; the theme's h2 rule and spacing would
+	   add a second line and an empty band above the title. */
+	border-top: 0;
+	margin-top: 0;
+	padding-top: 0;
 	font-size: 0.9rem;
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 	color: var(--rp-c-text-2, #888);
 	margin-bottom: 0.75rem;
+}
+
+/* The theme opens a parent's first h2 with a divider and a 3rem band. That
+   marks a page's first section; inside a panel or a card it reads as a stray
+   rule above the heading. */
+.obsidian-backlinks h2::before,
+.obsidian-transclusion h2::before,
+.callout-content h2::before,
+.kanban-plugin h2::before {
+	content: none;
 }
 
 .obsidian-backlinks ul {
@@ -349,13 +414,18 @@ html.dark .rp-callout {
 	font-size: 0.85rem;
 	line-height: 1.5;
 	background: var(--rp-c-bg-soft, #f5f5f5);
-	color: var(--rp-c-brand, #448aff);
+	color: var(--obsidian-c-link);
 	text-decoration: none;
 	transition: background 0.15s;
 }
 
 .obsidian-backlinks a:hover {
 	background: var(--rp-c-bg-mute, #ebebeb);
+}
+
+.obsidian-backlinks a:focus-visible {
+	outline: 2px solid var(--rp-c-brand, #448aff);
+	outline-offset: 2px;
 }
 
 /* Unlinked mentions stack instead of flowing as pills: each entry carries a
@@ -365,13 +435,26 @@ html.dark .rp-callout {
 }
 
 .obsidian-unlinked-mentions li {
-	margin-bottom: 0.5rem;
+	margin-bottom: 0.75rem;
 	line-height: 1.6;
 }
 
+/* The snippet goes under its page, as in Obsidian's pane, instead of wrapping
+   around the pill. */
 .obsidian-mention-context {
-	color: var(--rp-c-text-2, #888);
+	display: block;
+	margin-top: 0.2rem;
+	padding-left: 0.75rem;
+	color: var(--rp-c-text-2, #67676c);
 	font-size: 0.85rem;
+}
+
+/* Right after the backlinks it is the second section of one pane: no second
+   divider. */
+.obsidian-backlinks + .obsidian-unlinked-mentions {
+	margin-top: 0;
+	padding-top: 0;
+	border-top: 0;
 }
 
 /* ─── Transclusion wrapper ──────────────────────────────────────────────── */
@@ -380,7 +463,7 @@ html.dark .rp-callout {
 	margin: 1.25rem 0;
 	border: 1px solid color-mix(in srgb, var(--rp-c-brand, #448aff) 28%, var(--rp-c-divider, #d9deea));
 	border-left: 3px solid var(--rp-c-brand, #448aff);
-	border-radius: 12px;
+	border-radius: 8px;
 	background: color-mix(in srgb, var(--rp-c-brand, #448aff) 4%, var(--rp-c-bg-soft, #f9f9f9));
 	box-shadow:
 		0 1px 2px rgb(15 23 42 / 5%),
@@ -671,7 +754,7 @@ a.obsidian-embed:hover {
 .dataview-calendar-month th {
 	font-size: 0.75rem;
 	font-weight: 500;
-	color: var(--rp-c-text-3, #8a8f98);
+	color: var(--rp-c-text-2, #67676c);
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
 	padding: 0.2rem 0.3rem;
@@ -701,7 +784,7 @@ a.obsidian-embed:hover {
 .dataview-calendar-date {
 	display: block;
 	font-size: 0.7rem;
-	color: var(--rp-c-text-3, #8a8f98);
+	color: var(--rp-c-text-2, #67676c);
 	margin-bottom: 0.15rem;
 }
 
@@ -733,8 +816,25 @@ a.obsidian-embed:hover {
 	margin: 1rem 0;
 	padding: 0.6rem 0.8rem;
 	border: 1px solid var(--rp-c-divider-light, #d9deea);
-	border-radius: 6px;
+	border-radius: 8px;
 	background: var(--rp-c-bg-soft, #f7f8fa);
+}
+
+/* A date never breaks at its hyphens; on a phone the bar tightens instead. */
+.obsidian-daily-navigation > span {
+	white-space: nowrap;
+}
+
+.daily-notes-next {
+	text-align: end;
+}
+
+@media (max-width: 480px) {
+	.obsidian-daily-navigation {
+		gap: 0.5rem;
+		padding: 0.5rem 0.65rem;
+		font-size: 0.875rem;
+	}
 }
 
 .daily-notes-current {
@@ -755,16 +855,19 @@ a.obsidian-embed:hover {
 	background: var(--rp-c-bg-soft, #f7f8fa);
 }
 
+/* Centred, as Obsidian shows a diagram narrower than the note. */
 .obsidian-mermaid-block svg {
+	display: block;
 	max-width: 100%;
 	height: auto;
+	margin-inline: auto;
 }
 
 .obsidian-mermaid-error {
 	padding: 0.6em 0.8em;
-	color: var(--rp-c-danger, #d9534f);
+	color: var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
 	background: var(--rp-c-bg-mute, #f2f3f5);
-	border-left: 3px solid var(--rp-c-danger, #d9534f);
+	border-left: 3px solid var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
 	white-space: pre-wrap;
 }
 
@@ -783,9 +886,112 @@ a.obsidian-embed:hover {
 /* Unresolved wikilinks: the label stays readable and is visibly unresolved
  * (Obsidian dims them), with the original syntax in `data-wikilink`. */
 .obsidian-unresolved {
-	color: var(--rp-c-text-3, #8a8f98);
+	color: var(--rp-c-text-2, #67676c);
 	border-bottom: 1px dashed currentColor;
 	cursor: help;
+}
+
+/* Task items, from notes and from Dataview `TASK` queries alike. Obsidian's
+ * custom statuses (`- [/]`, `- [-]`, `- [>]`, `- [?]`, `- [!]`, …) render
+ * checked with the status in `data-task`; done (`x`) and cancelled (`-`) items
+ * are muted, in-progress statuses dim their box, and snippets can target any
+ * other status. Only an item's own checkbox and text are styled, so a nested
+ * open task under a done one still reads as open. */
+.task-list-item[data-task],
+.contains-task-list {
+	list-style: none;
+}
+
+.contains-task-list {
+	padding-left: 1.4em;
+}
+
+.task-list-item[data-task] > input[type="checkbox"] {
+	margin: 0 0.45em 0 -1.4em;
+	vertical-align: middle;
+}
+
+.task-list-item[data-task="/"] > input[type="checkbox"],
+.task-list-item[data-task=">"] > input[type="checkbox"],
+.task-list-item[data-task="?"] > input[type="checkbox"],
+.task-list-item[data-task="!"] > input[type="checkbox"] {
+	opacity: 0.6;
+}
+
+.task-list-item[data-task] > p > input[type="checkbox"] {
+	margin: 0 0.45em 0 -1.4em;
+	vertical-align: middle;
+}
+
+.task-list-item[data-task="/"] > p > input[type="checkbox"],
+.task-list-item[data-task=">"] > p > input[type="checkbox"],
+.task-list-item[data-task="?"] > p > input[type="checkbox"],
+.task-list-item[data-task="!"] > p > input[type="checkbox"] {
+	opacity: 0.6;
+}
+
+.task-list-item[data-task="x"],
+.task-list-item[data-task="-"] {
+	color: var(--rp-c-text-2, #67676c);
+}
+
+.task-list-item[data-task="x"] .task-list-item:not([data-task="x"], [data-task="-"]),
+.task-list-item[data-task="-"] .task-list-item:not([data-task="x"], [data-task="-"]) {
+	color: var(--rp-c-text-1, inherit);
+}
+
+/* Dataview inline fields: `[key:: value]` shows key and value as one pill,
+ * `(key:: value)` the value alone, as Dataview's reading view does. The spans
+ * share the `.dataview` class, so `margin: 0` undoes its block spacing, which
+ * inside a line pushed the field (and its whole list item) 1rem apart. */
+.dataview.inline-field {
+	display: inline-flex;
+	align-items: baseline;
+	vertical-align: baseline;
+	margin: 0;
+}
+
+.dataview.inline-field-key,
+.dataview.inline-field-value,
+.dataview.inline-field-standalone-value {
+	margin: 0;
+	padding: 0 0.4em;
+	font-size: 0.92em;
+	background: var(--rp-c-bg-soft, #f2f3f5);
+	border: 1px solid var(--rp-c-divider-light, #e2e8f0);
+}
+
+.dataview.inline-field-key {
+	color: var(--rp-c-text-2, #4b5563);
+	border-radius: 4px 0 0 4px;
+	border-right: none;
+}
+
+.dataview.inline-field-value {
+	border-radius: 0 4px 4px 0;
+	background: transparent;
+}
+
+.dataview.inline-field-standalone-value {
+	border-radius: 4px;
+}
+
+/* A Dataview link to a note that is not published, dimmed like an
+ * unresolved wikilink. */
+.internal-link.is-unresolved {
+	color: var(--rp-c-text-2, #67676c);
+	border-bottom: 1px dashed currentColor;
+	text-decoration: none;
+}
+
+/* One `GROUP BY` group in a Dataview result. */
+.dataview.result-group {
+	margin: 0.25rem 0;
+}
+
+/* Block-id targets (`id="^block"`) take no space; they only anchor links. */
+.obsidian-block-anchor {
+	display: inline;
 }
 
 /* Inline picker for an ambiguous vault search ([[##query]]). */
@@ -861,7 +1067,7 @@ a.obsidian-embed:hover {
 }
 
 .rp-wiki-picker-page {
-	color: var(--rp-c-text-3, #8a8f98);
+	color: var(--rp-c-text-2, #67676c);
 	font-size: 0.85em;
 	white-space: nowrap;
 	overflow: hidden;
@@ -870,5 +1076,5 @@ a.obsidian-embed:hover {
 
 .rp-wiki-picker-empty {
 	padding: 4px;
-	color: var(--rp-c-text-3, #8a8f98);
+	color: var(--rp-c-text-2, #67676c);
 }

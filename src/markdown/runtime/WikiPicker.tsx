@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigateTo } from "../../shared/usePathname.js";
 import type { WikiLinkCandidate } from "../types.js";
 
 /**
@@ -20,9 +21,20 @@ interface WikiPickerProps {
 	query?: string;
 	/** Link text when the link carried an alias. */
 	alias?: string;
+	/**
+	 * The site `base` (`/…/`). Candidate hrefs are routes; the rendered href
+	 * carries the base so opening a match in a new tab works, while a plain
+	 * click navigates by route through the router, which adds the base itself.
+	 */
+	base?: string;
 }
 
 const CANDIDATE_LIMIT = 50;
+
+function withBase(route: string, base: string): string {
+	if (base === "/" || !route.startsWith("/") || route.startsWith(base)) return route;
+	return `${base}${route.slice(1)}`;
+}
 
 function parseCandidates(value: string): WikiLinkCandidate[] {
 	try {
@@ -40,10 +52,11 @@ function parseCandidates(value: string): WikiLinkCandidate[] {
 	}
 }
 
-export default function WikiPicker({ candidates, query, alias }: WikiPickerProps) {
+export default function WikiPicker({ candidates, query, alias, base = "/" }: WikiPickerProps) {
 	const matches = useMemo(() => parseCandidates(candidates), [candidates]);
 	const [isOpen, setIsOpen] = useState(false);
 	const [filter, setFilter] = useState("");
+	const navigateTo = useNavigateTo();
 
 	if (matches.length === 0) {
 		// Nothing usable was serialized; show the source so the link is not lost.
@@ -89,7 +102,27 @@ export default function WikiPicker({ candidates, query, alias }: WikiPickerProps
 					<ul className="rp-wiki-picker-list">
 						{visible.map((candidate) => (
 							<li key={candidate.href}>
-								<a href={candidate.href} title={candidate.description}>
+								<a
+									href={withBase(candidate.href, base)}
+									title={candidate.description}
+									onClick={(event) => {
+										// A plain click is a route change inside the app, like
+										// Rspress's own links; modified clicks keep the browser's
+										// new-tab and download behaviour.
+										if (
+											event.button !== 0 ||
+											event.metaKey ||
+											event.ctrlKey ||
+											event.shiftKey ||
+											event.altKey
+										) {
+											return;
+										}
+										event.preventDefault();
+										setIsOpen(false);
+										navigateTo(candidate.href);
+									}}
+								>
 									<span className="rp-wiki-picker-label">{candidate.label}</span>
 									<span className="rp-wiki-picker-page">{candidate.pageLabel}</span>
 								</a>

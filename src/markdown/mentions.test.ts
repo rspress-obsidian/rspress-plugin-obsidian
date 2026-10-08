@@ -62,6 +62,17 @@ describe("stripMentionText", () => {
 		expect(stripMentionText("Link [[Widget Notes]] here.")).toBe("Link here.");
 		expect(stripMentionText("Link [[Other|Widget Notes]] here.")).toBe("Link Widget Notes here.");
 	});
+
+	test("reads a table as its cells' text, so snippets show no pipes", () => {
+		const table = [
+			"| Step | Notes |",
+			"| :--- | ---: |",
+			"| One | Read Widget Notes first |",
+			"| Two | a \\| b |",
+		].join("\n");
+
+		expect(stripMentionText(table)).toBe("Step Notes One Read Widget Notes first Two a \\| b");
+	});
 });
 
 describe("buildMentionsIndex", () => {
@@ -182,5 +193,56 @@ describe("buildMentionsIndex", () => {
 		const entries = mentions.get("/widget") ?? [];
 		expect(entries.length).toBeLessThanOrEqual(20);
 		expect(new Set(entries.map((entry) => entry.routePath)).size).toBe(entries.length);
+	});
+});
+
+describe("buildMentionsIndex matching", () => {
+	test("matches whole names across whitespace and punctuation-edged names", () => {
+		const target = makePage({ filePathKey: "Getting Started" });
+		const cpp = makePage({ filePathKey: "C++" });
+		const source = makePage({ filePathKey: "notes/source" });
+		const mentions = buildMentionsIndex([
+			{ page: target, text: "" },
+			{ page: cpp, text: "" },
+			{
+				page: source,
+				text: "Read getting\nstarted first. Not C++x, but C++ yes. Not getting startedness.",
+			},
+		]);
+
+		expect(mentions.get("/Getting Started")?.map((ref) => ref.routePath)).toEqual([
+			"/notes/source",
+		]);
+		expect(mentions.get("/C++")?.[0]?.snippet).toContain("C++ yes");
+	});
+
+	test("prefers the longest name starting at the same word", () => {
+		const short = makePage({ filePathKey: "Getting Started" });
+		const long = makePage({ filePathKey: "Getting Started Guide" });
+		const source = makePage({ filePathKey: "source" });
+		const mentions = buildMentionsIndex([
+			{ page: short, text: "" },
+			{ page: long, text: "" },
+			{ page: source, text: "See the Getting Started Guide." },
+		]);
+
+		expect(mentions.get("/Getting Started Guide")?.length).toBe(1);
+		expect(mentions.get("/Getting Started")).toBeUndefined();
+	});
+
+	test("scales linearly with vault size", () => {
+		// The old single-alternation regex took ~27 s for 2000 pages of 3000
+		// words; a first-token table keeps this to well under a second.
+		const words = Array.from({ length: 400 }, (_, i) => `word${i}`);
+		const pages = Array.from({ length: 1000 }, (_, i) =>
+			makePage({ filePathKey: `Note ${words[i % 400]} ${i}` }),
+		);
+		const sources = pages.map((page, i) => ({
+			page,
+			text: Array.from({ length: 1500 }, (_, j) => words[(i * 7 + j) % 400]).join(" "),
+		}));
+		const started = performance.now();
+		buildMentionsIndex(sources);
+		expect(performance.now() - started).toBeLessThan(3000);
 	});
 });

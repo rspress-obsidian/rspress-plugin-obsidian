@@ -3,10 +3,30 @@ import path from "node:path";
 import { normalizeFilePathKey } from "../shared/paths.js";
 import { normalizeFsPath } from "../shared/route-path.js";
 import { humanizeBaseName, normalizeUnicode } from "../shared/slug.js";
-import type { ContentPage } from "./types.js";
+import type { ContentPage, ParsedWikiLink } from "./types.js";
 
 export { normalizeFilePathKey } from "../shared/paths.js";
 export { normalizeFsPath, normalizeRoutePath as normalizePathKey } from "../shared/route-path.js";
+
+/**
+ * The text Obsidian shows for a wikilink: the alias when there is one, else the
+ * target exactly as typed (`[[2024-01-15]]` stays `2024-01-15`, `[[my_note]]`
+ * stays `my_note`), with a subpath shown as `Note > Heading` / `Note > ^id`
+ * and a same-page `[[#Heading]]` as just `Heading`.
+ */
+export function wikiLinkDisplayText(parsed: ParsedWikiLink): string {
+	if (parsed.alias) return parsed.alias;
+	const subpath = parsed.subpath;
+	const parts =
+		subpath?.kind === "block"
+			? [`^${subpath.value}`]
+			: (subpath?.value
+					.split("#")
+					.map((part) => part.trim())
+					.filter(Boolean) ?? []);
+	const target = parsed.target.trim();
+	return (target ? [target, ...parts] : parts).join(" > ");
+}
 
 /**
  * True when `filePath` is inside the already-absolute `rootDir`.
@@ -74,17 +94,18 @@ export function isRealPathInsideRoot(realPath: string, realRoot: string): boolea
 
 /**
  * Human-facing label for a page in the backlinks panel: the frontmatter
- * `title`, else the page's first heading, else a humanized filename. A raw
- * basename ("getting-started") reads like debug output, so it is the last
- * resort.
+ * `title`, else the page's `# heading`, else a humanized filename. A section
+ * heading names a part of the note, not the note (a Kanban board's first
+ * heading is a lane), so only a top-level one counts. A raw basename
+ * ("getting-started") reads like debug output, so it is the last resort.
  */
 export function backlinkLabel(page: ContentPage): string {
 	if (page.title) {
 		return page.title;
 	}
-	const firstHeading = page.headings[0]?.rawText;
-	if (firstHeading) {
-		return firstHeading;
+	const titleHeading = page.headings.find((heading) => (heading.depth ?? 1) === 1)?.rawText;
+	if (titleHeading) {
+		return titleHeading;
 	}
 	return humanizeBaseName(page.baseName) || page.baseName;
 }

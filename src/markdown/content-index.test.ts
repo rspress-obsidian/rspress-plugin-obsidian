@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
-import { buildContentIndex } from "./content-index.ts";
+import { buildContentIndex, getCachedContentIndex } from "./content-index.ts";
 
 /** Run `body` against a throwaway vault built from `files`. */
 async function withVault(
@@ -186,35 +186,25 @@ describe("unicode-normalized resolution", () => {
  * A case-insensitive filesystem (Windows, default macOS) cannot hold `Note.md`
  * and `NOTE.md` side by side, so the case-insensitive maps there always hold one
  * entry and every lookup resolves. Linux can hold both — the only place this
- * ambiguity is reachable — and then the resolver must report every candidate
- * rather than silently pick one. That is why the diagnostics legitimately
- * differ per OS.
+ * ambiguity is reachable — and then the link resolves to one of them the way
+ * Obsidian picks, and the backlink follows the link.
  */
 describe("case-only-different files", () => {
 	test.skipIf(!caseSensitiveFilesystem)(
-		"keeps both candidates and reports the ambiguity instead of picking one",
+		"backlinks only the candidate the link resolves to",
 		async () => {
 			await withVault(
 				{ "Note.md": "# Note\n", "NOTE.md": "# NOTE\n", "source.md": "[[note]]\n" },
 				async (root) => {
 					const index = await buildContentIndex(root);
-					const routes = index.pages
-						.filter((page) => page.baseName.toLowerCase() === "note")
-						.map((page) => page.routePath);
-
-					expect(routes).toHaveLength(2);
-					// Both case-insensitive maps see both pages: a lookup that lands
-					// there is ambiguous, and must be reported as such.
 					expect(index.byBaseNameCI.get("note")).toHaveLength(2);
 					expect(index.byFilePathKeyCI.get("note")).toHaveLength(2);
 
-					// The backlink resolver reaches that ambiguity and records a backlink
-					// for every candidate instead of guessing one.
-					for (const route of routes) {
-						expect(index.backlinks.get(route)?.map((ref) => ref.relativePath)).toEqual([
-							"source.md",
-						]);
-					}
+					// Same folder and length: the alphabetically first path ("NOTE.md").
+					expect(index.backlinks.get("/NOTE")?.map((ref) => ref.relativePath)).toEqual([
+						"source.md",
+					]);
+					expect(index.backlinks.get("/Note")).toBeUndefined();
 				},
 			);
 		},
@@ -353,6 +343,325 @@ describe("wikilink target normalization", () => {
 				const index = await buildContentIndex(root);
 				const a = index.pages.find((p) => p.filePathKey === "a");
 				expect(a?.wikilinkTargets).toEqual(["chapter 1. introduction", "v1.0 roadmap"]);
+			},
+		);
+	});
+});
+
+describe("publishable files", () => {
+	test("never indexes dotfiles or files in dot-directories", async () => {
+		await withVault(
+			{
+				".env": "SECRET=1",
+				"sub/.secrets.json": "{}",
+				".obsidian/app.json": "{}",
+				"Note.md": "# Note",
+				"img.png": "png",
+			},
+			async (root) => {
+				const index = await buildContentIndex(root);
+				expect(index.assets.map((asset) => asset.relativePath)).toEqual(["img.png"]);
+				expect(index.pages.map((page) => page.relativePath)).toEqual(["Note.md"]);
+			},
+		);
+	});
+
+	test("never indexes the excluded folders, and keeps a sibling with a similar name", async () => {
+		await withVault(
+			{
+				"Templates/Daily.md": "# <% tp.file.title %>",
+				"Templates/nested/x.png": "png",
+				"Templates archive/Old.md": "# Old",
+				"Note.md": "# Note",
+			},
+			async (root) => {
+				const index = await buildContentIndex(root, { excludeFolders: ["/Templates/"] });
+				expect(index.pages.map((page) => page.relativePath).sort()).toEqual([
+					"Note.md",
+					"Templates archive/Old.md",
+				]);
+				expect(index.assets).toEqual([]);
+			},
+		);
+	});
+});
+
+describe("heading ids", () => {
+	test("match the ids the rendered page gives its headings", async () => {
+		await withVault(
+			{
+				"Note.md": [
+					"## my_function",
+					"## See [[x|alias]]",
+					"## Title %%draft%%",
+					"## **Bold** and ~~gone~~",
+					"## Energy $E=mc^2$",
+					"## Duplicate",
+					"## Duplicate",
+					"## Custom {#custom-id}",
+					"> ## Quoted",
+				].join("\n\n"),
+			},
+			async (root) => {
+				const index = await buildContentIndex(root);
+				const page = index.byFilePathKey.get("Note");
+				expect(page?.headings.map((h) => h.explicitId ?? h.slug)).toEqual([
+					"my_function",
+					"see-alias",
+					"title",
+					"bold-and-gone",
+					"energy-emc2",
+					"duplicate",
+					"duplicate-1",
+					"custom-id",
+					"quoted",
+				]);
+				expect(page?.headings[1]?.rawText).toBe("See alias");
+			},
+		);
+	});
+
+	test("keeps commented headings and comment text out of the index", async () => {
+		await withVault(
+			{
+				"other.md": "## Plan\n%% secret salary 120k %%\nPublic text\n\n%%\n## Hidden\n%%\n",
+			},
+			async (root) => {
+				const page = (await buildContentIndex(root)).byFilePathKey.get("other");
+				expect(page?.headings.map((h) => h.rawText)).toEqual(["Plan"]);
+				expect(page?.headings[0]?.preview).toBe("Public text");
+			},
+		);
+	});
+
+	test("leaves an Excalidraw note's data headings out, keeping its links and element ids", async () => {
+		await withVault(
+			{
+				"Plan.excalidraw.md": [
+					"---",
+					"excalidraw-plugin: parsed",
+					"---",
+					"## Notes on the plan",
+					"",
+					"# Excalidraw Data",
+					"",
+					"## Text Elements",
+					"Ship [[Target]] ^box1",
+					"",
+					"%%",
+					"## Drawing",
+					"```json",
+					"{}",
+					"```",
+					"%%",
+				].join("\n"),
+				"Target.md": "# Target",
+				"Plain.md": "# Excalidraw Data\n\n## Text Elements\n",
+			},
+			async (root) => {
+				const index = await buildContentIndex(root);
+				const drawing = index.byFilePathKey.get("Plan.excalidraw");
+				// Otherwise backlinks and the graph label the drawing "Excalidraw Data".
+				expect(drawing?.headings.map((h) => h.rawText)).toEqual(["Notes on the plan"]);
+				expect(drawing?.wikilinkTargets).toContain("target");
+				expect(drawing?.blocks.map((b) => b.id)).toEqual(["box1"]);
+				// Only a drawing note: the same headings in an ordinary note are its own.
+				expect(index.byFilePathKey.get("Plain")?.headings.map((h) => h.rawText)).toEqual([
+					"Excalidraw Data",
+					"Text Elements",
+				]);
+			},
+		);
+	});
+});
+
+describe("tags", () => {
+	test("are read from prose only, not anchors, code or link destinations", async () => {
+		await withVault(
+			{
+				"Note.md": [
+					"---",
+					"tags: alpha, Beta",
+					"---",
+					"Use `#include <stdio.h>` and see [[#Setup]] or [jump](#install).",
+					'Visit https://example.com/#frag and <a href="#x">x</a>.',
+					"%% #secret %%",
+					"```",
+					"#fenced",
+					"```",
+					"Real #tag and #nested/child, [label #inlabel](Other.md).",
+				].join("\n"),
+			},
+			async (root) => {
+				const page = (await buildContentIndex(root)).byFilePathKey.get("Note");
+				expect(page?.tags).toEqual(["alpha", "Beta", "tag", "nested/child", "inlabel"]);
+			},
+		);
+	});
+});
+
+describe("legacy list properties", () => {
+	test("split a comma-separated aliases string", async () => {
+		await withVault(
+			{ "Note.md": "---\naliases: First, Second Name\ncssclass: wide tall\n---\nBody" },
+			async (root) => {
+				const page = (await buildContentIndex(root)).byFilePathKey.get("Note");
+				expect(page?.aliases).toEqual(["First", "Second Name"]);
+				expect(page?.cssclasses).toEqual(["wide", "tall"]);
+			},
+		);
+	});
+});
+
+describe("outlinks", () => {
+	test("include frontmatter property links and count them as backlinks", async () => {
+		await withVault(
+			{
+				"Source.md":
+					'---\nrelated: "[[Target]]"\nup: ["[[Folder/Deep]]"]\n---\nBody without links.',
+				"Target.md": "# Target",
+				"Folder/Deep.md": "# Deep",
+			},
+			async (root) => {
+				const index = await buildContentIndex(root);
+				const source = index.byFilePathKey.get("Source");
+				expect(source?.outlinks?.map((link) => link.target)).toEqual(["Target", "Folder/Deep"]);
+				expect(index.backlinks.get("/Target")?.map((ref) => ref.routePath)).toEqual(["/Source"]);
+				expect(index.backlinks.get("/Folder/Deep")?.map((ref) => ref.routePath)).toEqual([
+					"/Source",
+				]);
+			},
+		);
+	});
+
+	test("include markdown images and links to attachments, not site URLs", async () => {
+		await withVault(
+			{
+				"Note.md":
+					"![](img.png) [spec](docs/spec%20v2.pdf) [abs](/downloads/app.zip) [ext](https://x.y/a.png) ![[clip.mp4]]",
+			},
+			async (root) => {
+				const page = (await buildContentIndex(root)).byFilePathKey.get("Note");
+				expect(page?.outlinks?.map((link) => [link.target, link.isEmbed])).toEqual([
+					["clip.mp4", true],
+					["img.png", true],
+					["docs/spec v2.pdf", false],
+				]);
+			},
+		);
+	});
+
+	test("split an escaped alias pipe inside a table cell", async () => {
+		await withVault(
+			{
+				"A.md": "| Link | Img |\n| --- | --- |\n| [[Page\\|Alias]] | ![[img.png\\|100]] |\n",
+				"Page.md": "# Page",
+			},
+			async (root) => {
+				const index = await buildContentIndex(root);
+				const links = index.byFilePathKey.get("A")?.outlinks ?? [];
+				expect(links.map((link) => [link.target, link.alias])).toEqual([
+					["Page", "Alias"],
+					["img.png", "100"],
+				]);
+				expect(index.backlinks.get("/Page")?.map((ref) => ref.routePath)).toEqual(["/A"]);
+			},
+		);
+	});
+
+	test("a note named like a media extension is a page link", async () => {
+		await withVault({ "A.md": "See [[SVG]].", "SVG.md": "# SVG" }, async (root) => {
+			const index = await buildContentIndex(root);
+			expect(index.byFilePathKey.get("A")?.wikilinkTargets).toEqual(["svg"]);
+			expect(index.backlinks.get("/SVG")?.map((ref) => ref.routePath)).toEqual(["/A"]);
+		});
+	});
+});
+
+describe("docs routes", () => {
+	test("drop the default language and version like Rspress", async () => {
+		await withVault(
+			{ "en/guide.md": "# Guide", "zh/guide.md": "# 指南", "en/index.md": "# Home" },
+			async (root) => {
+				const index = await buildContentIndex(root, {
+					locales: { lang: "en", langs: ["en", "zh"] },
+				});
+				expect(index.pages.map((page) => page.routePath).sort()).toEqual([
+					"/",
+					"/guide",
+					"/zh/guide",
+				]);
+			},
+		);
+	});
+});
+
+describe("Dataview metadata", () => {
+	test("is skipped when Dataview is off", async () => {
+		await withVault(
+			{ "Note.md": "---\nstatus: done\n---\nfield:: value\n- [ ] task" },
+			async (root) => {
+				const off = (await getCachedContentIndex(root, { dataview: false })).byFilePathKey.get(
+					"Note",
+				);
+				expect(off?.dataviewFields).toEqual({});
+				expect(off?.dataviewTasks).toEqual([]);
+				const on = (await getCachedContentIndex(root)).byFilePathKey.get("Note");
+				expect(on?.dataviewTasks.length).toBe(1);
+			},
+		);
+	});
+});
+
+describe("frontmatter property links under YAML anchors", () => {
+	test("an alias bomb or a self-referencing list indexes in linear time", async () => {
+		const levels = ['a0: &a0 ["[[Target]]"]'];
+		for (let level = 1; level <= 12; level++) {
+			const refs = Array.from({ length: 9 }, () => `*a${level - 1}`).join(", ");
+			levels.push(`a${level}: &a${level} [${refs}]`);
+		}
+		await withVault(
+			{
+				"Bomb.md": `---\n${levels.join("\n")}\n---\nBody`,
+				"Cycle.md": '---\nloop: &l ["[[Target]]", *l]\n---\nBody',
+				"Target.md": "# Target",
+			},
+			async (root) => {
+				const index = await buildContentIndex(root);
+				expect(index.byFilePathKey.get("Bomb")?.outlinks?.map((link) => link.target)).toEqual([
+					"Target",
+				]);
+				expect(
+					index.backlinks
+						.get("/Target")
+						?.map((ref) => ref.routePath)
+						.sort(),
+				).toEqual(["/Bomb", "/Cycle"]);
+			},
+		);
+	}, 5000);
+});
+
+describe("rebuilds", () => {
+	test("parse a note recreated after it left the root afresh", async () => {
+		await withVault(
+			{ "Note.md": "---\ntitle: First\n---\n", "Other.md": "# Other" },
+			async (root) => {
+				const note = path.join(root, "Note.md");
+				const stamp = new Date("2026-01-01T00:00:00Z");
+				utimesSync(note, stamp, stamp);
+				const titleOf = async () =>
+					(await getCachedContentIndex(root)).byFilePathKey.get("Note")?.title;
+				expect(await titleOf()).toBe("First");
+
+				rmSync(note);
+				expect(await titleOf()).toBeUndefined();
+
+				// Same size and mtime, other text: only a parse kept for a file that
+				// had left the root could still answer "First".
+				writeFileSync(note, "---\ntitle: Fresh\n---\n");
+				utimesSync(note, stamp, stamp);
+				expect(await titleOf()).toBe("Fresh");
 			},
 		);
 	});

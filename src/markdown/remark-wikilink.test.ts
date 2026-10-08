@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -48,6 +49,17 @@ const DEFAULT_OPTIONS: NormalizedPluginOptions = {
 	enableMermaid: false,
 	mermaidSecurityLevel: "strict",
 	enableDefaultStyles: false,
+	enableTasks: false,
+	tasks: {},
+	enableKanban: false,
+	kanban: {},
+	enableExcalidraw: false,
+	excalidraw: {},
+	enableBases: false,
+	bases: {},
+	enableTemplater: false,
+	templater: {},
+	onPluginError: "error",
 };
 
 function makeProcessor(
@@ -194,18 +206,27 @@ describe("wikilink diagnostics", () => {
 		}
 	});
 
-	test("error mode fails the build for a broken link", async () => {
+	test("error mode fails the build naming every broken link, since Rspress never prints file messages", async () => {
 		const processor = makeProcessor(basicRoot, { onBrokenLink: "error" });
 
-		await expect(
-			processor.process({
-				value: "See [[nonexistent]] here.",
+		const failure = await processor
+			.process({
+				value: "See [[nonexistent]] and [[also-missing]] here.",
 				path: path.resolve(basicRoot, "index.md"),
-			}),
-		).rejects.toThrow(/failed to resolve/);
+			})
+			.then(
+				() => "",
+				(error: unknown) => String(error),
+			);
+
+		expect(failure).toContain("failed to resolve");
+		expect(failure).toContain("[[nonexistent]]");
+		expect(failure).toContain("[[also-missing]]");
 	});
 
-	test("warn mode reports an ambiguous link and renders the unresolved marker", async () => {
+	// Obsidian resolves an ambiguous name (same folder, then shortest path, then
+	// alphabetical); the plugin follows it and only reports the ambiguity.
+	test("warn mode links an ambiguous name and reports it", async () => {
 		const warnings = captureWarnings();
 		try {
 			const processor = makeProcessor(ambiguousRoot, {
@@ -217,7 +238,7 @@ describe("wikilink diagnostics", () => {
 				path: path.resolve(ambiguousRoot, "index.md"),
 			});
 
-			expect(String(file)).toContain('class="obsidian-unresolved"');
+			expect(String(file)).toContain("[getting-started](/");
 			expect(file.messages.some((m) => String(m).includes("ambiguous-page"))).toBe(true);
 		} finally {
 			warnings.restore();
@@ -349,7 +370,7 @@ describe("wikilink skip guards", () => {
 		expect(output).toContain("Inline `[[guide/getting-started]]` stays put.");
 		expect(output).toContain("](https://example.com)");
 		expect(output).toContain("[ref]: guide/getting-started");
-		expect(output).toContain("[getting started](/guide/getting-started)");
+		expect(output).toContain("[guide/getting-started](/guide/getting-started)");
 	});
 
 	test("leaves highlight syntax inside a wikilink alias to the link", async () => {
@@ -366,7 +387,36 @@ describe("wikilink skip guards", () => {
 });
 
 describe("unsupported plugin fences", () => {
-	test("warn mode reports a kanban fence and keeps the block as code", async () => {
+	test("warn mode reports a disabled plugin's fence and keeps the block as code", async () => {
+		const warnings = captureWarnings();
+		try {
+			const processor = makeProcessor(basicRoot);
+			const file = await processor.process({
+				value: '```excalidraw\n{"type":"excalidraw","elements":[]}\n```',
+				path: path.resolve(basicRoot, "index.md"),
+			});
+
+			expect(file.messages.some((m) => String(m).includes("[!excalidraw]"))).toBe(true);
+			expect(warnings.calls.some((call) => call.includes("`enableExcalidraw`"))).toBe(true);
+			// The scene is still published, as an ordinary code block.
+			expect(String(file)).toContain('"type":"excalidraw"');
+		} finally {
+			warnings.restore();
+		}
+	});
+
+	test("error mode fails the build for a disabled plugin's fence", async () => {
+		const processor = makeProcessor(basicRoot, { onUnsupportedBlock: "error" });
+
+		await expect(
+			processor.process({
+				value: "```base\nviews: []\n```",
+				path: path.resolve(basicRoot, "index.md"),
+			}),
+		).rejects.toThrow(/\[!base\]/);
+	});
+
+	test("a kanban fence is the author's code: the Kanban plugin defines no fence", async () => {
 		const warnings = captureWarnings();
 		try {
 			const processor = makeProcessor(basicRoot);
@@ -375,24 +425,12 @@ describe("unsupported plugin fences", () => {
 				path: path.resolve(basicRoot, "index.md"),
 			});
 
-			expect(file.messages.some((m) => String(m).includes("[!kanban]"))).toBe(true);
-			expect(warnings.calls.some((call) => call.includes("[!kanban]"))).toBe(true);
-			// The board content is still published, as an ordinary code block.
+			expect(file.messages).toHaveLength(0);
+			expect(warnings.calls).toHaveLength(0);
 			expect(String(file)).toContain("- [ ] Ship it");
 		} finally {
 			warnings.restore();
 		}
-	});
-
-	test("error mode fails the build for a kanban fence", async () => {
-		const processor = makeProcessor(basicRoot, { onUnsupportedBlock: "error" });
-
-		await expect(
-			processor.process({
-				value: "```kanban\n- [ ] Ship it\n```",
-				path: path.resolve(basicRoot, "index.md"),
-			}),
-		).rejects.toThrow(/\[!kanban\]/);
 	});
 
 	test("warn mode reports a tasks fence the plugin will not execute", async () => {
@@ -434,7 +472,7 @@ describe("dataview diagnostics", () => {
 			onDataviewError: "warn",
 		});
 		const file = await processor.process({
-			value: "Count: = unknownfn(1)",
+			value: "Count: `= unknownfn(1)`",
 			path: path.resolve(basicRoot, "index.md"),
 		});
 
@@ -451,7 +489,7 @@ describe("dataview diagnostics", () => {
 
 		await expect(
 			processor.process({
-				value: "Count: = unknownfn(1)",
+				value: "Count: `= unknownfn(1)`",
 				path: path.resolve(basicRoot, "index.md"),
 			}),
 		).rejects.toThrow(/Unsupported Dataview function/);
@@ -473,7 +511,7 @@ describe("dataview diagnostics", () => {
 	test("renders every inline expression in one text node exactly once", async () => {
 		const processor = makeProcessor(basicRoot, { enableDataview: true });
 		const file = await processor.process({
-			value: "a = file.name, b = file.name",
+			value: "a `= this.file.name`, b `= this.file.name`",
 			path: path.resolve(basicRoot, "index.md"),
 		});
 		const output = String(file);
@@ -494,7 +532,9 @@ describe("dataview diagnostics", () => {
 });
 
 describe("transclusion diagnostics", () => {
-	test("renders a section that resolves but cannot be extracted as a link", async () => {
+	// The section is found by the id the index gave it, so the second of two
+	// same-named headings is embedded; slug matching used to miss it.
+	test("embeds the second of two same-named sections by its id", async () => {
 		const processor = makeProcessor(wikilinkCompatRoot, { enableTransclusion: true });
 		const file = await processor.process({
 			value: "![[Folder/Space Note#duplicate-1]]",
@@ -502,9 +542,27 @@ describe("transclusion diagnostics", () => {
 		});
 		const output = String(file);
 
-		expect(output).toContain('class="obsidian-embed"');
-		expect(output).toContain('href="/Folder/Space Note"');
-		expect(file.messages.some((m) => String(m).includes('"duplicate-1" not found in'))).toBe(true);
+		expect(output).toContain('class="obsidian-transclusion"');
+		expect(output).toContain("Second duplicate.");
+		// The heading keeps the id its own page gives it, behind the embed prefix.
+		expect(output).toContain('<h2 id="embed-1-duplicate-1">');
+	});
+
+	test("renders a section the note does not have as a link to the page", async () => {
+		const processor = makeProcessor(wikilinkCompatRoot, {
+			enableTransclusion: true,
+			onBrokenLink: "warn",
+		});
+		const warnings = captureWarnings();
+		try {
+			const file = await processor.process({
+				value: "![[Folder/Space Note#duplicate-7]]",
+				path: path.resolve(wikilinkCompatRoot, "index.md"),
+			});
+			expect(String(file)).toContain('class="obsidian-unresolved"');
+		} finally {
+			warnings.restore();
+		}
 	});
 
 	test("reports a transcluded page whose file cannot be read", async () => {
@@ -839,7 +897,7 @@ describe("canvas boards in wikilinks", () => {
 			path: "/vault/index.md",
 		});
 
-		expect(String(file)).toContain("[Demo](/canvas/demo)");
+		expect(String(file)).toContain("[Demo.canvas](/canvas/demo)");
 		expect(String(file)).not.toContain("/vault/Demo.canvas");
 	});
 
@@ -906,30 +964,16 @@ describe("footnotes after remark-gfm", () => {
 		}
 	});
 
-	test("keeps a reference anchor for each construct, inline ones included", async () => {
+	// Obsidian numbers label and inline footnotes in one sequence, by first
+	// reference; both used to be numbered "1".
+	test("numbers label and inline footnotes in one sequence", async () => {
 		const file = await makeGfmProcessor().process({ value: source, path: "/index.md" });
 		const output = String(file);
 
-		expect(output).toContain('id="fnref-1"');
-		expect(output).toContain('id="fnref-inline-1"');
+		expect(output).toContain('id="fnref-1"><a href="#fn-1" title="The definition.">1</a>');
+		expect(output).toContain('id="fnref-2"><a href="#fn-2" title="inline note">2</a>');
+		expect(output.indexOf('<li id="fn-1">')).toBeLessThan(output.indexOf('<li id="fn-2">'));
 	});
-});
-
-// A sentence-ending `.` used to be swallowed into the identifier, so
-// `its folder is = file.folder.` resolved a field named `file.folder.` and
-// matched nothing — the expression then silently rendered as literal text.
-test("does not absorb a sentence-final period into an inline expression", async () => {
-	const processor = makeProcessor(basicRoot, { enableDataview: true });
-	const file = await processor.process({
-		value: "The file name is = file.name, and its folder is = file.folder.",
-		path: path.resolve(basicRoot, "index.md"),
-	});
-	const output = String(file);
-
-	expect(output.match(/<span class="dataview-inline">/g) ?? []).toHaveLength(2);
-	// The period stays prose: it is the sentence's, not the field's.
-	expect(output.trimEnd().endsWith("</span>.")).toBe(true);
-	expect(output).not.toContain("= file.folder");
 });
 
 // Enabling `enableDataview` on a page containing `$E = mc^2$` used to break the
@@ -1050,4 +1094,74 @@ test("a case-insensitive filesystem does not make the emitted URL lowercase", as
 	} finally {
 		spy.mockRestore();
 	}
+});
+
+describe("page titles", () => {
+	const roots: string[] = [];
+	afterEach(() => {
+		for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+	});
+
+	/** Compile `file` from a fresh vault the way Rspress does: `pageMeta` filled from the source first. */
+	async function compile(
+		files: Record<string, string>,
+		file: string,
+		meta: { title: string; frontmatter?: { title?: unknown } },
+		asVault = true,
+	): Promise<{ output: string; title: string }> {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "page-title-"));
+		roots.push(root);
+		for (const [name, content] of Object.entries(files)) {
+			fs.writeFileSync(path.join(root, name), content);
+		}
+		const pageMeta = { toc: [], ...meta };
+		const processor = makeProcessor(root, asVault ? { vaultRoot: root } : {});
+		// Rspress's own key, unknown to unified's `Data` type.
+		Object.assign(processor.data(), { pageMeta });
+		const output = String(
+			await processor.process({ value: files[file] ?? "", path: path.join(root, file) }),
+		);
+		return { output, title: pageMeta.title };
+	}
+
+	test("a vault note with no heading is titled by its file name, as Obsidian's inline title", async () => {
+		const { output, title } = await compile({ "Roadmap.md": "- [ ] Ship" }, "Roadmap.md", {
+			title: "",
+		});
+
+		expect(output.startsWith("# Roadmap\n")).toBe(true);
+		expect(title).toBe("Roadmap");
+	});
+
+	test("a note keeps the heading it renders, and that heading is its title", async () => {
+		const { output, title } = await compile({ "Note.md": "# Plan\n\nBody" }, "Note.md", {
+			title: "Plan",
+		});
+
+		expect(output.match(/^# /gm)).toHaveLength(1);
+		expect(title).toBe("Plan");
+	});
+
+	test("a docs-root page without a heading keeps Rspress's convention", async () => {
+		const { output, title } = await compile(
+			{ "guide.md": "Text" },
+			"guide.md",
+			{ title: "" },
+			false,
+		);
+
+		expect(output).not.toContain("# ");
+		expect(title).toBe("");
+	});
+
+	test("a frontmatter title is not drawn a second time above a heading the page renders", async () => {
+		const { output, title } = await compile({ "Base.md": "# Projects" }, "Base.md", {
+			title: "",
+			frontmatter: { title: "Projects" },
+		});
+
+		expect(output.match(/^# /gm)).toHaveLength(1);
+		// A non-empty heading title is what stops Rspress's fallback heading.
+		expect(title).toBe("Projects");
+	});
 });

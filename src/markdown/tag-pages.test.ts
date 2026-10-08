@@ -104,3 +104,39 @@ describe("generated tag pages", () => {
 		expect(generatedFor("Getting Started")).toContain("- [Getting Started](/Eve)");
 	});
 });
+
+describe("tag page routes", () => {
+	test("docs and vault share one page per tag, whatever the casing", () => {
+		const docs = makeIndex([
+			makePage({ absolutePath: "/docs/a.md", routePath: "/a", title: "A", tags: ["project"] }),
+		]);
+		const vault = makeIndex([
+			makePage({
+				absolutePath: "/vault/b.md",
+				routePath: "/vault/b",
+				title: "B",
+				tags: ["Project"],
+			}),
+			makePage({
+				absolutePath: "/vault/c.md",
+				routePath: "/vault/c",
+				title: "C",
+				tags: ["Project/Sub"],
+			}),
+		]);
+
+		const pages = generateTagPages(docs, vault);
+		const routes = pages.map((page) => page.routePath);
+
+		// Rspress refuses a route added twice, so the old per-index generation
+		// failed the build here.
+		expect(routes).toEqual(["/tags/project", "/tags/project/sub"]);
+		const project = pages.find((page) => page.routePath === "/tags/project")?.content ?? "";
+		// The most common spelling names the page; every tagged page is listed,
+		// a nested child included.
+		expect(project).toContain("# \\#Project");
+		expect(project).toContain("- [A](/a)");
+		expect(project).toContain("- [B](/vault/b)");
+		expect(project).toContain("- [C](/vault/c)");
+	});
+});

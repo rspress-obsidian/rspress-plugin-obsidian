@@ -9,6 +9,15 @@
 export const MERMAID_BLOCK_CLASS = "obsidian-mermaid-block";
 export const MERMAID_RENDERED_CLASS = "obsidian-mermaid-rendered";
 export const MERMAID_ERROR_CLASS = "obsidian-mermaid-error";
+/** Marks a placeholder left as source because `mermaid` is not installed. */
+export const MERMAID_UNAVAILABLE_ATTRIBUTE = "data-mermaid-unavailable";
+
+/**
+ * Shown (console and placeholder title) when a page has diagrams but the site
+ * was built without the optional `mermaid` peer dependency.
+ */
+export const MERMAID_INSTALL_HINT =
+	"Mermaid diagrams need the optional peer dependency `mermaid`: install it next to rspress-plugin-obsidian (`npm install mermaid`) and rebuild the site.";
 
 /**
  * Mermaid's `securityLevel` setting, passed through to `mermaid.initialize`.

@@ -17,6 +17,15 @@
 	--obsidian-pdf-open-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3.2 1h5.8v5.8' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M9 1 3.6 6.4' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 
+/* `![[clip.mp4]]` and `![[tone.mp3]]` reach the page as bare players. Each is
+ * its own block, spaced like a paragraph, as in Obsidian; without this an audio
+ * bar sat flush under the image before it. Canvas cards keep their own sizing. */
+:where(.rspress-doc, .callout-content, .obsidian-transclusion) > :is(audio, video) {
+	display: block;
+	max-width: 100%;
+	margin: 1rem 0;
+}
+
 .obsidian-pdf {
 	margin: 1.25rem 0;
 	border: 1px solid var(--rp-c-divider, #e2e8f0);
@@ -52,7 +61,7 @@
 
 .obsidian-pdf-ext,
 .obsidian-pdf-page {
-	color: var(--rp-c-text-3, #8a8f98);
+	color: var(--rp-c-text-2, #67676c);
 	font-weight: 400;
 }
 
@@ -69,9 +78,15 @@
 	margin-left: auto;
 	padding: 0.15rem 0.4rem;
 	border-radius: 4px;
-	color: var(--rp-c-brand, #3b82f6);
 	text-decoration: none;
 	transition: background 0.15s;
+}
+
+/* The markdown stylesheet's AA link colour for tinted bars; a canvas-only site
+ * falls back to the brand. Element-qualified so it outranks Rspress's
+ * `.rp-doc … a.rp-link` colour. */
+.obsidian-pdf-bar a.obsidian-pdf-open {
+	color: var(--obsidian-c-link, var(--rp-c-brand, #3b82f6));
 }
 
 .obsidian-pdf-open:hover {

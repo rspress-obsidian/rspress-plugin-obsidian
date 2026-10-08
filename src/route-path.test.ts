@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+// Rspress's own route normalizer — not public API, which is why the plugin
+// carries a port; this test keeps the two in lockstep.
+import { normalizeRoutePath as rspressNormalizeRoutePath } from "@rspress/core/dist/node/route/normalizeRoutePath.js";
 import fc from "fast-check";
+import { extensionOf } from "./shared/media-exts.js";
 import {
+	deriveDocsRoutePath,
 	deriveRoutePath,
 	encodeRoutePath,
 	isIndexRoute,
@@ -131,5 +136,62 @@ describe("encodeRoutePath (property)", () => {
 				return encoded.split("/").length === routePath.split("/").length && !encoded.includes(" ");
 			}),
 		);
+	});
+});
+
+describe("deriveDocsRoutePath", () => {
+	const langs = ["en", "zh"];
+	const versions = ["v1", "v2"];
+	const paths = [
+		"index.md",
+		"guide.md",
+		"guide/index.md",
+		"en/guide.md",
+		"zh/guide.md",
+		"en/index.md",
+		"zh/index.mdx",
+		"v1/en/guide.md",
+		"v2/zh/api/index.md",
+		"v2/guide.md",
+		"fr/guide.md",
+		"Notes/My Page.md",
+	];
+
+	test.each([
+		["en", "v1"],
+		["en", ""],
+		["", ""],
+	])("matches Rspress with lang %p and version %p", (lang, version) => {
+		for (const relativePath of paths) {
+			const expected = rspressNormalizeRoutePath(
+				relativePath,
+				lang,
+				version,
+				lang ? langs : [],
+				version ? versions : [],
+			).routePath.replace(/(.)\/$/, "$1");
+			const actual = deriveDocsRoutePath(relativePath, {
+				lang: lang || undefined,
+				langs: lang ? langs : [],
+				version: version || undefined,
+				versions: version ? versions : [],
+			});
+			expect([relativePath, actual]).toEqual([relativePath, expected]);
+		}
+	});
+
+	test("drops the default locale from a docs route", () => {
+		expect(deriveDocsRoutePath("en/guide.md", { lang: "en", langs })).toBe("/guide");
+		expect(deriveDocsRoutePath("zh/guide.md", { lang: "en", langs })).toBe("/zh/guide");
+	});
+});
+
+describe("extensionOf", () => {
+	test("reads the extension of the last path segment only", () => {
+		expect(extensionOf("media/Clip.MP4")).toBe("mp4");
+		expect(extensionOf("SVG")).toBe("");
+		expect(extensionOf("PDF")).toBe("");
+		expect(extensionOf("v1.2/Notes")).toBe("");
+		expect(extensionOf(".env")).toBe("");
 	});
 });

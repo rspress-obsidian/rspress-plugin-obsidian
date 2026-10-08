@@ -2,6 +2,12 @@ import type { Root as MDASTRoot } from "mdast";
 import type { Plugin } from "unified";
 import type { MathEngine } from "../math.js";
 import type { MermaidSecurityLevel } from "../mermaid/classes.js";
+import type { PublishedFileRoute } from "../shared/file-routes.js";
+import type { BasesOptions } from "./obsidian-plugins/bases/options.js";
+import type { ExcalidrawOptions } from "./obsidian-plugins/excalidraw/options.js";
+import type { KanbanOptions } from "./obsidian-plugins/kanban/options.js";
+import type { TasksOptions } from "./obsidian-plugins/tasks/options.js";
+import type { TemplaterOptions } from "./obsidian-plugins/templater/options.js";
 
 /**
  * A remark plugin factory: called with its options, returns a unified plugin
@@ -55,17 +61,22 @@ export interface DailyNotesOptions {
  *   `enableTransclusion`, `enableMediaEmbeds`, `enableBacklinks`,
  *   `enableUnlinkedMentions`, `enableTagLinking`, `enableTagPages`,
  *   `enableDailyNotes` (+ `dailyNotes`), `enableDataview`, `enableMath`
- *   (+ `mathEngine`), `enableMermaid`, `enableDefaultStyles`.
+ *   (+ `mathEngine`), `enableMermaid`, the plugin reproductions
+ *   `enableTasks`, `enableKanban`, `enableExcalidraw`, `enableBases`,
+ *   `enableTemplater` (each + its option object), `enableDefaultStyles`.
  * - **What counts as a link** — the resolution options above feed
  *   `wikilinkTargets`, which is what the backlinks panel and the graph read.
  * - **What happens when it does not work** — `onBrokenLink`,
- *   `onAmbiguousLink`, `onDataviewError`, `onUnsupportedBlock`, and
- *   `mermaidSecurityLevel`. The first two default to `"error"`: an
+ *   `onAmbiguousLink`, `onDataviewError`, `onUnsupportedBlock`,
+ *   `onPluginError`, and
+ *   `mermaidSecurityLevel`. `onBrokenLink` defaults to `"error"`: an
  *   unresolvable `[[wikilink]]` fails the build rather than shipping dead.
+ *   An ambiguous one resolves the way Obsidian does and only warns.
  *
  * Note that the renderers emit markup, not rules: `enableCallouts`,
- * `enableBacklinks` and `enableTagPages` need `enableDefaultStyles` (or the
- * stylesheet imported by hand) before any of it is visible.
+ * `enableBacklinks`, `enableTagPages` and the Kanban, Bases and Tasks layouts
+ * need `enableDefaultStyles` (or the stylesheet imported by hand) before any
+ * of it is visible.
  */
 export interface RspressPluginMarkdownOptions {
 	/**
@@ -76,8 +87,17 @@ export interface RspressPluginMarkdownOptions {
 	 * notes, backlinks, tags) applied as if the vault were the docs root.
 	 *
 	 * The vault is indexed separately from the docs root: wikilinks inside
-	 * vault pages resolve against vault files, and wikilinks inside normal
-	 * docs pages are unaffected. Default: unset (docs directory only).
+	 * vault pages resolve against vault files first, and docs pages against
+	 * docs files first; a link with no match in its own tree falls back to the
+	 * other one, so the two can link (and backlink) each other.
+	 *
+	 * Only attachments a published page references (embeds, links, markdown
+	 * images, frontmatter property links) are published, at
+	 * `{vaultRoutePrefix}/<vault path>`. Dotfiles, files in dot-directories and
+	 * attachments used only by `publish: false` notes never are. They are
+	 * staged in `node_modules/.rspress-plugin-obsidian/` and served from there
+	 * (dev and build alike); nothing is written into the docs tree.
+	 * Default: unset (docs directory only).
 	 */
 	vaultRoot?: string;
 	/**
@@ -89,7 +109,11 @@ export interface RspressPluginMarkdownOptions {
 	vaultRoutePrefix?: string;
 	/** How to report unresolvable wikilinks. Default: `"error"`. */
 	onBrokenLink?: DiagnosticMode;
-	/** How to report wikilinks that match multiple pages. Default: `"error"`. */
+	/**
+	 * How to report a wikilink whose name matches several pages. The link still
+	 * resolves like Obsidian's: a match in the linking note's folder first, then
+	 * the shortest vault path, then the alphabetically first. Default: `"warn"`.
+	 */
 	onAmbiguousLink?: DiagnosticMode;
 	/**
 	 * Enable shortest-suffix fuzzy matching when exact, basename, title,
@@ -115,10 +139,10 @@ export interface RspressPluginMarkdownOptions {
 	 */
 	onDataviewError?: DiagnosticMode;
 	/**
-	 * How fenced blocks belonging to an Obsidian plugin runtime this plugin
-	 * cannot execute (`tasks`, `excalidraw`, `base`, and Dataview while
-	 * `enableDataview` is off) are reported. They stay in the page as code.
-	 * Default: `"warn"`.
+	 * How a fenced block belonging to a plugin this site has not enabled
+	 * (`tasks`, `base`, `excalidraw`, and Dataview while `enableDataview` is
+	 * off) is reported; the message names the option that turns it on. The
+	 * block stays in the page as code. Default: `"warn"`.
 	 */
 	onUnsupportedBlock?: DiagnosticMode;
 	/**
@@ -210,6 +234,41 @@ export interface RspressPluginMarkdownOptions {
 	 * Rspress `globalStyles` hook. Default: `false`.
 	 */
 	enableDefaultStyles?: boolean;
+	/**
+	 * Obsidian's "Strict line breaks" setting. Obsidian's default (off) shows a
+	 * single newline inside a paragraph as a line break; CommonMark (on) joins
+	 * the lines. Unset: vault pages follow Obsidian's default and docs-root
+	 * pages stay CommonMark, as Rspress renders them. `false`: every page
+	 * renders newlines as `<br>`. `true`: no page does. Default: unset.
+	 */
+	strictLineBreaks?: boolean;
+	/**
+	 * The Tasks plugin: ` ```tasks ` query blocks over every task in the site,
+	 * evaluated at build time. Default: `false`.
+	 */
+	enableTasks?: boolean;
+	tasks?: TasksOptions;
+	/** The Kanban plugin: notes with `kanban-plugin` frontmatter render as boards. Default: `false`. */
+	enableKanban?: boolean;
+	kanban?: KanbanOptions;
+	/**
+	 * The Excalidraw plugin: `.excalidraw.md` and `.excalidraw` drawings render
+	 * as pictures, as pages and as embeds. Default: `false`.
+	 */
+	enableExcalidraw?: boolean;
+	excalidraw?: ExcalidrawOptions;
+	/** Obsidian Bases: `.base` files and ` ```base ` blocks render as views. Default: `false`. */
+	enableBases?: boolean;
+	bases?: BasesOptions;
+	/** The Templater plugin: `<% %>` commands evaluate where Obsidian evaluates them. Default: `false`. */
+	enableTemplater?: boolean;
+	templater?: TemplaterOptions;
+	/**
+	 * What a Tasks, Kanban, Excalidraw, Bases or Templater block that cannot
+	 * render does to the build. The block shows its error in place either way.
+	 * Default: `"error"`.
+	 */
+	onPluginError?: DiagnosticMode;
 }
 export interface NormalizedPluginOptions {
 	/** Resolved vault directory, or `undefined` when vault publishing is off. */
@@ -238,6 +297,19 @@ export interface NormalizedPluginOptions {
 	enableMermaid: boolean;
 	mermaidSecurityLevel: MermaidSecurityLevel;
 	enableDefaultStyles: boolean;
+	/** As given; `undefined` keeps the vault-only default. */
+	strictLineBreaks?: boolean;
+	enableTasks: boolean;
+	tasks: TasksOptions;
+	enableKanban: boolean;
+	kanban: KanbanOptions;
+	enableExcalidraw: boolean;
+	excalidraw: ExcalidrawOptions;
+	enableBases: boolean;
+	bases: BasesOptions;
+	enableTemplater: boolean;
+	templater: TemplaterOptions;
+	onPluginError: DiagnosticMode;
 }
 
 /**
@@ -279,12 +351,19 @@ export interface WikilinkMatch {
 
 /** A single heading entry indexed from a page. */
 export interface HeadingEntry {
+	/** The heading's text as the page renders it (comments dropped, wikilinks
+	 *  shown as their display text, emphasis markers removed). */
 	rawText: string;
+	/** The id the rendered heading carries, unless `explicitId` is set. */
 	slug: string;
 	explicitId?: string;
+	/** Heading level, 1–6. Absent on hand-built entries. */
+	depth?: number;
+	/** The heading's inline markdown as written, for `[[Note#**Bold** text]]`. */
+	sourceText?: string;
 	/** Short plain-text preview of the content following this heading
-	 *  (the first ~200 characters, markdown stripped). Used for tooltip
-	 *  previews on heading wikilinks. */
+	 *  (the first ~200 characters, markdown and comments stripped). Used for
+	 *  tooltip previews on heading wikilinks. */
 	preview?: string;
 }
 
@@ -302,21 +381,42 @@ export interface ContentAsset {
 	urlPath: string;
 }
 
-/** A Dataview task extracted from a Markdown list item. */
-export interface DataviewTask {
+/**
+ * A Dataview list item extracted from a Markdown list — Dataview's `ListItem`.
+ * Tasks are list items too and appear in both `dataviewLists` and
+ * `dataviewTasks`.
+ */
+export interface DataviewListItem {
+	/** Item text without the list marker or checkbox; continuation lines joined with `\n`. */
 	text: string;
-	completed: boolean;
+	/** Zero-based source line of the item, as Dataview numbers it. */
 	line: number;
+	/** Number of source lines the item spans (continuation lines included). */
+	lineCount: number;
 	path: string;
+	/** Inline fields of the item (`[key:: value]`, task emoji shorthands). */
 	fields: Record<string, unknown>;
+	/** List marker as written: `-`, `*`, `+`, `1.`, `1)`. */
+	symbol: string;
+	/** `line` of the enclosing list item; absent at the top level of a list. */
+	parent?: number;
+	/** `line` of each directly nested list item, in source order. */
+	children: number[];
+	/** Text of the nearest heading above the item, if any. */
+	section?: string;
+	/** `#tags` written in the item, with their `#`. */
+	tags: string[];
+	/** Checkbox character (` `, `x`, `/`, `-`, …) for a task; absent on plain items. */
+	status?: string;
 }
 
-/** A Dataview list item extracted from a Markdown list. */
-export interface DataviewListItem {
-	text: string;
-	line: number;
-	path: string;
-	fields: Record<string, unknown>;
+/** A Dataview task: a list item with a one-character checkbox status. */
+export interface DataviewTask extends DataviewListItem {
+	status: string;
+	/** `true` only for the `x`/`X` status. */
+	completed: boolean;
+	/** Completed, and so is every task nested under it. */
+	fullyCompleted: boolean;
 }
 
 /** The normalized, searchable representation of a single docs page. */
@@ -341,6 +441,13 @@ export interface ContentPage {
 	headings: HeadingEntry[];
 	/** Pre-extracted normalized wikilink targets from this page's content. */
 	wikilinkTargets: string[];
+	/**
+	 * Every link the page makes, as parsed wikilinks: body wikilinks and embeds,
+	 * relative markdown links/images and reference definitions, `obsidian://`
+	 * URIs, and frontmatter property links. Backlinks and attachment publishing
+	 * resolve exactly this list. Absent on hand-built pages.
+	 */
+	outlinks?: ParsedWikiLink[];
 	/** Maps slugified heading text → HeadingEntry for O(1) resolution. */
 	headingBySlug: Map<string, HeadingEntry>;
 	/** Maps normalized (lowercased, single-spaced) raw heading text → first heading. */
@@ -387,6 +494,13 @@ export interface ContentIndex {
 	 * Built once during index construction; no separate pass needed.
 	 */
 	backlinks: Map<string, BacklinkRef[]>;
+	/**
+	 * The other trees published on the same site (the docs root for a vault, the
+	 * vault for the docs root), consulted by `resolveWikiLink` when this index
+	 * has no match and merged into the backlinks panel. Set by the plugin per
+	 * build generation.
+	 */
+	linkedIndexes?: ContentIndex[];
 }
 
 /**
@@ -424,6 +538,12 @@ export interface ResolvedWikiLink {
 	 */
 	canvasSrc?: string;
 	/**
+	 * The page a feature publishes the target file on (a `.base` view, a plain
+	 * `.excalidraw` drawing), set together with `href` pointing at that page.
+	 * Such a target is never a `targetAsset`: it is not staged as a download.
+	 */
+	fileRoute?: PublishedFileRoute;
+	/**
 	 * Every target a vault search (`[[##query]]`) matched, when more than one did.
 	 *
 	 * The remark pass turns this into a `<WikiPicker>`: Obsidian opens a list of
@@ -432,6 +552,15 @@ export interface ResolvedWikiLink {
 	 * and never sets this.
 	 */
 	candidates?: WikiLinkCandidate[];
+	/**
+	 * Set on an `ok` result whose name matched several files: the link resolved
+	 * the way Obsidian picks (same folder, then shortest path, then
+	 * alphabetical), and this message lists the alternatives so the caller can
+	 * report it through `onAmbiguousLink`.
+	 */
+	ambiguity?: string;
+	/** The attachment an `ok` result points at, when it is not a page. */
+	targetAsset?: ContentAsset;
 }
 
 /** One entry of a vault-search picker. */
@@ -448,6 +577,11 @@ export interface WikiLinkCandidate {
 export interface ResolveContext {
 	currentPage: ContentPage;
 	index: ContentIndex;
+	/**
+	 * Indexes to try, in order, when `index` has no match. Defaults to
+	 * `index.linkedIndexes`.
+	 */
+	fallbackIndexes?: ContentIndex[];
 	options?: Partial<
 		Pick<NormalizedPluginOptions, "enableFuzzyMatching" | "enableCaseInsensitiveLookup">
 	>;
@@ -461,5 +595,17 @@ export interface ResolveContext {
 export interface RemarkWikiLinkPluginOptions {
 	getDocsRoot: (filePath?: string) => string;
 	getContentIndex?: (filePath: string) => Promise<ContentIndex>;
+	/**
+	 * Every published content index (docs, then the vault). Queries that span
+	 * the whole site — Tasks, Bases — read these. Defaults to the file's own
+	 * index.
+	 */
+	getPublishedIndexes?: () => Promise<readonly ContentIndex[]>;
 	options: NormalizedPluginOptions;
+	/**
+	 * The site's Rspress `base` (always starting and ending with `/`). Raw HTML
+	 * the pass emits for `<audio>`, `<video>` and `<iframe>` is not rewritten by
+	 * Rspress, so those URLs must be prefixed here. Defaults to `/`.
+	 */
+	getSiteBase?: () => string;
 }

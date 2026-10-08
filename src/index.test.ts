@@ -3,6 +3,7 @@
 // exercised as a consumer meets them: `rspress.config.ts` imports
 // `pluginObsidian` from here, and user code imports the helpers from here.
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import * as umbrella from "./index.ts";
 import * as markdownEntry from "./markdown/index.ts";
@@ -52,13 +53,19 @@ describe("pluginObsidian", () => {
 			markdown({ vaultRoot: "/vault", enableMermaid: true }),
 			graphview({ enableDefaultStyles: true }),
 		]);
+		const [plainMarkdown] = pluginObsidian((markdown) => [markdown({ vaultRoot: "/vault" })]);
 
 		// `enableMermaid` is what registers the client component drawing the
 		// placeholders; `enableDefaultStyles` is what ships the panel stylesheet.
+		// Both reach Rspress as paths, so the assertion is that each option
+		// produced one and that it names a file Rspress can load.
 		const uiComponents = fields(markdownPlugin).globalUIComponents as [string, object][];
 		expect(uiComponents).toHaveLength(1);
-		expect(uiComponents[0]?.[0]).toEndWith(path.join("markdown", "runtime", "MermaidBlocks.tsx"));
-		expect(fields(graph).globalStyles as string).toEndWith("graph-panels.css");
+		expect(existsSync(uiComponents[0]?.[0] ?? "")).toBe(true);
+		expect(fields(plainMarkdown).globalUIComponents).toBeUndefined();
+		const stylesheet = fields(graph).globalStyles as string;
+		expect(existsSync(stylesheet)).toBe(true);
+		expect(stylesheet).toEndWith(".css");
 	});
 });
 
@@ -90,7 +97,9 @@ describe("root entry re-exports", () => {
 		const resolved = resolveWikiLink(parsed, { currentPage, index });
 
 		expect(resolved.status).toBe("ok");
-		expect(resolved.label).toBe("Install");
+		// Obsidian's display text for an unaliased heading link: the link text
+		// as written, with `#` shown as ` > `.
+		expect(resolved.label).toBe("guide/getting-started > Install");
 		expect(resolved.href).toContain("getting-started");
 		expect(resolved.targetPage?.relativePath).toBe("guide/getting-started.md");
 	});
@@ -103,7 +112,7 @@ describe("root entry re-exports", () => {
 			"/tags/tutorial",
 		]);
 		expect(pages.find((page) => page.routePath === "/tags/tutorial")?.content).toContain(
-			"# #tutorial",
+			"# \\#tutorial",
 		);
 		expect(pages.find((page) => page.routePath === "/tags/obsidian")?.content).toContain(
 			"Tagged Guide",

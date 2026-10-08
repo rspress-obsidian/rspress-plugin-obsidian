@@ -48,7 +48,13 @@ export const ATTACHMENT_EXTS = new Set<string>([
 	PDF_EXT,
 ]);
 
-/** The lowercased extension of a target, without the dot. */
+/**
+ * The lowercased extension of a target, without the dot; `""` when the last
+ * path segment has none. A note called `PDF` or `SVG` is a note, not a file
+ * whose extension is its whole name.
+ */
 export function extensionOf(target: string): string {
-	return target.split(".").pop()?.toLowerCase() ?? "";
+	const name = target.slice(target.lastIndexOf("/") + 1);
+	const dot = name.lastIndexOf(".");
+	return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
