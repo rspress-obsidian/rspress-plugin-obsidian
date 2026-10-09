@@ -29,7 +29,7 @@ export default defineConfig({
 | `defaultOpen` | `boolean` | `false` | Open the graph panel by default when the site loads (not on screens narrower than 640px) |
 | `profileBuild` | `boolean` | `false` | Log graph build counts, timings and module reuse |
 | `colors` | `GraphViewColors` | Light/dark palette | Override the graph palette — see [Custom Colors](#custom-colors) |
-| `enableHoverPreviews` | `boolean` | `false` | Show a content preview when hovering an internal link; the preview data loads on the first hover |
+| `enableHoverPreviews` | `boolean` | `false` | Show Obsidian's Page preview when a link in the article is hovered: the linked note rendered in a scrollable popover, sliced to the section or block a `#heading` or `#^block` link names |
 | `enableDefaultStyles` | `boolean` | `false` | Inject the bundled graph-panel stylesheet; unnecessary if you import `rspress-plugin-obsidian/styles.css` instead |
 | `groups` | `GraphViewGroup[]` | `[]` | Colour groups: nodes matching the group's query paint in its colour — see [`groups`](#groups) |
 | `onUnresolvedLink` | `"warn" \| "error" \| "ignore"` | `"warn"` | What to do about a link that resolves to nothing — see [Broken Link Diagnostics](#broken-link-diagnostics) |

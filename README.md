@@ -91,7 +91,7 @@ feature is importable on its own.
 | --- | --- | --- | --- |
 | Markdown | `markdown` | wikilinks, embeds, callouts, backlinks, transclusion, media embeds, tags + tag pages, daily notes, Dataview, Tasks, Kanban, Excalidraw, Bases, Templater, math, Mermaid — see below | `rspress-plugin-obsidian/markdown/styles.css` |
 | Canvas | `canvas` | `.canvas` boards as interactive pages, with an in-browser editor | `rspress-plugin-obsidian/canvas/styles.css` |
-| Graph view | `graphview` | the interactive link graph, local and global | `rspress-plugin-obsidian/styles.css` (aggregate) |
+| Graph view | `graphview` | the interactive link graph, local and global, and Obsidian's Page preview of linked notes on hover (`enableHoverPreviews`) | `rspress-plugin-obsidian/styles.css` (aggregate) |
 
 ## What `markdown()` turns on
 

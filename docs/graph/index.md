@@ -59,7 +59,8 @@ export default defineConfig({
 
 ## Hover Previews
 
-Hover previews show a tooltip with page content when hovering over internal links.
+Hover previews reproduce Obsidian's Page preview: hovering a link in a page
+shows the linked note, rendered, in a popover you can scroll.
 
 ### Setup
 
@@ -71,26 +72,31 @@ graphview({
 
 ### Features
 
-- Shows page title and a plain-text content preview — the body is reduced to
-  prose at build time (heading, emphasis, link and code markers stripped), so a
-  preview never ships raw markdown syntax and stays bounded in size
-- Comments (`%%…%%`, `<!-- … -->`) are left out, as the page leaves them out
-- The preview data loads on the first hover over an internal link, not with the page
-- Appears after 300ms hover delay
-- Disappears when mouse leaves
-- Works on any internal link whose `href` resolves to a generated route — plugin
-  wikilinks, tag pages and Rspress's own page links. Hrefs are percent-decoded
-  (so `/My%20Note` finds `My Note`), and the site `base`, an `.html` suffix, a
-  query and an `#anchor` are removed before the lookup.
+- Shows the linked note as its own page renders it: headings, lists, callouts,
+  code, tables, math, images and Mermaid diagrams
+- A `[[Note#Heading]]` link shows only that section, a `[[Note#^block]]` link
+  only that block, and `[[#Heading]]` works on the same page
+- Opens after the mouse rests on a link for 300 ms, under the hovered line of
+  the link, or above it when there is no room below
+- Stays open while the pointer is on the link or in the popover, so a long
+  note can be scrolled; closes 300 ms after the pointer leaves both, and on
+  Escape, a click elsewhere, a page scroll or navigation
+- Fires only for links in the article and only for a mouse: the sidebar, nav,
+  outline, heading anchors, footnote markers, touch and pen never open one
+- Works on any link whose `href` resolves to a route — plugin wikilinks, tag
+  pages and Rspress's own page links, with or without the site `base`, an
+  `.html` suffix, a query, or percent-encoding (`/My%20Note`)
+- Loads nothing extra: the popover renders the page's own module, which
+  Rspress already fetches when the pointer enters the link, so it works the
+  same in `rspress dev` and with SSG off
 
 ### Styling
 
-The preview popup has:
-- Fixed positioning
-- Max width: 320px
-- Max height: 240px
-- Scrollable content area
-- Dark mode support
+The popover is a 450 px wide, at most 400 px tall `.obsidian-hover-preview`
+element above the graph panel, styled by `graph-panels.css` (included in
+`rspress-plugin-obsidian/styles.css`). The note inside keeps the site's article
+typography at 87.5%, on the page background in light and dark themes, and
+fades in unless the reader prefers reduced motion.
 
 ## Configuration Reference
 

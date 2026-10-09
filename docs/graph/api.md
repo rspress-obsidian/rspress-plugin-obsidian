@@ -37,7 +37,7 @@ interface GraphViewGroup {
 
 `profileBuild` can also be enabled temporarily with the `RSPRESS_GRAPH_VIEW_PROFILE=1` environment variable.
 
-`enableHoverPreviews` publishes each page's title and the first 300 characters of its visible text as a separate chunk. The hover component fetches it on the first hover over an internal link, so it is not part of any page's initial bundle.
+`enableHoverPreviews` registers the Page preview component. A preview renders the linked page's own route module, which Rspress already loads when the pointer enters the link, so the option publishes no data of its own.
 
 The graph keeps no disk cache. The `cacheDir` option of earlier versions has been removed.
 
