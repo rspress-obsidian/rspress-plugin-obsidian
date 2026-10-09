@@ -23,4 +23,5 @@ Release sections are written above this one by semantic-release from Conventiona
 - Vault code is sandboxed: DataviewJS, DQL, Templater commands, Bases formulas and Tasks queries are interpreted, never evaluated; prototype access is refused however the name is built; user regexes that could backtrack catastrophically are refused at every site; text and list sizes are capped; runaway scripts stop at step budgets; and a stack overflow is reported instead of crashing the build.
 - Date arithmetic lives in one module with each language's own library semantics — Moment for Templater, Kanban, Bases and daily notes, Luxon for Dataview — checked against the real libraries.
 - `mermaid`, `mathjax-full`, `@excalidraw/excalidraw`, `maplibre-gl` and `lucide-static` are optional peer dependencies. Install them only for the features that need them.
+- `rspress dev` no longer exits when a page with a Mermaid diagram is opened after another page. The plugins compile Mermaid with its renderer instead of on demand, because Rspack's lazy compilation crashes on that chain (Rspack 2.2.2 to at least 2.2.8).
 - Runs on Node ≥ 22.14 on Linux, macOS and Windows. CI exercises all three.

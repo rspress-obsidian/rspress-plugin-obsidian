@@ -378,6 +378,12 @@ diagram stays on the page as its source, with `.obsidian-mermaid-error`, a
 `data-mermaid-unavailable` attribute and the install hint as its title. Mermaid
 fences inside canvas text cards need the same package.
 
+Under `rspress dev` the plugins compile Mermaid with its renderer instead of
+on demand, because Rspack's lazy compilation (2.2.2 to at least 2.2.8) crashes
+the dev server when a diagram page is opened after another page. If your own
+Rspack config brings that crash back, keep `node_modules/mermaid` out of
+`dev.lazyCompilation` or set `RSPRESS_LAZY_COMPILATION=false`.
+
 ### `enableMediaEmbeds`
 
 - `false` (default) — `![[file]]` is rewritten to an embed anchor

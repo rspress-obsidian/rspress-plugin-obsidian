@@ -3502,9 +3502,10 @@ describe("external vault publishing", () => {
 			let publicDirs: Array<{ name: string }> = [];
 			const rsbuildPlugin = (
 				(plugin.builderConfig?.plugins ?? []) as unknown as Array<{
+					name: string;
 					setup: (api: unknown) => void;
 				}>
-			)[0];
+			).find(({ name }) => name === "rspress-plugin-obsidian:assets");
 			rsbuildPlugin?.setup({
 				context: { rootPath: docsRoot },
 				modifyRsbuildConfig: (fn: (config: Record<string, unknown>) => void) => {
@@ -3558,16 +3559,19 @@ describe("external vault publishing", () => {
 			let staging = "";
 			(
 				(plugin.builderConfig?.plugins ?? []) as unknown as Array<{
+					name: string;
 					setup: (api: unknown) => void;
 				}>
-			)[0]?.setup({
-				context: { rootPath: docsRoot },
-				modifyRsbuildConfig: (fn: (config: Record<string, unknown>) => void) => {
-					const config: { server?: { publicDir?: Array<{ name: string }> } } = {};
-					fn(config);
-					staging = config.server?.publicDir?.at(-1)?.name ?? "";
-				},
-			});
+			)
+				.find(({ name }) => name === "rspress-plugin-obsidian:assets")
+				?.setup({
+					context: { rootPath: docsRoot },
+					modifyRsbuildConfig: (fn: (config: Record<string, unknown>) => void) => {
+						const config: { server?: { publicDir?: Array<{ name: string }> } } = {};
+						fn(config);
+						staging = config.server?.publicDir?.at(-1)?.name ?? "";
+					},
+				});
 			const staged = (await fsp.readdir(staging, { recursive: true }))
 				.map((entry) => String(entry).split(path.sep).join("/"))
 				.filter((entry) => entry.includes("."));
