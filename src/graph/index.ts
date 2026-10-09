@@ -31,9 +31,11 @@ export interface RspressPluginGraphViewOptions {
 	/** Node, link and accent colours for the panel; the built-in palette is
 	 * used for whatever is omitted. */
 	colors?: GraphViewColors;
-	/** Ship a short plain-text preview of every published page and register
-	 * the component that shows it when the reader hovers an internal link. The
-	 * preview data loads on the first hover, not with the page.
+	/** Register the Page preview: hovering a link in the article with a mouse
+	 * shows the linked note rendered in a scrollable popover, sliced to the
+	 * section or block a `#heading` or `#^block` link names. The popover renders
+	 * the target route's own page module, which Rspress already fetches on
+	 * hover, so nothing extra is built or shipped.
 	 * @default false */
 	enableHoverPreviews?: boolean;
 	/** Inject the bundled panel stylesheet as a global style. Off by default —
@@ -88,7 +90,7 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 	// Routes are read when the modules are built, not in `routeGenerated`:
 	// Rspress fires that hook before `routeServiceGenerated`, where the markdown
 	// plugin removes `publish: false` pages, so a snapshot taken there would put
-	// unpublished pages (titles, links and preview text) into the graph.
+	// unpublished pages (titles, links and text) into the graph.
 	const collectRoutes = (): CollectedRoute[] =>
 		(routeSource?.getRoutes() ?? []).map((route) => ({
 			routePath: normalizeRoutePath(route.routePath),
@@ -101,7 +103,6 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 		buildGraphModules(collectRoutes(), state, {
 			docsRoot: path.resolve(config.root ?? "docs"),
 			base: config.base ?? "/",
-			hoverPreviews: options.enableHoverPreviews === true,
 			profile: shouldProfileBuild,
 			onUnresolvedLink: options.onUnresolvedLink,
 		});

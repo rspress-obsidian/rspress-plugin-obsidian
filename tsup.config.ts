@@ -102,7 +102,6 @@ export default defineConfig([
 			"@rspress/core",
 			"virtual-graph-data",
 			"virtual-graph-search-data",
-			"virtual-page-content-data",
 		],
 		target: "es2020",
 		noExternal: ["marked"],

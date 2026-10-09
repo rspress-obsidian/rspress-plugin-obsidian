@@ -558,7 +558,7 @@ describe("modules", () => {
 		expect(decodeGraphPayload(payload)).toEqual(graph);
 	});
 
-	test("hover previews and search text hide comments and skip routes Rspress does not publish", async () => {
+	test("search text hides comments and skips routes Rspress does not publish", async () => {
 		const files = {
 			"a.md": "Visible <!-- internal: hunter2 --> text %% secret %%\n",
 			"private.md": "---\npublish: false\n---\nPrivate body\n",
@@ -566,7 +566,7 @@ describe("modules", () => {
 		const root = await writeTree(files);
 		// The markdown plugin removed the private page's route before the build.
 		const routes = routesFor(root, files).filter((route) => route.routePath !== "/private");
-		const { graph, modules } = await build(routes, root, { hoverPreviews: true });
+		const { graph, modules } = await build(routes, root);
 		const everything = Object.values(modules).join("\n");
 		expect(everything).toContain("Visible");
 		expect(everything).not.toContain("hunter2");

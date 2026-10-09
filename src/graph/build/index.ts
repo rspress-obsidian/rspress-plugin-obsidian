@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { encodeGraphPayload, graphPayloadModuleSource } from "../graph-payload.js";
 import { loadGraphDocuments, planGraphDocuments } from "./documents.js";
 import { buildGraphData } from "./graph-builder.js";
-import { collectPageTexts, pageContentModuleSource, searchModuleSource } from "./page-content.js";
+import { collectPageTexts, searchModuleSource } from "./page-content.js";
 import type {
 	CollectedRoute,
 	GraphBuildOptions,
@@ -21,7 +21,6 @@ export type {
 
 export const GRAPH_DATA_MODULE = "virtual-graph-data";
 export const GRAPH_SEARCH_MODULE = "virtual-graph-search-data";
-export const PAGE_CONTENT_MODULE = "virtual-page-content-data";
 
 /**
  * Build the graph's virtual modules for the routes Rspress publishes.
@@ -41,7 +40,6 @@ export async function buildGraphModules(
 		routes.map((route) => [route.routePath, route.absolutePath]),
 		plan.untrackedSignature,
 		options.base,
-		options.hoverPreviews === true,
 		options.onUnresolvedLink ?? "warn",
 	]);
 	const last = state.last;
@@ -68,15 +66,12 @@ export async function buildGraphModules(
 	const { graph, unresolved, resolvedLinks } = buildGraphData(documents);
 	reportUnresolved(unresolved, options.onUnresolvedLink ?? "warn");
 	state.texts ??= new Map();
-	const texts = await collectPageTexts(documents, options.hoverPreviews === true, state.texts);
+	const texts = await collectPageTexts(documents, state.texts);
 
 	const modules: Record<string, string> = {
 		[GRAPH_DATA_MODULE]: graphPayloadModuleSource(encodeGraphPayload(graph, options.base)),
 		[GRAPH_SEARCH_MODULE]: searchModuleSource(texts.search),
 	};
-	if (options.hoverPreviews) {
-		modules[PAGE_CONTENT_MODULE] = pageContentModuleSource(texts.previews, options.base);
-	}
 
 	const result = { graphData: graph, modules };
 	state.last = { indexes: plan.indexes, key, result };

@@ -12,10 +12,8 @@ export interface CollectedRoute {
 export interface GraphBuildOptions {
 	/** Rspress `root`, used when `markdown()` has not published its own roots. */
 	docsRoot: string;
-	/** Rspress `base` (`/…/`); attachment nodes and hover previews need it. */
+	/** Rspress `base` (`/…/`); attachment nodes need it. */
 	base: string;
-	/** Also emit `virtual-page-content-data` for the hover-preview component. */
-	hoverPreviews?: boolean;
 	profile?: boolean;
 	logger?: (message: string) => void;
 	/** What to do about a link that resolves to nothing. @default "warn" */

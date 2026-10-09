@@ -9,15 +9,3 @@ declare module "virtual-graph-search-data" {
 	export const searchEntries: GraphSearchEntry[];
 	export default searchEntries;
 }
-
-declare module "virtual-page-content-data" {
-	interface PageContent {
-		routePath: string;
-		title: string;
-		content: string;
-	}
-	/** Site `base` (`/…/`), stripped from link hrefs before lookup. */
-	export const base: string;
-	export const pageContentData: PageContent[];
-	export default pageContentData;
-}

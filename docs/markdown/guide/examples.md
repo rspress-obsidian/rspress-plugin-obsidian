@@ -187,6 +187,10 @@ Standard markdown links to vault pages resolve through the same rules — Obsidi
 - [Markdown link to the vault root](/markdown/) — resolves the section root page, not a relative path. The trailing slash is what makes an index page resolve: Rspress rewrites a slash-less route to `/markdown.html`, and the file it published is `markdown/index.html`
 - [Markdown link with an anchor](getting-started.md#Install) — `#anchor` destinations resolve to heading slugs
 
+A block link reaches one paragraph, list item or table of another note:
+
+- [[intro#^anchor-demo|A block in the vault's intro]] — hovering it previews only that paragraph
+
 Current page anchor links:
 
 - [[#Callouts]] — jump to the callouts section

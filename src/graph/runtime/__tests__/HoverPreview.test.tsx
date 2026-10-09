@@ -1,225 +1,427 @@
-// happy-dom must be registered BEFORE any testing-library import binds to globals
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-
-if (!globalThis.document) GlobalRegistrator.register();
-
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, vi } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
+import type { ComponentType, ElementType, ReactNode } from "react";
+import { setTestRoutes } from "../../../../test/rspress-routes";
+import { MAP_CONFIG_ATTRIBUTE } from "../../../markdown/obsidian-plugins/bases/runtime/map-markup";
+import { navigation } from "../../../shared/usePathname";
+import HoverPreview from "../HoverPreview";
+import { CLOSE_GRACE_MS, HOVER_DELAY_MS } from "../hover-preview-model";
 
-const { mock } = require("bun:test");
+type MdxComponents = Record<
+	"h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "span" | "ul" | "li" | "a" | "div",
+	ElementType
+>;
 
-const mockPageContentData = [
+/** A page component shaped like Rspress's compiled MDX: overridable tags under `components`. */
+function mdxPage(body: (n: MdxComponents) => ReactNode): ComponentType<{ components?: object }> {
+	return ({ components }) =>
+		body({
+			h1: "h1",
+			h2: "h2",
+			h3: "h3",
+			h4: "h4",
+			h5: "h5",
+			h6: "h6",
+			p: "p",
+			span: "span",
+			ul: "ul",
+			li: "li",
+			a: "a",
+			div: "div",
+			...components,
+		});
+}
+
+const ROUTES = [
 	{
-		routePath: "/guide/getting-started",
-		title: "Getting Started",
-		content: "Install and configure the plugin.",
+		path: "/guide/advanced",
+		headingTitle: "Advanced",
+		default: mdxPage((n) => (
+			<>
+				<n.h1 id="advanced">Advanced</n.h1>
+				<n.p>Configuration reference.</n.p>
+				<n.h2 id="options">Options</n.h2>
+				<n.p>Every option.</n.p>
+			</>
+		)),
 	},
-	{ routePath: "/guide/advanced", title: "Advanced", content: "Configuration reference." },
-	// The build ships one character past the budget when it truncated the body.
-	{ routePath: "/guide/long", title: "Long", content: "x".repeat(301) },
-	{ routePath: "/guide/exact", title: "Exact", content: "y".repeat(300) },
-	// Route ids are Rspress's decoded routes; hrefs arrive percent-encoded.
-	{ routePath: "/Deep Note", title: "Deep Note", content: "Spaces in the name." },
-	{ routePath: "/日本語ノート", title: "日本語ノート", content: "CJK route." },
+	{
+		path: "/guide/getting-started",
+		headingTitle: "Getting Started",
+		default: mdxPage((n) => (
+			<>
+				<n.h1 id="getting-started">Getting Started</n.h1>
+				<n.p>Intro.</n.p>
+				<n.h2 id="install">Install</n.h2>
+				<n.p>
+					Run bun add.
+					<n.a href="#fn-1">1</n.a>
+				</n.p>
+				<n.h2 id="configure">Configure</n.h2>
+				<n.ul>
+					<n.li>First step.</n.li>
+					<n.li>
+						Second step.
+						<n.span className="obsidian-block-anchor" id="^step" />
+					</n.li>
+				</n.ul>
+				<n.div className="bases-map-view" {...{ [MAP_CONFIG_ATTRIBUTE]: "{}" }}>
+					Map table
+				</n.div>
+			</>
+		)),
+	},
+	{
+		path: "/Deep Note",
+		headingTitle: "Deep Note",
+		default: mdxPage((n) => <n.h1 id="deep-note">Deep Note</n.h1>),
+	},
+	{
+		path: "/日本語ノート",
+		headingTitle: "日本語ノート",
+		default: mdxPage((n) => <n.h1 id="日本語ノート">日本語ノート</n.h1>),
+	},
+	{
+		path: "/untitled",
+		title: "Untitled Page",
+		default: mdxPage((n) => <n.p>No heading here.</n.p>),
+	},
+	{
+		path: "/throws",
+		default: () => {
+			throw new Error("broken page");
+		},
+	},
+	{
+		path: "/levels",
+		headingTitle: "Level 1",
+		default: mdxPage((n) => (
+			<>
+				<n.h1>Level 1</n.h1>
+				<n.h2>Level 2</n.h2>
+				<n.h3>Level 3</n.h3>
+				<n.h4>Level 4</n.h4>
+				<n.h5>Level 5</n.h5>
+				<n.h6>Level 6</n.h6>
+			</>
+		)),
+	},
+	{
+		path: "/offline",
+		chunkFails: true,
+		default: mdxPage((n) => <n.p>Never seen.</n.p>),
+	},
 ];
 
-mock.module("virtual-page-content-data", () => ({
-	base: "/",
-	pageContentData: mockPageContentData,
-	default: mockPageContentData,
-}));
-
-// Re-import the component under test AFTER mocks are registered — a static
-// import would bind to the unmocked virtual module.
-const { default: HoverPreview, previewKeyForHref } = await import("../HoverPreview");
-
-const HOVER_DELAY = 300;
-
-async function hoverHref(href: string): Promise<void> {
+function articleLink(href: string): HTMLAnchorElement {
+	const article = document.createElement("div");
+	article.className = "rspress-doc";
 	const link = document.createElement("a");
 	link.setAttribute("href", href);
 	link.textContent = href;
-	document.body.appendChild(link);
+	article.append(link);
+	document.body.append(article);
+	return link;
+}
 
-	const { promise, resolve } = Promise.withResolvers<void>();
-	setTimeout(resolve, HOVER_DELAY + 50);
+function pointer(
+	type: string,
+	target: Element,
+	relatedTarget: Element | null = null,
+	pointerType = "mouse",
+): void {
+	target.dispatchEvent(
+		new PointerEvent(type, { bubbles: true, pointerType, relatedTarget, clientX: 5, clientY: 5 }),
+	);
+}
 
+async function advance(ms: number): Promise<void> {
 	await act(async () => {
-		link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 10, clientY: 10 }));
-		await promise;
+		// Let the page load's promise chain settle before the timers run.
+		for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
+		vi.advanceTimersByTime(ms);
+	});
+}
+
+async function hover(link: Element, pointerType = "mouse"): Promise<void> {
+	await act(async () => pointer("pointerover", link, null, pointerType));
+	await advance(HOVER_DELAY_MS);
+}
+
+function popover(): HTMLElement | null {
+	return document.querySelector<HTMLElement>(".obsidian-hover-preview");
+}
+
+function popoverText(selector: string): string[] {
+	return Array.from(popover()?.querySelectorAll(selector) ?? [], (element) =>
+		(element.textContent ?? "").trim(),
+	);
+}
+
+describe("HoverPreview", () => {
+	beforeEach(() => {
+		setTestRoutes(ROUTES);
+		vi.useFakeTimers();
 	});
 
-	link.remove();
-}
-
-function previewTitle(): string | null | undefined {
-	return document.querySelector(".obsidian-hover-preview__title")?.textContent;
-}
-
-describe("HoverPreview link resolution", () => {
 	afterEach(() => {
 		cleanup();
+		// React's scheduler may have queued its next tick on the fake clock; a tick
+		// dropped with it leaves the scheduler stalled for every later test file.
+		vi.runAllTimers();
+		vi.useRealTimers();
 		document.body.innerHTML = "";
 	});
 
-	test("resolves a wikilink target", async () => {
+	test("a wikilink, a .html link and one with a query and fragment open the rendered page", async () => {
 		render(<HoverPreview />);
 
-		await hoverHref("/guide/advanced");
-
-		expect(previewTitle()).toBe("Advanced");
-	});
-
-	test("resolves a markdown link rewritten to .html", async () => {
-		render(<HoverPreview />);
-
-		await hoverHref("/guide/getting-started.html");
-
-		expect(previewTitle()).toBe("Getting Started");
-	});
-
-	test("resolves a markdown link carrying an .html fragment and query", async () => {
-		render(<HoverPreview />);
-
-		await hoverHref("/guide/getting-started.html?from=nav#Install");
-
-		expect(previewTitle()).toBe("Getting Started");
-	});
-
-	test("truncates the sentinel payload to the budget and marks it", async () => {
-		render(<HoverPreview />);
-
-		await hoverHref("/guide/long");
-
-		const content = document.querySelector(".obsidian-hover-preview__content")?.textContent ?? "";
-		expect(content).toHaveLength(301);
-		expect(content.endsWith("…")).toBe(true);
-		expect(content.slice(0, 300)).toBe("x".repeat(300));
-	});
-
-	test("leaves a body that fits the budget exactly unmarked", async () => {
-		render(<HoverPreview />);
-
-		await hoverHref("/guide/exact");
-
-		const content = document.querySelector(".obsidian-hover-preview__content")?.textContent ?? "";
-		expect(content).toHaveLength(300);
-		expect(content).not.toContain("…");
-	});
-
-	test("resolves percent-encoded hrefs to routes with spaces and CJK", async () => {
-		render(<HoverPreview />);
-
-		await hoverHref("/Deep%20Note");
-		expect(previewTitle()).toBe("Deep Note");
-
+		await hover(articleLink("/guide/advanced"));
+		expect(popoverText("h1")).toEqual(["Advanced"]);
+		expect(popoverText("h2")).toEqual(["Options"]);
 		cleanup();
+
 		render(<HoverPreview />);
-		await hoverHref("/%E6%97%A5%E6%9C%AC%E8%AA%9E%E3%83%8E%E3%83%BC%E3%83%88.html");
-		expect(previewTitle()).toBe("日本語ノート");
+		await hover(articleLink("/guide/getting-started.html"));
+		expect(popoverText("h1")).toEqual(["Getting Started"]);
+		cleanup();
+
+		render(<HoverPreview />);
+		await hover(articleLink("/guide/getting-started.html?from=nav#Install"));
+		expect(popoverText("[data-preview-keep]")).toEqual(["Install", "Run bun add.1"]);
 	});
 
-	test("strips the site base and ignores other origins", () => {
-		const location = new URL("https://docs.example/site/guide") as unknown as Location;
-		expect(previewKeyForHref("/site/Deep%20Note/", "/site/", location)).toBe("/Deep Note");
-		expect(previewKeyForHref("/site/", "/site/", location)).toBe("/");
-		expect(
-			previewKeyForHref("https://elsewhere.example/site/x", "/site/", location),
-		).toBeUndefined();
-		expect(previewKeyForHref("#heading", "/site/", location)).toBeUndefined();
-		// An href the URL parser rejects is not a route.
-		expect(previewKeyForHref("http://[bad", "/site/", location)).toBeUndefined();
+	test("percent-encoded hrefs reach routes with spaces and CJK", async () => {
+		render(<HoverPreview />);
+		await hover(articleLink("/Deep%20Note"));
+		expect(popoverText("h1")).toEqual(["Deep Note"]);
+		cleanup();
+
+		render(<HoverPreview />);
+		await hover(articleLink("/%E6%97%A5%E6%9C%AC%E8%AA%9E%E3%83%8E%E3%83%BC%E3%83%88.html"));
+		expect(popoverText("h1")).toEqual(["日本語ノート"]);
 	});
 
-	test("shows nothing for a link with no collected page", async () => {
+	test("a block link keeps only that block", async () => {
 		render(<HoverPreview />);
-
-		await hoverHref("/guide/missing.html");
-
-		expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
+		await hover(articleLink("/guide/getting-started#%5Estep"));
+		expect(popoverText("[data-preview-keep]")).toEqual(["Second step."]);
 	});
 
-	test("moving the pointer off the link closes the preview", async () => {
+	test("a page without its own heading shows its title", async () => {
 		render(<HoverPreview />);
-		const link = document.createElement("a");
-		link.setAttribute("href", "/guide/advanced");
-		document.body.appendChild(link);
-		const { promise, resolve } = Promise.withResolvers<void>();
-		setTimeout(resolve, HOVER_DELAY + 50);
+		await hover(articleLink("/untitled"));
+		expect(popoverText("h1")).toEqual(["Untitled Page"]);
+	});
+
+	test("the popover holds no unprefixed id, outline heading or live map", async () => {
+		render(<HoverPreview />);
+		await hover(articleLink("/guide/getting-started"));
+		const ids = Array.from(popover()?.querySelectorAll("[id]") ?? [], (element) => element.id);
+		expect(ids).toEqual([
+			"obsidian-hover-preview-getting-started",
+			"obsidian-hover-preview-install",
+			"obsidian-hover-preview-configure",
+			"obsidian-hover-preview-^step",
+		]);
+		expect(popover()?.querySelectorAll(".rp-toc-include").length).toBe(0);
+		expect(popover()?.querySelectorAll(`[${MAP_CONFIG_ATTRIBUTE}]`).length).toBe(0);
+		expect(popoverText(".bases-map-view")).toEqual(["Map table"]);
+	});
+
+	test("the popover sits in body, fixed, above the graph panel", async () => {
+		render(<HoverPreview />);
+		await hover(articleLink("/guide/advanced"));
+		expect(popover()?.parentElement).toBe(document.body);
+		expect(popover()?.style.position).toBe("fixed");
+		expect(popover()?.style.zIndex).toBe("10000");
+		expect(popover()?.style.visibility).toBe("");
+	});
+
+	test("no heading level in the popover joins the outline", async () => {
+		render(<HoverPreview />);
+		await hover(articleLink("/levels"));
+		expect(popoverText("h1, h2, h3, h4, h5, h6")).toEqual([
+			"Level 1",
+			"Level 2",
+			"Level 3",
+			"Level 4",
+			"Level 5",
+			"Level 6",
+		]);
+		expect(popover()?.querySelectorAll(".rp-toc-include").length).toBe(0);
+	});
+
+	test("a link with no page, or whose chunk fails to load, shows nothing", async () => {
+		render(<HoverPreview />);
+		const missing = articleLink("/guide/missing.html");
+		const offline = articleLink("/offline");
+		await hover(missing);
+		const afterMissing = popover();
+		await act(async () => pointer("pointerout", missing, offline));
+		await hover(offline);
+		expect([afterMissing, popover()]).toEqual([null, null]);
+
+		await hover(articleLink("/guide/advanced"));
+		expect(popoverText("h1")).toEqual(["Advanced"]);
+	});
+
+	test("touch, and links outside the article, show nothing", async () => {
+		render(<HoverPreview />);
+		const link = articleLink("/guide/advanced");
+		await hover(link, "touch");
+		const afterTouch = popover();
+
+		const sidebar = document.createElement("a");
+		sidebar.setAttribute("href", "/guide/advanced");
+		document.body.append(sidebar);
+		await hover(sidebar);
+		expect([afterTouch, popover()]).toEqual([null, null]);
+
+		await hover(link);
+		expect(popoverText("h1")).toEqual(["Advanced"]);
+	});
+
+	test("leaving the link closes after the grace period", async () => {
+		render(<HoverPreview />);
+		const link = articleLink("/guide/advanced");
+		await hover(link);
+
+		await act(async () => pointer("pointerout", link, document.body));
+		expect(popover()).not.toBeNull();
+		await advance(CLOSE_GRACE_MS);
+		expect(popover()).toBeNull();
+	});
+
+	test("leaving before the hover delay opens nothing", async () => {
+		render(<HoverPreview />);
+		const link = articleLink("/guide/advanced");
+		await act(async () => pointer("pointerover", link));
+		await act(async () => pointer("pointerout", link, document.body));
+		await advance(HOVER_DELAY_MS * 2);
+		expect(popover()).toBeNull();
+	});
+
+	test("moving from the link into the popover keeps it open", async () => {
+		render(<HoverPreview />);
+		const link = articleLink("/guide/advanced");
+		await hover(link);
+		const popup = popover();
+		if (!popup) throw new Error("preview did not open");
+
 		await act(async () => {
-			link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 10, clientY: 10 }));
-			await promise;
+			pointer("pointerout", link, popup);
+			pointer("pointerover", popup, link);
 		});
-		expect(previewTitle()).toBe("Advanced");
+		await advance(CLOSE_GRACE_MS * 2);
+		expect(popover()).toBe(popup);
 
-		act(() => {
-			link.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
-		});
-		expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
+		await act(async () => pointer("pointerout", popup, document.body));
+		await advance(CLOSE_GRACE_MS);
+		expect(popover()).toBeNull();
 	});
 
-	test("leaving the link before the hover delay opens no preview", async () => {
+	test("hovering another link keeps the open popover until the new one opens", async () => {
 		render(<HoverPreview />);
-		const link = document.createElement("a");
-		link.setAttribute("href", "/guide/advanced");
-		document.body.appendChild(link);
-		const { promise, resolve } = Promise.withResolvers<void>();
-		setTimeout(resolve, HOVER_DELAY + 50);
+		const first = articleLink("/guide/advanced");
+		const second = articleLink("/Deep%20Note");
+		await hover(first);
+
 		await act(async () => {
-			link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 10, clientY: 10 }));
-			await Promise.resolve();
-			link.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
-			await promise;
+			pointer("pointerout", first, second);
+			pointer("pointerover", second, first);
 		});
-		expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
+		expect(popoverText("h1")).toEqual(["Advanced"]);
+		await advance(HOVER_DELAY_MS);
+		expect(popoverText("h1")).toEqual(["Deep Note"]);
 	});
 
-	test("a hover still pending when the component unmounts never opens a popup", async () => {
-		vi.useFakeTimers();
-		try {
-			const { unmount } = render(<HoverPreview />);
-
-			const link = document.createElement("a");
-			link.setAttribute("href", "/guide/advanced");
-			document.body.appendChild(link);
-			link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 5, clientY: 5 }));
-			unmount();
-
-			// Let the preview data finish loading, then run out every hover delay.
-			await import("virtual-page-content-data");
-			await act(async () => {
-				await Promise.resolve();
-			});
-			vi.advanceTimersByTime(HOVER_DELAY * 2);
-
-			expect(document.querySelector(".obsidian-hover-preview")).toBeNull();
-			link.remove();
-		} finally {
-			vi.useRealTimers();
+	test("Escape, an outside press, a host scroll and a resize each close it", async () => {
+		render(<HoverPreview />);
+		const link = articleLink("/guide/advanced");
+		const closers = [
+			() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })),
+			() => document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })),
+			() => document.dispatchEvent(new Event("scroll")),
+			() => window.dispatchEvent(new Event("resize")),
+		];
+		const openThenClosed: [boolean, boolean][] = [];
+		for (const close of closers) {
+			await hover(link);
+			const opened = popover() !== null;
+			await act(async () => close());
+			openThenClosed.push([opened, popover() === null]);
+			await act(async () => pointer("pointerout", link, document.body));
 		}
+		expect(openThenClosed).toEqual([
+			[true, true],
+			[true, true],
+			[true, true],
+			[true, true],
+		]);
 	});
 
-	test("re-clamps the popup when the viewport resizes", async () => {
-		Object.defineProperty(window, "innerWidth", { value: 200, configurable: true });
+	test("scrolling or pressing inside the popover keeps it open", async () => {
+		render(<HoverPreview />);
+		await hover(articleLink("/guide/advanced"));
+		const popup = popover();
+		await act(async () => {
+			popup?.dispatchEvent(new Event("scroll"));
+			popup?.querySelector("p")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+		});
+		expect(popover()).toBe(popup);
+	});
+
+	test("a hash link inside goes to the previewed page", async () => {
+		const assign = spyOn(navigation, "assign").mockImplementation(() => {});
 		try {
 			render(<HoverPreview />);
-
-			await hoverHref("/guide/advanced");
-
-			const popup = document.querySelector(".obsidian-hover-preview") as HTMLElement | null;
-			if (!popup) throw new Error("preview did not open");
-			// 200px is narrower than the popup, so the clamp pushes it off the left.
-			const cramped = popup.style.left;
-
+			await hover(articleLink("/guide/getting-started"));
+			const footnote = popover()?.querySelector('a[href="#fn-1"]');
 			await act(async () => {
-				Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
-				window.dispatchEvent(new Event("resize"));
+				footnote?.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
 			});
-
-			// Reading `window.innerWidth` during render would leave it stranded here.
-			expect(popup.style.left).not.toBe(cramped);
+			expect(assign.mock.calls).toEqual([["/guide/getting-started#fn-1"]]);
+			expect(popover()).toBeNull();
 		} finally {
-			Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
+			assign.mockRestore();
 		}
+	});
+
+	test("navigating closes it", async () => {
+		render(<HoverPreview />);
+		await hover(articleLink("/guide/advanced"));
+		await act(async () => {
+			history.pushState(null, "", "/guide/other");
+			window.dispatchEvent(new PopStateEvent("popstate"));
+		});
+		expect(popover()).toBeNull();
+		history.replaceState(null, "", "/");
+	});
+
+	test("a page that throws shows nothing and leaves the host mounted", async () => {
+		const consoleError = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const host = render(
+				<>
+					<p>host page</p>
+					<HoverPreview />
+				</>,
+			);
+			await hover(articleLink("/throws"));
+			expect(popover()).toBeNull();
+			expect(host.container.textContent).toBe("host page");
+		} finally {
+			consoleError.mockRestore();
+		}
+	});
+
+	test("a hover still pending when the component unmounts never opens a popover", async () => {
+		const { unmount } = render(<HoverPreview />);
+		await act(async () => pointer("pointerover", articleLink("/guide/advanced")));
+		unmount();
+		await advance(HOVER_DELAY_MS * 2);
+		expect(popover()).toBeNull();
 	});
 });

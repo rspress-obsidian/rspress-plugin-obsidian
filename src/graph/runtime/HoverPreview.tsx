@@ -1,192 +1,332 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { PREVIEW_CONTENT_LENGTH } from "../build/preview-content.js";
-import { normalizeClientRoutePath } from "./deriveGraphViewData.js";
+import {
+	initPageData,
+	PageContext,
+	pathnameToRouteService,
+	removeBase,
+} from "@rspress/core/runtime";
+import { Callout, getCustomMDXComponent } from "@rspress/core/theme";
+import type { ComponentType, CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import {
+	Component,
+	Suspense,
+	useEffect,
+	useLayoutEffect,
+	useReducer,
+	useRef,
+	useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { useNavigateTo, usePathname } from "../../shared/usePathname.js";
+import type {
+	Placement,
+	PreviewEvent,
+	PreviewPage,
+	PreviewTarget,
+	ShownPreview,
+} from "./hover-preview-model.js";
+import {
+	anchorRectAt,
+	CLOSE_GRACE_MS,
+	HOVER_DELAY_MS,
+	IDLE,
+	isolateIds,
+	POPOVER_CLASS,
+	placePopover,
+	popoverWidth,
+	previewTargetFor,
+	reducePreview,
+	shownPreview,
+	sliceToAnchor,
+} from "./hover-preview-model.js";
 
-interface PagePreview {
-	routePath: string;
-	title: string;
-	content: string;
+interface PreviewHeadingProps {
+	id?: string;
+	className?: string;
+	children?: ReactNode;
 }
-
-interface PopupState {
-	preview: PagePreview;
-	x: number;
-	y: number;
-}
-
-interface PreviewIndex {
-	base: string;
-	byRoutePath: Map<string, PagePreview>;
-}
-
-const POPUP_WIDTH = 320;
-const POPUP_HEIGHT = 240;
-const HOVER_DELAY = 300;
-
-let previewIndex: Promise<PreviewIndex> | undefined;
 
 /**
- * The preview text of every page is the largest thing this component needs, so
- * it is its own chunk, fetched on the first hover over an internal link rather
- * than shipped in every page's initial bundle.
+ * Plain headings in place of the theme's: no `rp-toc-include` class, Tag badge
+ * or LLMs buttons, so nothing in a popover joins the host's outline or acts on
+ * the wrong page.
  */
-function loadPreviewIndex(): Promise<PreviewIndex> {
-	previewIndex ??= import("virtual-page-content-data")
-		.then(({ base, pageContentData }) => ({
-			base: base || "/",
-			byRoutePath: new Map(pageContentData.map((page) => [page.routePath, page])),
-		}))
-		.catch((error: unknown) => {
-			previewIndex = undefined;
-			throw error;
-		});
-	return previewIndex;
+const PREVIEW_HEADINGS: Record<
+	"h1" | "h2" | "h3" | "h4" | "h5" | "h6",
+	ComponentType<PreviewHeadingProps>
+> = {
+	h1: (props) => <h1 {...props} />,
+	h2: (props) => <h2 {...props} />,
+	h3: (props) => <h3 {...props} />,
+	h4: (props) => <h4 {...props} />,
+	h5: (props) => <h5 {...props} />,
+	h6: (props) => <h6 {...props} />,
+};
+
+/**
+ * The MDX components `DocContent` provides on a real page, with the headings
+ * replaced. Passed as the page component's `components` prop, which MDX spreads
+ * over its provider's, so no `MDXProvider` is needed.
+ */
+const PREVIEW_COMPONENTS = {
+	...getCustomMDXComponent(),
+	$$$callout$$$: Callout,
+	...PREVIEW_HEADINGS,
+};
+
+const POPOVER_SELECTOR = `.${POPOVER_CLASS}`;
+/**
+ * What Bases' map component keys on (`MAP_CONFIG_ATTRIBUTE` in markdown's
+ * `bases/runtime/map-markup.ts`; browser code may not import across features).
+ */
+const BASES_MAP_ATTRIBUTE = "data-bases-map";
+
+/**
+ * Resolve and load the page a target names, or undefined when no route matches
+ * (an attachment, an unpublished note). The module comes from `route.preload()`,
+ * the memoized import Rspress's `Link` already started on hover. The data comes
+ * from `initPageData`, never `warmPageData`, which is the App's one navigation
+ * slot. Components rendered inside should take page identity from `usePage()`,
+ * not the router: the location stays the host page's.
+ */
+async function loadPreviewPage(target: PreviewTarget): Promise<PreviewPage | undefined> {
+	const route = pathnameToRouteService(removeBase(target.pathname));
+	if (!route) return undefined;
+	const [module, data] = await Promise.all([route.preload(), initPageData(route.path)]);
+	const Content: ComponentType<{ components?: object }> = module.default;
+	const requested = target.anchor;
+	return {
+		routePath: route.path,
+		content: (
+			<PageContext.Provider value={{ data }}>
+				<Content components={PREVIEW_COMPONENTS} />
+			</PageContext.Provider>
+		),
+		fallbackTitle: data.headingTitle || !data.title ? null : data.title,
+		anchor:
+			requested?.kind === "heading"
+				? {
+						kind: "heading",
+						// Dynamic: the slugger is needed only for heading links, and this
+						// component loads on every page.
+						ids: [
+							requested.text,
+							(await import("../../shared/slug.js")).slugifyHeading(requested.text),
+						],
+					}
+				: requested,
+	};
 }
 
 /**
- * The route an internal link points at, as a preview key: same-origin only,
- * site base removed, then the graph's own route normalization (percent
- * decoding, `.html`, `/index`, trailing slashes).
+ * Keeps a page that throws while rendering inside the popover from reaching the
+ * App root: a portal's render errors propagate up the React tree.
  */
-export function previewKeyForHref(
-	href: string,
-	base: string,
-	location: Location,
-): string | undefined {
-	if (!href || href.startsWith("#")) return undefined;
-	let url: URL;
-	try {
-		url = new URL(href, location.href);
-	} catch {
-		return undefined;
+class PreviewErrorBoundary extends Component<
+	{ onError: () => void; children: ReactNode },
+	{ failed: boolean }
+> {
+	override state = { failed: false };
+	static getDerivedStateFromError() {
+		return { failed: true };
 	}
-	if (url.origin !== location.origin) return undefined;
-	const prefix = base.replace(/\/+$/, "");
-	let pathname = url.pathname;
-	if (prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-		pathname = pathname.slice(prefix.length) || "/";
+	override componentDidCatch() {
+		this.props.onError();
 	}
-	return normalizeClientRoutePath(pathname);
+	override render() {
+		return this.state.failed ? null : this.props.children;
+	}
 }
 
-export default function HoverPreview() {
-	const [popup, setPopup] = useState<PopupState | null>(null);
-	// The clamp depends on the viewport, so track it in state: reading
-	// `window.innerWidth` during render leaves a popup stranded off-screen after
-	// a resize.
-	const [viewport, setViewport] = useState(() => ({
-		width: typeof window === "undefined" ? 0 : window.innerWidth,
-		height: typeof window === "undefined" ? 0 : window.innerHeight,
-	}));
-	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	// The link the pointer is on now; a preview that finishes loading after the
-	// pointer left must not appear.
-	const hoveredLinkRef = useRef<Element | null>(null);
+function geometry(placement: Placement | null): CSSProperties {
+	if (!placement) {
+		return { left: 0, top: 0, width: popoverWidth(window.innerWidth), visibility: "hidden" };
+	}
+	const { side, ...box } = placement;
+	return box;
+}
 
-	const clearHoverTimer = useCallback(() => {
-		if (hoverTimer.current) {
-			clearTimeout(hoverTimer.current);
-			hoverTimer.current = null;
-		}
-	}, []);
+/**
+ * The popover: a portal into `document.body`, outside `.rspress-doc` so the
+ * outline never sees it, inside body so the Mermaid scanner draws its diagrams.
+ * Before first paint, per preview: prefix ids, turn Bases maps back into their
+ * tables (no MapLibre download on hover, no map fighting the wheel), slice to
+ * the anchor, measure and place. A mutation observer repeats all but placement
+ * for content that renders late; the popover never moves under the pointer.
+ */
+function PreviewPopover({ shown, onDismiss }: { shown: ShownPreview; onDismiss: () => void }) {
+	const popoverRef = useRef<HTMLDivElement>(null);
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const [placement, setPlacement] = useState<Placement | null>(null);
+	const navigateTo = useNavigateTo();
+	const { anchorRect } = shown.request;
+	const { anchor, routePath, fallbackTitle, content } = shown.page;
 
-	const handleMouseEnter = useCallback(
-		(e: MouseEvent) => {
-			const target = e.target as Element | null;
-			const link = target?.closest?.("a[href]") ?? null;
-			if (!link) return;
-			const href = link.getAttribute("href") ?? "";
-			if (!href || href.startsWith("#")) return;
-			hoveredLinkRef.current = link;
-
-			const { clientX, clientY } = e;
-			void loadPreviewIndex()
-				.then((index) => {
-					if (hoveredLinkRef.current !== link) return;
-					const key = previewKeyForHref(href, index.base, window.location);
-					const preview = key ? index.byRoutePath.get(key) : undefined;
-					if (!preview) return;
-					clearHoverTimer();
-					hoverTimer.current = setTimeout(() => {
-						setPopup({ preview, x: clientX, y: clientY });
-					}, HOVER_DELAY);
-				})
-				.catch(() => {
-					// No preview data, no popup; the link still works.
-				});
-		},
-		[clearHoverTimer],
-	);
-
-	const handleMouseLeave = useCallback(() => {
-		hoveredLinkRef.current = null;
-		clearHoverTimer();
-		setPopup(null);
-	}, [clearHoverTimer]);
-
-	useEffect(() => {
-		document.addEventListener("mouseover", handleMouseEnter);
-		document.addEventListener("mouseout", handleMouseLeave);
-		return () => {
-			document.removeEventListener("mouseover", handleMouseEnter);
-			document.removeEventListener("mouseout", handleMouseLeave);
-			// Neither a pending hover timer nor a preview still loading may open a
-			// popup after the component unmounts.
-			hoveredLinkRef.current = null;
-			clearHoverTimer();
+	useLayoutEffect(() => {
+		const popover = popoverRef.current;
+		const body = bodyRef.current;
+		if (!popover || !body) return;
+		const prepare = () => {
+			isolateIds(body);
+			for (const map of body.querySelectorAll(`[${BASES_MAP_ATTRIBUTE}]`)) {
+				map.removeAttribute(BASES_MAP_ATTRIBUTE);
+			}
+			sliceToAnchor(body, anchor);
 		};
-	}, [handleMouseEnter, handleMouseLeave, clearHoverTimer]);
+		prepare();
+		popover.scrollTop = 0;
+		setPlacement(
+			placePopover(anchorRect, popover.scrollHeight, {
+				width: window.innerWidth,
+				height: window.innerHeight,
+			}),
+		);
+		const observer = new MutationObserver(prepare);
+		observer.observe(body, { childList: true, subtree: true });
+		return () => observer.disconnect();
+	}, [anchor, anchorRect]);
 
-	useEffect(() => {
-		const updateViewport = () =>
-			setViewport({ width: window.innerWidth, height: window.innerHeight });
-		window.addEventListener("resize", updateViewport);
-		return () => window.removeEventListener("resize", updateViewport);
-	}, []);
+	// A hash link (a footnote, a back-reference) would scroll the host page;
+	// send it to the previewed page instead.
+	const onClick = (event: ReactMouseEvent) => {
+		const link = event.target instanceof Element ? event.target.closest('a[href^="#"]') : null;
+		if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
+		event.preventDefault();
+		navigateTo(`${routePath}${link.getAttribute("href")}`);
+		onDismiss();
+	};
 
-	if (!popup) return null;
-
-	// The build ships one character past the budget when it truncated the note.
-	const previewContent =
-		popup.preview.content.length > PREVIEW_CONTENT_LENGTH
-			? `${popup.preview.content.slice(0, PREVIEW_CONTENT_LENGTH)}…`
-			: popup.preview.content;
-
-	return (
+	return createPortal(
+		// biome-ignore lint/a11y/noStaticElementInteractions: the click handler only reroutes hash links inside, which stay keyboard-operable themselves
 		<div
-			className="obsidian-hover-preview"
+			ref={popoverRef}
+			className={POPOVER_CLASS}
+			data-side={placement?.side}
 			style={{
 				position: "fixed",
-				left: Math.min(popup.x + 16, viewport.width - POPUP_WIDTH - 16),
-				top: Math.min(popup.y + 16, viewport.height - POPUP_HEIGHT - 16),
-				width: POPUP_WIDTH,
-				maxHeight: POPUP_HEIGHT,
+				zIndex: 10000,
 				overflow: "auto",
-				background: "var(--rp-c-bg, #fff)",
-				border: "1px solid var(--rp-c-divider, #e5e7eb)",
-				borderRadius: 8,
-				boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
-				padding: 12,
-				zIndex: 9999,
+				// Wheeling past the end would scroll the host page, and a host scroll dismisses.
+				overscrollBehavior: "contain",
+				background: "var(--rp-c-bg)",
+				...geometry(placement),
 			}}
+			onClick={onClick}
 		>
-			<h4
-				className="obsidian-hover-preview__title"
-				style={{ margin: "0 0 8px", fontSize: 14, fontWeight: 600 }}
-			>
-				{popup.preview.title}
-			</h4>
-			<div
-				className="obsidian-hover-preview__content"
-				style={{
-					fontSize: 12,
-					color: "var(--rp-c-text-2, #4b5563)",
-					lineHeight: 1.5,
-					whiteSpace: "pre-wrap",
-				}}
-			>
-				{previewContent}
+			<div ref={bodyRef} className={`${POPOVER_CLASS}__body rp-doc`}>
+				{fallbackTitle && <h1>{fallbackTitle}</h1>}
+				<PreviewErrorBoundary onError={onDismiss}>
+					{/* A child that suspends must not suspend the host page. */}
+					<Suspense fallback={null}>{content}</Suspense>
+				</PreviewErrorBoundary>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
+}
+
+/**
+ * Obsidian's Page preview. Registered through `globalUIComponents` by
+ * `graphview({ enableHoverPreviews: true })`. Every timer, load and listener is
+ * derived from the lifecycle state, so leaving a phase cancels its work.
+ */
+export default function HoverPreview() {
+	const [state, dispatch] = useReducer(reducePreview, IDLE);
+	const pathname = usePathname();
+	const request = state.phase === "pending" ? state.request : null;
+	const active = state.phase !== "idle";
+
+	useEffect(() => {
+		const linkFrom = (event: PointerEvent) => {
+			const element = event.target instanceof Element ? event.target : null;
+			const link = element?.closest("a[href]");
+			return link instanceof HTMLAnchorElement ? link : null;
+		};
+		// Mouse only: pen and touch never open a preview. `pointerover` and
+		// `pointerout` bubble on every child crossing, so each is matched against
+		// the element on its other side.
+		const onOver = (event: PointerEvent) => {
+			if (event.pointerType !== "mouse" || !(event.target instanceof Element)) return;
+			const from = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+			const popover = event.target.closest(POPOVER_SELECTOR);
+			if (popover) {
+				if (!popover.contains(from)) dispatch({ type: "enterPopover" });
+				return;
+			}
+			const link = linkFrom(event);
+			if (!link || link.contains(from)) return;
+			const target = previewTargetFor(link, window.location);
+			if (!target) return;
+			const anchorRect = anchorRectAt(link, event.clientX, event.clientY);
+			dispatch({ type: "enterLink", request: { link, target, anchorRect } });
+		};
+		const onOut = (event: PointerEvent) => {
+			if (event.pointerType !== "mouse" || !(event.target instanceof Element)) return;
+			const to = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+			const popover = event.target.closest(POPOVER_SELECTOR);
+			if (popover) {
+				if (!popover.contains(to)) dispatch({ type: "leavePopover" });
+				return;
+			}
+			const link = linkFrom(event);
+			if (link && !link.contains(to) && previewTargetFor(link, window.location)) {
+				dispatch({ type: "leaveLink" });
+			}
+		};
+		document.addEventListener("pointerover", onOver);
+		document.addEventListener("pointerout", onOut);
+		return () => {
+			document.removeEventListener("pointerover", onOver);
+			document.removeEventListener("pointerout", onOut);
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!request) return;
+		const { link } = request;
+		const timer = setTimeout(() => dispatch({ type: "delayElapsed", link }), HOVER_DELAY_MS);
+		loadPreviewPage(request.target).then(
+			(page) => dispatch(page ? { type: "pageLoaded", link, page } : { type: "pageMissing", link }),
+			() => dispatch({ type: "pageMissing", link }),
+		);
+		return () => clearTimeout(timer);
+	}, [request]);
+
+	useEffect(() => {
+		if (state.phase !== "closing") return;
+		const timer = setTimeout(() => dispatch({ type: "graceElapsed" }), CLOSE_GRACE_MS);
+		return () => clearTimeout(timer);
+	}, [state.phase]);
+
+	useEffect(() => {
+		if (!active) return;
+		const dismiss: PreviewEvent = { type: "dismiss" };
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") dispatch(dismiss);
+		};
+		// Scrolling and resizing count too: a fixed popover would drift off its link.
+		const onOutside = (event: Event) => {
+			if (!(event.target instanceof Element && event.target.closest(POPOVER_SELECTOR))) {
+				dispatch(dismiss);
+			}
+		};
+		document.addEventListener("keydown", onKeyDown);
+		document.addEventListener("pointerdown", onOutside);
+		document.addEventListener("scroll", onOutside, { capture: true, passive: true });
+		window.addEventListener("resize", onOutside);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown);
+			document.removeEventListener("pointerdown", onOutside);
+			document.removeEventListener("scroll", onOutside, { capture: true });
+			window.removeEventListener("resize", onOutside);
+		};
+	}, [active]);
+
+	// `pathname` is the trigger: navigating away closes the preview.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: re-run per route
+	useEffect(() => dispatch({ type: "dismiss" }), [pathname]);
+
+	const shown = shownPreview(state);
+	return shown ? (
+		<PreviewPopover shown={shown} onDismiss={() => dispatch({ type: "dismiss" })} />
+	) : null;
 }

@@ -100,7 +100,7 @@ describe("graphview", () => {
 		expect(graph.links).toEqual([{ source: "/", target: "/guide" }]);
 	});
 
-	test("a publish: false page never reaches the graph, the previews or the search data", async () => {
+	test("a publish: false page never reaches the graph or the search data", async () => {
 		const { root, routes } = await createDocs({
 			"index.md": "Public page linking [[secret]].\n",
 			"secret.md": "---\ntitle: Secret Plans\npublish: false\n---\nThe launch code is 0000.\n",
@@ -125,28 +125,23 @@ describe("graphview", () => {
 			label: "secret",
 			navigable: false,
 		});
-		const published = [
-			modules["virtual-graph-data"],
-			modules["virtual-page-content-data"],
-			modules["virtual-graph-search-data"],
-		].join("\n");
+		const published = [modules["virtual-graph-data"], modules["virtual-graph-search-data"]].join(
+			"\n",
+		);
 		expect(published).not.toContain("Secret Plans");
 		expect(published).not.toContain("launch code");
 	});
 
-	test("hover-preview data is its own module, published only when previews are on", async () => {
+	test("hover previews publish no data module of their own", async () => {
 		const { root, routes } = await createDocs({ "index.md": "x\n", "guide.md": "# Guide\nBody\n" });
-
-		const plain = await runRspress([graphview()], routes, { root });
-		expect(plain.modules["virtual-page-content-data"]).toBeUndefined();
 
 		const withPreviews = await runRspress([graphview({ enableHoverPreviews: true })], routes, {
 			root,
 		});
-		const previewSource = withPreviews.modules["virtual-page-content-data"] ?? "";
-		expect(previewSource).toContain("export const pageContentData");
-		expect(previewSource).toContain("/guide");
-		expect(previewSource).toContain("Body");
+		expect(Object.keys(withPreviews.modules).sort()).toEqual([
+			"virtual-graph-data",
+			"virtual-graph-search-data",
+		]);
 	});
 
 	test("hands colour groups to the lazy panel as a runtime prop", () => {
