@@ -151,6 +151,28 @@ test.describe("Page preview", () => {
 		await expect(popover).toBeHidden();
 	});
 
+	test("stays open when content above the link grows", async ({ page }) => {
+		const link = page.locator(HEADING_LINK).first();
+		await hoverLink(link);
+		const popover = page.locator(POPOVER);
+		await expect(popover).toBeVisible();
+		const linkTop = await link.evaluate((element) => element.getBoundingClientRect().top);
+		const scrollBefore = await page.evaluate(() => window.scrollY);
+
+		// Scroll anchoring keeps the link where it is and scrolls the page instead,
+		// as when a Mermaid diagram or an image above it finishes rendering.
+		await page.evaluate((article) => {
+			const spacer = document.createElement("div");
+			spacer.style.height = "240px";
+			document.querySelector(`${article} h2`)?.before(spacer);
+		}, ARTICLE);
+		expect(await page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(scrollBefore + 240);
+		expect(await link.evaluate((element) => element.getBoundingClientRect().top)).toBe(linkTop);
+
+		await page.waitForTimeout(SETTLE_MS);
+		await expect(popover).toBeVisible();
+	});
+
 	test("a sidebar link shows nothing", async ({ page }) => {
 		await hoverLink(page.locator(SIDEBAR_LINK));
 		await page.waitForTimeout(SETTLE_MS);
