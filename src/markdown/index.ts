@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
+import { deferInvalidationPlugin } from "../dev-invalidation.js";
 import { mermaidBuilderConfig } from "../mermaid/install.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { getContentLineFlags } from "../shared/content-flags.js";
@@ -567,7 +568,12 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 			// `mermaid` is an optional peer: without it, alias the client import
 			// away so the site still bundles.
 			mermaidBuilderConfig({ diagramsRequested: normalizedOptions.enableMermaid }),
-			{ plugins: [publicDirectoryPlugin("rspress-plugin-obsidian:assets", assetStagingDir)] },
+			{
+				plugins: [
+					deferInvalidationPlugin,
+					publicDirectoryPlugin("rspress-plugin-obsidian:assets", assetStagingDir),
+				],
+			},
 			...features.map((feature) => feature.builderConfig?.(normalizedOptions) ?? {}),
 		),
 

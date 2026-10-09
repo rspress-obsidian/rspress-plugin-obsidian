@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
+import { deferInvalidationPlugin } from "../dev-invalidation.js";
 import { buildContentIndex, getCachedContentIndex } from "../markdown/content-index.js";
 import { parseWikiLink } from "../markdown/parse-wikilink.js";
 import { resolveWikiLink } from "../markdown/resolve-wikilink.js";
@@ -584,6 +585,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 	const mermaidConfig = mermaidBuilderConfig({ diagramsRequested: false });
 	const builderConfig: NonNullable<RspressPlugin["builderConfig"]> = {
 		...mermaidConfig,
+		plugins: [...(mermaidConfig.plugins ?? []), deferInvalidationPlugin],
 		source: { ...mermaidConfig.source, define },
 		server: {
 			...mermaidConfig.server,

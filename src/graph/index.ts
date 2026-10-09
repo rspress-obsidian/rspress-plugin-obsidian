@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
+import { deferInvalidationPlugin } from "../dev-invalidation.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { getPublishedContent } from "../shared/published-content.js";
 import { buildGraphModules, type CollectedRoute, type GraphBuildState } from "./build/index.js";
@@ -120,7 +121,11 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 				...config,
 				builderConfig: {
 					...config.builderConfig,
-					plugins: [...(config.builderConfig?.plugins ?? []), devRefresher.rsbuildPlugin],
+					plugins: [
+						...(config.builderConfig?.plugins ?? []),
+						deferInvalidationPlugin,
+						devRefresher.rsbuildPlugin,
+					],
 				},
 			};
 		},
