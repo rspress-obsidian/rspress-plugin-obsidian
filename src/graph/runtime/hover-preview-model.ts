@@ -89,7 +89,7 @@ export type PreviewEvent =
 	| { type: "pageLoaded"; link: HTMLAnchorElement; page: PreviewPage }
 	| { type: "pageMissing"; link: HTMLAnchorElement }
 	| { type: "graceElapsed" }
-	/** Escape, route change, host scroll, resize, pointerdown outside, render error. */
+	/** Escape, route change, a host scroll that moves the link, resize, pointerdown outside, render error. */
 	| { type: "dismiss" };
 
 export const IDLE: PreviewState = { phase: "idle" };
@@ -257,6 +257,22 @@ export function anchorRectAt(link: Element, clientX: number, clientY: number): R
 		rects[0] ??
 		link.getBoundingClientRect();
 	return { left: hit.left, top: hit.top, right: hit.right, bottom: hit.bottom };
+}
+
+/** Sub-pixel layout nudges a line box by a pixel without moving it for the reader. */
+const ANCHOR_TOLERANCE = 2;
+
+/**
+ * Whether the line box a request is anchored to is still where it was hovered,
+ * given the link's current client rects. A wrapped link's lines move together,
+ * so the anchor is in place when any one of them still sits at its corner.
+ */
+export function anchorInPlace(rects: readonly Rect[], anchor: Rect): boolean {
+	return rects.some(
+		(rect) =>
+			Math.abs(rect.top - anchor.top) <= ANCHOR_TOLERANCE &&
+			Math.abs(rect.left - anchor.left) <= ANCHOR_TOLERANCE,
+	);
 }
 
 export type Placement =

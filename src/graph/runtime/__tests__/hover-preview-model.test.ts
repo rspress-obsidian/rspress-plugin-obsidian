@@ -8,6 +8,7 @@ import type {
 	ShownPreview,
 } from "../hover-preview-model";
 import {
+	anchorInPlace,
 	anchorRectAt,
 	IDLE,
 	isolateIds,
@@ -327,6 +328,32 @@ describe("anchorRectAt", () => {
 			right: 0,
 			bottom: 0,
 		});
+	});
+});
+
+describe("anchorInPlace", () => {
+	const anchor = { left: 0, top: 120, right: 60, bottom: 140 };
+
+	test("an unchanged line box is in place", () => {
+		expect(anchorInPlace([anchor], anchor)).toBe(true);
+	});
+
+	test("a line box moved 300 px down is not", () => {
+		expect(anchorInPlace([{ left: 0, top: 420, right: 60, bottom: 440 }], anchor)).toBe(false);
+	});
+
+	test("a line box nudged by 1 px is still in place", () => {
+		expect(anchorInPlace([{ left: 1, top: 121, right: 61, bottom: 141 }], anchor)).toBe(true);
+	});
+
+	test("a wrapped link matches on the line that was hovered", () => {
+		const firstLine = { left: 300, top: 100, right: 400, bottom: 120 };
+		expect(anchorInPlace([firstLine, { left: 0, top: 120, right: 60, bottom: 140 }], anchor)).toBe(
+			true,
+		);
+		expect(anchorInPlace([firstLine, { left: 0, top: 420, right: 60, bottom: 440 }], anchor)).toBe(
+			false,
+		);
 	});
 });
 

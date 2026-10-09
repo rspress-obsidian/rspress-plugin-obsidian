@@ -25,6 +25,7 @@ import type {
 	ShownPreview,
 } from "./hover-preview-model.js";
 import {
+	anchorInPlace,
 	anchorRectAt,
 	CLOSE_GRACE_MS,
 	HOVER_DELAY_MS,
@@ -233,7 +234,7 @@ export default function HoverPreview() {
 	const [state, dispatch] = useReducer(reducePreview, IDLE);
 	const pathname = usePathname();
 	const request = state.phase === "pending" ? state.request : null;
-	const active = state.phase !== "idle";
+	const anchored = request ?? shownPreview(state)?.request ?? null;
 
 	useEffect(() => {
 		const linkFrom = (event: PointerEvent) => {
@@ -298,28 +299,34 @@ export default function HoverPreview() {
 	}, [state.phase]);
 
 	useEffect(() => {
-		if (!active) return;
+		if (!anchored) return;
 		const dismiss: PreviewEvent = { type: "dismiss" };
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key === "Escape") dispatch(dismiss);
 		};
-		// Scrolling and resizing count too: a fixed popover would drift off its link.
 		const onOutside = (event: Event) => {
 			if (!(event.target instanceof Element && event.target.closest(POPOVER_SELECTOR))) {
 				dispatch(dismiss);
 			}
 		};
+		// A fixed popover would drift off its link. Content loading above the link
+		// scrolls the page without moving the link (scroll anchoring), so a scroll
+		// counts only when the hovered line box moved.
+		const onScroll = (event: Event) => {
+			const rects = Array.from(anchored.link.getClientRects());
+			if (!anchorInPlace(rects, anchored.anchorRect)) onOutside(event);
+		};
 		document.addEventListener("keydown", onKeyDown);
 		document.addEventListener("pointerdown", onOutside);
-		document.addEventListener("scroll", onOutside, { capture: true, passive: true });
+		document.addEventListener("scroll", onScroll, { capture: true, passive: true });
 		window.addEventListener("resize", onOutside);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
 			document.removeEventListener("pointerdown", onOutside);
-			document.removeEventListener("scroll", onOutside, { capture: true });
+			document.removeEventListener("scroll", onScroll, { capture: true });
 			window.removeEventListener("resize", onOutside);
 		};
-	}, [active]);
+	}, [anchored]);
 
 	// `pathname` is the trigger: navigating away closes the preview.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-run per route

@@ -336,13 +336,12 @@ describe("HoverPreview", () => {
 		expect(popoverText("h1")).toEqual(["Deep Note"]);
 	});
 
-	test("Escape, an outside press, a host scroll and a resize each close it", async () => {
+	test("Escape, an outside press and a resize each close it", async () => {
 		render(<HoverPreview />);
 		const link = articleLink("/guide/advanced");
 		const closers = [
 			() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })),
 			() => document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })),
-			() => document.dispatchEvent(new Event("scroll")),
 			() => window.dispatchEvent(new Event("resize")),
 		];
 		const openThenClosed: [boolean, boolean][] = [];
@@ -357,8 +356,24 @@ describe("HoverPreview", () => {
 			[true, true],
 			[true, true],
 			[true, true],
-			[true, true],
 		]);
+	});
+
+	test("a host scroll closes it only once the link has moved", async () => {
+		render(<HoverPreview />);
+		const link = articleLink("/guide/advanced");
+		let top = 0;
+		Object.defineProperty(link, "getClientRects", {
+			value: () => [{ left: 0, top, right: 60, bottom: top + 20 }],
+		});
+		await hover(link);
+		const shown = [popover() !== null];
+		await act(async () => document.dispatchEvent(new Event("scroll")));
+		shown.push(popover() !== null);
+		top = 300;
+		await act(async () => document.dispatchEvent(new Event("scroll")));
+		shown.push(popover() !== null);
+		expect(shown).toEqual([true, true, false]);
 	});
 
 	test("scrolling or pressing inside the popover keeps it open", async () => {
