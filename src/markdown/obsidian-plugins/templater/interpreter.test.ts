@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { expandCommands, scanCommands } from "./engine.js";
-import { HostFunction, HostObject, type ProgramRuntime } from "./interpreter.js";
+import type { ProgramRuntime } from "./interpreter.js";
 import { momentFunction } from "./moment.js";
+import { HostFunction, HostObject } from "./values.js";
 
 const NOW = new Date(2024, 4, 1, 9, 30, 15);
 

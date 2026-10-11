@@ -13,8 +13,8 @@ import { compileSafeRegex } from "../../safe-regex.js";
 import { parseObsidianMarkdown } from "../../syntax.js";
 import type { ContentPage } from "../../types.js";
 import type { ObsidianPluginFeature, PluginRenderContext } from "../types.js";
+import { messageOf } from "./builtins.js";
 import { scanCommands, type TemplaterCommand } from "./engine.js";
-import { messageOf } from "./interpreter.js";
 import { resolveTemplaterSettings, type TemplaterSettings } from "./settings.js";
 import { expandWithTp, RUN_MODE, type RunMode, type TemplaterHost, VaultFile } from "./tp.js";
 

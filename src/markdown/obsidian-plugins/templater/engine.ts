@@ -15,8 +15,8 @@ import {
 	runTemplate,
 	type TemplateChunk,
 	type TemplateProgram,
-	TemplaterError,
 } from "./interpreter.js";
+import { TemplaterError } from "./values.js";
 
 type Whitespace = "single" | "all" | undefined;
 

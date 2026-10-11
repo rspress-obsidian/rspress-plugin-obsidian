@@ -12,17 +12,9 @@ import path from "node:path";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
 import { formatDailyNoteDate } from "../../daily-notes.js";
 import { expandCommands } from "./engine.js";
-import {
-	HostFunction,
-	HostObject,
-	HostValue,
-	invoke,
-	type ProgramRuntime,
-	type RunBudget,
-	TemplaterError,
-	toTemplateString,
-} from "./interpreter.js";
+import { invoke, type ProgramRuntime, type RunBudget } from "./interpreter.js";
 import { addDuration, momentFunction, parseDateText, parseMomentDuration } from "./moment.js";
+import { HostFunction, HostObject, HostValue, TemplaterError, toTemplateString } from "./values.js";
 
 /** Templater's `RunMode`, which `tp.config.run_mode` reports. */
 export const RUN_MODE = {

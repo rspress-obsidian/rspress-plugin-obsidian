@@ -22,7 +22,7 @@ import {
 	normalizeMomentUnit,
 	startOf,
 } from "../../date-math.js";
-import { HostFunction, HostValue, TemplaterError, toTemplateString } from "./interpreter.js";
+import { HostFunction, HostValue, TemplaterError, toTemplateString } from "./values.js";
 
 /** A moment duration, in the buckets moment adds it by. */
 export interface MomentDuration {
