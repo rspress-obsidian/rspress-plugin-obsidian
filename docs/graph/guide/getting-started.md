@@ -12,10 +12,11 @@ Think of it as [Obsidian's graph view](https://obsidian.md) for your docs. The p
 ## Prerequisites
 
 - [Rspress](https://rspress.dev/) `^2.0.21` or later
-- `react-force-graph-2d` — **required** to render the panel. It is an optional
-  peer dependency, so your package manager will not install it for you, and the
-  build fails without it: the panel imports it by name and the bundler resolves
-  that specifier before any runtime fallback can run.
+- `react-force-graph-2d` — **required** to draw the graph. It is an optional
+  peer dependency, so your package manager will not install it for you. Without
+  it the site still builds: the plugin aliases the import to an empty module and
+  warns at build time, and the panel lists the pages with an install hint
+  instead of drawing the graph.
 - React `^18 || ^19` — an optional peer, required only to render the panel
 
 ## Installation

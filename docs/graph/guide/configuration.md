@@ -176,7 +176,7 @@ default).
 | `@rspress/core` | `^2.0.21` | Yes |
 | `react` | `^18 \|\| ^19` | Optional peer (required to render the panel) |
 | `react-dom` | `^18 \|\| ^19` | Optional peer (required to render the panel) |
-| `react-force-graph-2d` | `^1.29.1` | Optional peer (lazy-loaded by the runtime) |
+| `react-force-graph-2d` | `^1.29.1` | Optional peer (lazy-loaded by the runtime; without it the panel lists the pages) |
 
 These are the versions the package declares; `react`, `react-dom`, and
 `react-force-graph-2d` are marked optional peers so a site that only uses the

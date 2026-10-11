@@ -144,6 +144,11 @@ describe("graphview", () => {
 		]);
 	});
 
+	test("adds no bundler config while react-force-graph-2d is installed", () => {
+		// This repository has the renderer as a dev dependency, so it resolves.
+		expect(graphview().builderConfig).toEqual({});
+	});
+
 	test("hands colour groups to the lazy panel as a runtime prop", () => {
 		const groups = [{ query: "path:api", color: "#ff0000" }];
 		const plugin = graphview({ groups });

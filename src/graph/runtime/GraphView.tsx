@@ -166,14 +166,32 @@ export class GraphErrorBoundary extends Component<
 	}
 }
 
+/** Shown when the site was built without the optional `react-force-graph-2d` peer. */
+export const GRAPH_RENDERER_MISSING_MESSAGE = "Install react-force-graph-2d to draw the graph";
+
+/**
+ * Whether `value` can be rendered as a React component: a function, or one of
+ * React's wrapped types (`forwardRef`, `memo`), which carry a `$$typeof` tag.
+ * The empty module a missing peer is aliased to (see `../install.ts`) is
+ * neither.
+ */
+function isRenderable(value: unknown): value is ElementType {
+	return (
+		typeof value === "function" ||
+		(typeof value === "object" && value !== null && "$$typeof" in value)
+	);
+}
+
 export function GraphFallback({
 	width,
 	height,
 	color,
+	message = "Graph renderer failed to load",
 }: {
 	width: number;
 	height: number;
 	color: string;
+	message?: string;
 }) {
 	return (
 		<div
@@ -205,9 +223,7 @@ export function GraphFallback({
 				<line x1="12" y1="8" x2="12" y2="12" />
 				<line x1="12" y1="16" x2="12.01" y2="16" />
 			</svg>
-			{/* A missing package fails the site build, not this chunk; what reaches
-			    the reader is a renderer that failed to load or crashed. */}
-			<span>Graph renderer failed to load</span>
+			<span>{message}</span>
 		</div>
 	);
 }
@@ -322,7 +338,9 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 	const baseColors = dark ? DARK_COLORS : LIGHT_COLORS;
 	const colors = useMemo(() => mergeColors(baseColors, customColors), [baseColors, customColors]);
 	const [ForceGraph, setForceGraph] = useState<ElementType | null>(null);
-	const [forceGraphError, setForceGraphError] = useState(false);
+	// `missing`: the site was built without the optional peer, so the import
+	// resolved to an empty module. `failed`: the renderer's chunk did not load.
+	const [forceGraphError, setForceGraphError] = useState<"missing" | "failed" | null>(null);
 	// Hover state lives in refs the painters read; the counter changes the
 	// painters' identities so force-graph repaints after the simulation has
 	// cooled (it pauses redraws once the engine stops).
@@ -441,10 +459,12 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		let active = true;
 		import("react-force-graph-2d")
 			.then((mod) => {
-				if (active) setForceGraph(() => mod.default);
+				if (!active) return;
+				if (isRenderable(mod.default)) setForceGraph(() => mod.default);
+				else setForceGraphError("missing");
 			})
 			.catch(() => {
-				if (active) setForceGraphError(true);
+				if (active) setForceGraphError("failed");
 			});
 		return () => {
 			active = false;
@@ -777,7 +797,12 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 	if (forceGraphError) {
 		return (
 			<>
-				<GraphFallback width={width} height={height} color={colors.label} />
+				<GraphFallback
+					width={width}
+					height={height}
+					color={colors.label}
+					message={forceGraphError === "missing" ? GRAPH_RENDERER_MISSING_MESSAGE : undefined}
+				/>
 				{nodeList}
 			</>
 		);

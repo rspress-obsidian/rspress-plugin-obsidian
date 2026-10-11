@@ -5,6 +5,7 @@ import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { getPublishedContent } from "../shared/published-content.js";
 import { buildGraphModules, type CollectedRoute, type GraphBuildState } from "./build/index.js";
 import { createGraphDevRefresher } from "./dev-refresh.js";
+import { forceGraphBuilderConfig } from "./install.js";
 import type { GraphViewColors } from "./runtime/GraphView.js";
 import type { GraphViewGroup } from "./types.js";
 import { normalizeRoutePath } from "./utils.js";
@@ -110,6 +111,10 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 
 	return {
 		name: "rspress-plugin-obsidian:graph",
+
+		// `react-force-graph-2d` is an optional peer: without it, alias the client
+		// import away so the site still bundles.
+		builderConfig: forceGraphBuilderConfig(),
 
 		...(options.enableDefaultStyles && {
 			globalStyles: path.join(runtimeDir, "graph-panels.css"),

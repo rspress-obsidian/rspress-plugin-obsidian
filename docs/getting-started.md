@@ -17,8 +17,9 @@ This configuration publishes the local Obsidian vault, renders Canvas files from
 bun add rspress-plugin-obsidian react-force-graph-2d
 ```
 
-`react-force-graph-2d` is an optional peer of the package but a required one for
-the graph panel, so install it yourself if you use `graphview()`.
+`react-force-graph-2d` is an optional peer of the package, so install it yourself
+if you use `graphview()`. Without it the site still builds, with a warning, and
+the graph panel lists the pages instead of drawing the graph.
 
 ```ts
 import path from "node:path";

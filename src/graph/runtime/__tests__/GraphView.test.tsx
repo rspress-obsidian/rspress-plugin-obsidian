@@ -36,7 +36,7 @@ let lastProps: Record<string, unknown> = {};
 // `react-force-graph-2d` renders to a canvas, so it has no DOM of its own and
 // the palette it is handed would otherwise be invisible to a test. Echo it back
 // as an attribute so a paint's resolved theme can be read from the DOM.
-mock.module("react-force-graph-2d", () => ({
+const forceGraphMock = () => ({
 	default: (props: {
 		nodeColor?: (node: { isCurrent?: boolean }) => string;
 		graphData?: unknown;
@@ -45,7 +45,8 @@ mock.module("react-force-graph-2d", () => ({
 		lastProps = props;
 		return <div data-testid="force-graph" data-node-color={props.nodeColor?.({}) ?? ""} />;
 	},
-}));
+});
+mock.module("react-force-graph-2d", forceGraphMock);
 
 // Re-import the component under test AFTER mocks are registered.
 const { default: GraphView, GraphErrorBoundary, GraphFallback } = await import("../GraphView");
@@ -86,6 +87,32 @@ describe("GraphView error boundary", () => {
 
 		expect(textIn(container, "working child")).toBe(true);
 		expect(textIn(container, "Graph renderer failed to load")).toBe(false);
+	});
+});
+
+describe("GraphView without the optional renderer", () => {
+	beforeEach(() => {
+		cleanup();
+	});
+
+	test("says to install react-force-graph-2d, and still lists the pages", async () => {
+		// A site built without the peer has the import aliased to an empty module
+		// (`../../install.ts`), which resolves to a namespace with no component.
+		mock.module("react-force-graph-2d", () => ({ default: {} }));
+		try {
+			const { container } = render(<GraphView width={400} height={300} />);
+			await act(async () => {
+				await Promise.resolve();
+			});
+
+			expect(textIn(container, "Install react-force-graph-2d to draw the graph")).toBe(true);
+			expect(textIn(container, "Graph renderer failed to load")).toBe(false);
+			expect(container.querySelector("nav[aria-label='Pages in this graph']")).not.toBeNull();
+			expect(container.querySelector("[data-testid='force-graph']")).toBeNull();
+		} finally {
+			cleanup();
+			mock.module("react-force-graph-2d", forceGraphMock);
+		}
 	});
 });
 
