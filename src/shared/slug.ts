@@ -1,12 +1,25 @@
 import GithubSlugger from "github-slugger";
 
+/**
+ * Plain text of one line of markdown, for heading previews and node-free slug
+ * matching. Approximates what the page renders: comments vanish, a wikilink
+ * shows its alias or target, an embed nothing, and only real emphasis loses
+ * its markers — CommonMark never treats an intraword `_` as emphasis, so
+ * `my_function` keeps its underscore (and `id="my_function"` on the page).
+ */
 export function stripMarkdownFormatting(input: string): string {
 	return input
+		.replace(/%%[\s\S]*?(?:%%|$)/g, "")
+		.replace(/!\[\[[^\]]*\]\]/g, "")
+		.replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_match, target: string, alias?: string) =>
+			alias?.trim() ? alias : target.split("#").filter(Boolean).join(" > "),
+		)
 		.replace(/`([^`]+)`/g, "$1")
 		.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
 		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
 		.replace(/<[^>]+>/g, "")
-		.replace(/[*_~]/g, "")
+		.replace(/[*~]+/g, "")
+		.replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
 		.trim();
 }
 

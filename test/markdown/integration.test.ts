@@ -5,9 +5,10 @@ import path from "node:path";
 // End-to-end check of the real Rspress build output. Opt-in: build the docs
 // first (`bun run docs:build`), then run
 // `RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts` — the
-// step the `e2e` CI job runs before Playwright. The gate is explicit because
-// the build must also be from the current tree: a stale `doc_build/` can pass
-// while today's sources emit different markup, so rebuild before enabling it.
+// step every leg of the `test` CI job runs right after its docs build. The gate
+// is explicit because the build must also be from the current tree: a stale
+// `doc_build/` can pass while today's sources emit different markup, so rebuild
+// before enabling it.
 const DOC_BUILD = path.resolve(import.meta.dir, "..", "..", "doc_build");
 
 const hasBuildOutput =

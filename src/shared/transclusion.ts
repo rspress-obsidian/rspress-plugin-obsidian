@@ -28,86 +28,98 @@ export function extractNoteSection(content: string, subpath?: string): string | 
 	return extractHeadingSection(content, anchor) ?? content;
 }
 
-export function extractHeadingSection(content: string, heading: string): string | undefined {
-	// Split on `\r?\n`: vault content read from a Windows checkout carries CRLF,
-	// and a trailing `\r` makes the ATX-heading pattern below (which ends in
-	// `[ \t]*$`) match nothing, so every transclusion of a section silently fell
-	// back to a plain link.
-	const lines = content.split(/\r?\n/);
-	const isContent = getContentLineFlags(lines);
-	const normalizedTarget =
-		heading
-			.split("#")
-			.map((part) => part.trim())
-			.filter(Boolean)
-			.at(-1) ?? heading.trim();
-	const normalizedLower = normalizedTarget.toLowerCase();
-	let startLine = -1;
-	let startLevel = 0;
+/** One heading line of a note. */
+interface SectionHeading {
+	line: number;
+	level: number;
+	text: string;
+	explicitId?: string;
+}
 
-	// True when `line` refers to the requested heading. Accepts a raw heading
-	// name, an explicit `{#id}`, or an already-slugified heading anchor.
-	const matchesTarget = (line: string): boolean => {
-		const trimmed = line.trim();
-		const explicitIdMatch = trimmed.match(/\s*\{#([A-Za-z0-9_:.-]+)\}\s*$/);
-		const headingText = explicitIdMatch
-			? trimmed.slice(0, trimmed.length - explicitIdMatch[0].length).trim()
-			: trimmed;
-		const slug = slugifyHeading(headingText);
-		return (
-			normalizedTarget === headingText ||
-			normalizedLower === headingText.toLowerCase() ||
-			normalizedTarget === slug ||
-			normalizedLower === slug ||
-			(explicitIdMatch !== null && explicitIdMatch[1] === normalizedTarget)
-		);
+/** Every ATX and setext heading outside frontmatter and fences, in order. */
+function scanHeadings(lines: string[], isContent: boolean[]): SectionHeading[] {
+	const headings: SectionHeading[] = [];
+	const push = (line: number, level: number, raw: string): void => {
+		const explicit = /\s*\{#([^{}]+)\}\s*$/.exec(raw);
+		headings.push({
+			line,
+			level,
+			text: (explicit ? raw.slice(0, explicit.index) : raw).trim(),
+			explicitId: explicit?.[1]?.trim(),
+		});
 	};
-
 	for (let i = 0; i < lines.length; i++) {
-		// Headings inside frontmatter or code fences are not headings: a `#`
-		// comment in a fenced block must neither start nor end a section.
 		if (!isContent[i]) continue;
-
 		const line = lines[i] ?? "";
-
-		// ATX heading: ## Heading text (up to 3 leading spaces, per Markdown)
-		const atxMatch = line.match(/^\s{0,3}(#{1,6})[ \t]+(.+?)(?:\s+#+)?[ \t]*$/);
-		if (atxMatch) {
-			const level = (atxMatch[1] ?? "").length;
-			const title = (atxMatch[2] ?? "").trim();
-			if (startLine === -1) {
-				if (matchesTarget(title)) {
-					startLine = i;
-					startLevel = level;
-				}
-			} else if (level <= startLevel) {
-				return lines.slice(startLine, i).join("\n").trim();
-			}
+		const atx = line.match(/^\s{0,3}(#{1,6})[ \t]+(.+?)(?:\s+#+)?[ \t]*$/);
+		if (atx) {
+			push(i, (atx[1] ?? "").length, atx[2] ?? "");
 			continue;
 		}
-
-		// Setext heading: text on line i, underline (=== or ---) on line i+1
-		const nextLine = lines[i + 1] ?? "";
-		const setextUnderline = isContent[i + 1] ? nextLine.match(/^\s*(=+|-+)\s*$/) : null;
-		if (setextUnderline && line.trim().length > 0) {
-			const level = (setextUnderline[1] ?? "").startsWith("=") ? 1 : 2;
-			const title = line.trim();
-			if (startLine === -1) {
-				if (matchesTarget(title)) {
-					startLine = i;
-					startLevel = level;
-				}
-			} else if (level <= startLevel) {
-				return lines.slice(startLine, i).join("\n").trim();
-			}
-			i += 1; // skip underline
+		const underline = isContent[i + 1] ? (lines[i + 1] ?? "").match(/^\s{0,3}(=+|-+)\s*$/) : null;
+		if (underline && line.trim().length > 0) {
+			push(i, (underline[1] ?? "").startsWith("=") ? 1 : 2, line);
+			i += 1;
 		}
 	}
+	return headings;
+}
 
-	if (startLine !== -1) {
-		return lines.slice(startLine).join("\n").trim();
+/**
+ * Obsidian's heading-name fold: link text cannot hold `#`, `|`, `^`, `:`, `%`,
+ * `[`, `]` or `\`, so a heading containing them is linked with a space in their
+ * place (`## Step 1: Setup` → `[[Note#Step 1 Setup]]`). Compared without case.
+ */
+function headingKey(text: string): string {
+	return text
+		.normalize("NFC")
+		.replace(/[#|^:%[\]\\]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.toLowerCase();
+}
+
+/**
+ * The section a heading path names: from the heading to the next heading of
+ * the same or a higher level.
+ *
+ * Matching is exact — by explicit `{#id}`, heading name, or slug — never by
+ * prefix or substring, so a renamed heading is not silently replaced by a
+ * neighbour. `A#B` is a path: `B` must sit under an `A` (intermediate levels
+ * may be skipped, as in Obsidian), so a `Details` under `B` is not confused
+ * with one under `A`.
+ */
+export function extractHeadingSection(content: string, heading: string): string | undefined {
+	const lines = content.split(/\r?\n/);
+	const headings = scanHeadings(lines, getContentLineFlags(lines));
+	const parts = heading
+		.split("#")
+		.map((part) => part.trim())
+		.filter(Boolean);
+	if (parts.length === 0) return undefined;
+
+	const matches = (entry: SectionHeading, part: string): boolean =>
+		entry.explicitId === part ||
+		headingKey(entry.text) === headingKey(part) ||
+		slugifyHeading(entry.text) === part.toLowerCase();
+
+	for (const [position, entry] of headings.entries()) {
+		if (!matches(entry, parts[parts.length - 1] ?? "")) continue;
+		let level = entry.level;
+		let wanted = parts.length - 2;
+		for (let previous = position - 1; previous >= 0 && wanted >= 0; previous -= 1) {
+			const ancestor = headings[previous];
+			if (!ancestor || ancestor.level >= level) continue;
+			level = ancestor.level;
+			if (matches(ancestor, parts[wanted] ?? "")) wanted -= 1;
+		}
+		if (wanted >= 0) continue;
+		const end = headings.slice(position + 1).find((next) => next.level <= entry.level);
+		return lines
+			.slice(entry.line, end ? end.line : lines.length)
+			.join("\n")
+			.trim();
 	}
-
 	return undefined;
 }
 
@@ -155,13 +167,18 @@ export function extractBlockSection(content: string, blockId: string): string | 
 }
 
 /**
- * Extract the markdown block beginning at `index`, whose first line is `text`
- * (already stripped of the inline block ID). List items are extended to include
- * their nested sub-items and continuation lines; every other block type is
- * returned as a single line, matching the indexed block-ID semantics.
+ * Extract the markdown block whose last-or-first line is `index`, with `text`
+ * standing for that line (already stripped of the inline block ID).
+ *
+ * A list item is extended forward to include its nested sub-items and
+ * continuation lines. Any other block — a paragraph, a quote, a table — ends on
+ * the marked line, so it is extended backwards to where the block starts: the
+ * previous blank line, heading, fence or frontmatter. Obsidian embeds the whole
+ * paragraph for `![[Note#^id]]`, not just its last line. A heading carrying the
+ * id is a block of its own.
  *
  * Lines that are not content — frontmatter and code fences, per
- * {@link getContentLineFlags} — never end the block, so a fenced block nested
+ * {@link getContentLineFlags} — never end a list item, so a fenced block nested
  * in a list item (whose lines are commonly dedented) stays with its item.
  */
 function extractInlineBlock(
@@ -172,7 +189,17 @@ function extractInlineBlock(
 ): string {
 	const listItem = text.match(/^(\s*)([-*+]|\d+[.)])\s+/);
 	if (!listItem) {
-		return text.trim();
+		if (/^\s{0,3}#{1,6}(?:\s|$)/.test(text)) return text.trim();
+		let start = index;
+		while (start > 0) {
+			const previous = lines[start - 1] ?? "";
+			if (!isContent[start - 1] || previous.trim() === "") break;
+			if (/^\s{0,3}#{1,6}(?:\s|$)/.test(previous)) break;
+			// A setext underline or thematic break closes the block above it.
+			if (/^\s{0,3}(?:=+|-+|\*{3,}|_{3,})\s*$/.test(previous)) break;
+			start -= 1;
+		}
+		return [...lines.slice(start, index), text].join("\n").trim();
 	}
 
 	const indent = (listItem[1] ?? "").length;

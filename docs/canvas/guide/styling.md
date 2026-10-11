@@ -29,33 +29,54 @@ import 'rspress-plugin-obsidian/canvas/styles.css';
 
 | Class | Purpose |
 |-------|---------|
+| `.canvas-node-frame` | Positioned, focusable frame around a card (`role="group"`, stacking order) |
 | `.canvas-node` | Base node styling (border-radius, shadow) |
-| `.canvas-node-hovered` | Active hover state (elevated shadow) |
-| `.canvas-node-text` | Text node border color |
-| `.canvas-node-file` | File node border color |
-| `.canvas-node-link` | Link node left accent border |
-| `.canvas-node-group` | Group node dashed border and transparency |
+| `.canvas-node-hovered` / `.canvas-node-selected` | Hover and selection states |
+| `.canvas-node-text`, `.canvas-node-file`, `.canvas-node-link`, `.canvas-node-group` | Per-type hooks |
+| `.canvas-file-note`, `.canvas-file-image`, `.canvas-file-pdf`, … | File cards by kind (`canvas-file-<kind>` on `.canvas-node`) |
+| `.canvas-node-colored` | A card or group with a colour; the colour is in `--canvas-node-accent` |
+| `.canvas-node-label` | The name above a file or link card |
 
 ### Edges
 
 | Class | Purpose |
 |-------|---------|
 | `.canvas-edges` | SVG container for all edge paths |
-| `.canvas-edge` | Default edge transition |
+| `.canvas-edge` | One edge (`.canvas-edge-path` is its stroke) |
 | `.canvas-edge-highlighted` | Glow effect on connected edges |
+| `.canvas-edge-label` | The label box on the curve's midpoint |
 
 ### Content
 
 | Class | Purpose |
 |-------|---------|
 | `.canvas-markdown` | Markdown content wrapper inside text nodes |
-| `.canvas-group-label` | Group node label text |
+| `.canvas-group-label` | Group label above the group's top-left corner |
 | `.canvas-file-fallback` | File node card (clickable link or bare filename) |
 | `.canvas-file-media` | Audio/video element inside a file node |
 | `.canvas-file-pdf` | PDF iframe inside a file node |
-| `.canvas-link` | Link node URL display |
+| `.canvas-link` | Link node URL display (with `linkPreview: false`) |
+| `.canvas-link-frame` | The website preview frame of a link node |
 | `.wiki-link` | Obsidian wiki-link color |
+| `.canvas-unresolved-link` | A link whose target is not published |
 | `.canvas-error` | Parse error message display |
+
+## Colours
+
+The six JSON Canvas presets use Obsidian's palette and switch with dark mode:
+
+| Variable | Light | Dark |
+|----------|-------|------|
+| `--canvas-color-1` (red) | `#e93147` | `#fb464c` |
+| `--canvas-color-2` (orange) | `#ec7500` | `#e9973f` |
+| `--canvas-color-3` (yellow) | `#e0ac00` | `#e0de71` |
+| `--canvas-color-4` (green) | `#08b94e` | `#44cf6e` |
+| `--canvas-color-5` (cyan) | `#00bfbc` | `#53dfdd` |
+| `--canvas-color-6` (purple) | `#7852ee` | `#a882ff` |
+
+A coloured card is tinted with `--canvas-card-tint` of its colour over the card
+background, and a coloured group with `--canvas-group-tint`, for presets and
+custom colours alike.
 
 ## Override Example
 

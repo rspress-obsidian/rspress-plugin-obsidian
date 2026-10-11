@@ -36,12 +36,13 @@ export default defineConfig({
 | `vaultRoot` | `string` | unset | Absolute path to an Obsidian vault published alongside `docs/`, with wikilinks resolving against the vault |
 | `vaultRoutePrefix` | `string` | `"/vault"` | Route prefix vault pages publish under |
 | `onBrokenLink` | `DiagnosticMode` | `"error"` | How to handle missing link targets |
-| `onAmbiguousLink` | `DiagnosticMode` | `"error"` | How to handle ambiguous links |
+| `onAmbiguousLink` | `DiagnosticMode` | `"warn"` | How to report a name several files share (the link resolves like Obsidian either way) |
 | `enableFuzzyMatching` | `boolean` | `false` | Enable shortest-suffix path fallback |
 | `enableCaseInsensitiveLookup` | `boolean` | `true` | Case-insensitive path resolution (matches Obsidian; set `false` for strict matching) |
 | `enableMarkdownLinks` | `boolean` | `true` | Resolve `[label](Page.md)` markdown links and `![alt](note.md)` embeds against the vault |
 | `onDataviewError` | `DiagnosticMode` | `"error"` | How to report invalid or unsupported Dataview blocks |
-| `onUnsupportedBlock` | `DiagnosticMode` | `"warn"` | How to report fences from an Obsidian plugin runtime this plugin cannot execute (`tasks`, `excalidraw`, `base`, `kanban`, and Dataview while `enableDataview` is off) — the block stays in the page as code |
+| `onUnsupportedBlock` | `DiagnosticMode` | `"warn"` | How to report a fence that belongs to a plugin this site has not enabled (`tasks`, `base`, `excalidraw`, and Dataview while `enableDataview` is off) — the block stays in the page as code, and the message names the option that turns it on |
+| `onPluginError` | `DiagnosticMode` | `"error"` | How to report a Tasks, Kanban, Excalidraw, Bases or Templater block that will not render (a query that does not parse, a malformed base, a failing template command). The problem is shown in place either way |
 | `enableDataview` | `boolean` | `false` | Evaluate static Dataview DQL blocks and inline expressions at build time |
 | `enableDailyNotes` | `boolean` | `false` | Enable static Daily Notes date expansion and navigation |
 | `dailyNotes` | `DailyNotesOptions` | `{ folder: "", dateFormat: "YYYY-MM-DD", navigation: true, template: "", calendar: "" }` | Configure the Daily Notes folder, filename format, navigation, template note and calendar page |
@@ -54,15 +55,26 @@ export default defineConfig({
 | `enableTagPages` | `boolean` | `false` | Generate `/tags/{name}` index pages |
 | `enableMath` | `boolean` | `false` | Render `$inline$` / `$$display$$` math with KaTeX (loads KaTeX's stylesheet) |
 | `mathEngine` | `"katex" \| "mathjax"` | `"katex"` | Which engine renders that math. `"mathjax"` is Obsidian's own engine and needs the optional `mathjax-full` package; it emits its own generated stylesheet inline |
-| `enableMermaid` | `boolean` | `false` | Render ` ```mermaid ` fences as diagrams in the browser |
+| `enableMermaid` | `boolean` | `false` | Render ` ```mermaid ` fences as diagrams in the browser. Needs the optional `mermaid` package; without it diagrams stay as source with an install hint |
 | `mermaidSecurityLevel` | `"strict" \| "loose" \| "antiscript" \| "sandbox"` | `"strict"` | Mermaid `securityLevel` for note diagrams. `strict` sanitizes the SVG and strips unsafe link URLs; looser levels allow what a strict build refuses |
 | `enableDefaultStyles` | `boolean` | `false` | Inject bundled CSS stylesheet |
+| `strictLineBreaks` | `boolean` | unset | Obsidian's "Strict line breaks". Unset: vault pages render a single newline as `<br>` (Obsidian's default) and docs-root pages keep CommonMark; `false`: every page renders `<br>`; `true`: no page does |
+| `enableTasks` | `boolean` | `false` | Run ` ```tasks ` queries over every published task. See [Tasks](./tasks.md) |
+| `tasks` | `TasksOptions` | `{}` | `now`, `globalFilter`, `removeGlobalFilter`, `globalQuery`, `statuses`, `presets`, `useFilenameAsScheduledDate`, `filenameAsScheduledDateFormat`, `filenameAsDateFolders`, `readVaultSettings`; each overrides the vault's Tasks setting |
+| `enableKanban` | `boolean` | `false` | Publish Kanban plugin boards as read-only boards. See [Kanban](./kanban.md) |
+| `kanban` | `KanbanOptions` | `{}` | `now`, `showArchive`, `readVaultSettings` and Kanban's own settings in camelCase (`dateFormat`, `moveTags`, `metadataKeys`, `tagColors`, `laneWidth`, …) |
+| `enableExcalidraw` | `boolean` | `false` | Draw Excalidraw drawings, embeds and plain `.excalidraw` files as static SVG. See [Excalidraw](./excalidraw.md) |
+| `excalidraw` | `ExcalidrawOptions` | `{}` | `theme`, `preferExportedImage`, `padding`, `background`, `embedWidth`, `fonts`, `cjkFonts`, `readVaultSettings` |
+| `enableBases` | `boolean` | `false` | Render `.base` files as pages, `![[x.base]]` embeds and ` ```base ` blocks. See [Bases](./bases.md) |
+| `bases` | `BasesOptions` | `{ routePrefix: "/bases" }` | `routePrefix`, `now`, `dateFormat`, `dateTimeFormat`, `mapTiles` (`BasesMapTiles`: background of map views), `readVaultSettings` |
+| `enableTemplater` | `boolean` | `false` | Run Templater templates on empty daily, folder and regex-matched notes and render `<%+ %>` commands; keep the templates folder private. See [Templater](./templater.md) |
+| `templater` | `TemplaterOptions` | `{}` | `templatesFolder`, `triggerOnFileCreation`, `folderTemplates`, `fileTemplates`, `ignoreFolders`, `userScriptsFolder`, `renderCommands`, `now`, `readVaultSettings` |
 
 ## Remark Plugin
 
 ### `remarkWikilink(options: RemarkWikiLinkPluginOptions)`
 
-The remark pass itself, for composing your own unified pipeline instead of using `markdown()`. Calling it returns the unified plugin. It expects the plugin's runtime context: `getDocsRoot(filePath?)`, an optional `getContentIndex(filePath)`, and `options` as an already-normalized `NormalizedPluginOptions` object ([shape documented below](#normalizedpluginoptions)). Sites that just want the feature should use `markdown()`.
+The remark pass itself, for composing your own unified pipeline instead of using `markdown()`. Register it with `.use(remarkWikilink, options)`, after `remark-gfm` (Rspress runs GFM first; footnotes and tables depend on it): the plugin adds its Obsidian syntax extensions (`[[…]]`, `![[…]]`, `==…==` and, with `enableMath`, `$…$`) to the processor's parser when it is attached, the way `remark-gfm` does. It expects the plugin's runtime context: `getDocsRoot(filePath?)`, an optional `getContentIndex(filePath)`, an optional `getSiteBase()` (the site `base`, for media URLs), and `options` as an already-normalized `NormalizedPluginOptions` object ([shape documented below](#normalizedpluginoptions)). Sites that just want the feature should use `markdown()`.
 
 ## Content Index
 
@@ -132,19 +144,22 @@ const config = normalizeDailyNoteConfig({
 
 ### `parseDailyNoteDate(relativePath: string, config: DailyNoteConfig): Date | undefined`
 
-Parses a date-formatted daily-note path. Returns `undefined` when the path is
-outside the configured folder, does not match the configured format, or
-contains an invalid calendar date.
+Parses a date-formatted daily-note path to a local date. Returns `undefined`
+when the path is outside the configured folder, does not match the Moment
+format, or names a date that does not format back to the same name (such as
+`2026-02-30`).
 
 ### `formatDailyNoteDate(date: Date, format: string): string`
 
-Formats a UTC date using the supported tokens `YYYY`, `YY`, `MMMM`, `MMM`,
-`MM`, `M`, `DD`, `D`, `dddd`, and `ddd`.
+Formats a local date with Moment.js tokens (`YYYY`, `MM`, `Do`, `dddd`, `ww`,
+`W`, `gggg`, `HH`, `mm`, `A`, `[literal]`, …).
 
-### `expandDailyTemplateText(value: string, date: Date): string`
+### `expandDailyTemplateText(value: string, date: Date, format?: string, now?: Date): string`
 
-Expands `{{date}}` placeholders and optional format/offset expressions such as
-`{{date:MMMM D, YYYY}}` and `{{date-1d}}`.
+Expands `{{date}}`, `{{time}}` and `{{date|time±N unit:FORMAT}}` the way
+Obsidian's daily-notes core expands a template: dates render in `format`
+(default `YYYY-MM-DD`) at `now`'s time of day, `{{time}}` is `now` as `HH:mm`,
+and offsets use Moment units (`M` months, `m` minutes).
 
 > The template and calendar pages a `dailyNotes` config produces are built by the
 > plugin, not by you — `dailyNotes.template` and `dailyNotes.calendar` are covered
@@ -157,13 +172,14 @@ string when navigation is disabled or the current page is not a dated note.
 
 ## Dataview
 
-These helpers evaluate the static Dataview subset supported by the plugin.
+These helpers evaluate Dataview queries with the Dataview plugin's semantics.
 DataviewJS blocks run through a restricted interpreter, not a JavaScript
-engine: it supports `const`/`let`/`var` declarations, `dv.pages`/`dv.page`/
-`dv.current`/`dv.date`/`dv.array`, and the `dv.table`/`dv.list`/`dv.taskList`/
-`dv.paragraph`/`dv.header` render calls. Source that mentions a host or runtime
-API (`process`, `require`, `fetch`, `eval`, `Function`, `globalThis`, …) is
-rejected and reported through `onDataviewError`.
+engine: it supports declarations, `if`/`for … of`, arrow functions, template
+literals and the `dv` API (`pages`, `current`, `page`, `table`, `list`,
+`taskList`, `paragraph`, `header`, `span`, `el`, `execute`, `func`, …). An
+identifier naming a host or runtime API (`process`, `require`, `fetch`, `eval`,
+`Function`, `globalThis`, …) is rejected and reported through
+`onDataviewError`; the same words inside strings are just text.
 
 ### `extractDataviewMetadata(markdown: string, frontmatter: Record<string, unknown>, filePath: string): { fields: Record<string, unknown>; tasks: DataviewTask[]; lists: DataviewListItem[] }`
 
@@ -177,16 +193,19 @@ Extracts normalized fields, tasks, and list items from a Markdown document:
 }
 ```
 
-### `renderDataviewQuery(query: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig): { html?: string; error?: string }`
+### `renderDataviewQuery(query: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig, settings?: DataviewSettings): { html?: string; error?: string }`
 
-Evaluates a static `TABLE`, `LIST`, `TASK`, or `CALENDAR` query and returns
-rendered HTML on success. Unsupported or invalid queries return an `error`
-instead.
+Evaluates a `TABLE`, `LIST`, `TASK`, or `CALENDAR` query written on
+`currentPage` (which is `this`) and returns rendered HTML on success. Invalid
+queries — including text left over after a clause — return an `error`
+instead. `settings.now` fixes the clock `date(today)` reads; `settings.resolve`
+passes the link-resolution options.
 
-### `renderDataviewInline(expression: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig): { html?: string; error?: string }`
+### `renderDataviewInline(expression: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig, settings?: DataviewSettings): { html?: string; error?: string }`
 
-Evaluates one static Dataview inline expression and returns a rendered
-`<span>` on success, or an `error` for an unsupported expression.
+Evaluates the expression of one inline query (the `expr` of `` `= expr` ``)
+with only `this` in scope, as Dataview does, and returns a rendered `<span>`,
+or an `error`.
 
 
 ## Wikilink Parsing
@@ -247,7 +266,7 @@ const resolved = resolveWikiLink(parsed, { currentPage, index });
 
 if (resolved.status === "ok") {
   console.log(resolved.href);  // "/guide/getting-started"
-  console.log(resolved.label); // "getting started"
+  console.log(resolved.label); // "getting-started" — the target as typed
 }
 ```
 
@@ -346,6 +365,7 @@ interface RspressPluginMarkdownOptions {
   enableMarkdownLinks?: boolean;
   onDataviewError?: DiagnosticMode;
   onUnsupportedBlock?: DiagnosticMode;
+  onPluginError?: DiagnosticMode;
   enableDataview?: boolean;
   enableDailyNotes?: boolean;
   dailyNotes?: DailyNotesOptions;
@@ -361,11 +381,25 @@ interface RspressPluginMarkdownOptions {
   enableMermaid?: boolean;
   mermaidSecurityLevel?: MermaidSecurityLevel;
   enableDefaultStyles?: boolean;
+  strictLineBreaks?: boolean;
+  enableTasks?: boolean;
+  tasks?: TasksOptions;
+  enableKanban?: boolean;
+  kanban?: KanbanOptions;
+  enableExcalidraw?: boolean;
+  excalidraw?: ExcalidrawOptions;
+  enableBases?: boolean;
+  bases?: BasesOptions;
+  enableTemplater?: boolean;
+  templater?: TemplaterOptions;
 }
 ```
 
 `MermaidSecurityLevel` is `"strict" | "loose" | "antiscript" | "sandbox"`, and
-`MathEngine` is `"katex" | "mathjax"`.
+`MathEngine` is `"katex" | "mathjax"`. The five plugin option objects are
+documented key by key in their guides: [Tasks](./tasks.md),
+[Kanban](./kanban.md), [Excalidraw](./excalidraw.md), [Bases](./bases.md) and
+[Templater](./templater.md).
 
 ### `NormalizedPluginOptions`
 
@@ -382,6 +416,7 @@ interface NormalizedPluginOptions {
   enableMarkdownLinks: boolean;
   onDataviewError: DiagnosticMode;
   onUnsupportedBlock: DiagnosticMode;
+  onPluginError: DiagnosticMode;
   enableDataview: boolean;
   enableDailyNotes: boolean;
   dailyNotes: Required<DailyNotesOptions>;
@@ -397,6 +432,17 @@ interface NormalizedPluginOptions {
   enableMermaid: boolean;
   mermaidSecurityLevel: MermaidSecurityLevel;
   enableDefaultStyles: boolean;
+  strictLineBreaks?: boolean;
+  enableTasks: boolean;
+  tasks: TasksOptions;
+  enableKanban: boolean;
+  kanban: KanbanOptions;
+  enableExcalidraw: boolean;
+  excalidraw: ExcalidrawOptions;
+  enableBases: boolean;
+  bases: BasesOptions;
+  enableTemplater: boolean;
+  templater: TemplaterOptions;
 }
 ```
 

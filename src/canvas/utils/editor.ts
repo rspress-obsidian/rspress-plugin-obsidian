@@ -1,4 +1,5 @@
 import type { CanvasEdgeData, CanvasNode } from "../types.js";
+import { facingSides } from "./geometry.js";
 
 function createNodeId(nodes: CanvasNode[]): string {
 	let index = nodes.length + 1;
@@ -70,18 +71,24 @@ export function createGroupNode(nodes: CanvasNode[], x: number, y: number): Canv
 	};
 }
 
+/**
+ * A new edge between two nodes, attached on the sides they face — what
+ * Obsidian records when you draw one — so the arrow lands on the target's
+ * border instead of under it.
+ */
 export function createEdge(
 	edges: CanvasEdgeData[],
-	fromNode: string,
-	toNode: string,
+	fromNode: CanvasNode,
+	toNode: CanvasNode,
 ): CanvasEdgeData {
+	const { fromSide, toSide } = facingSides(fromNode, toNode);
 	return {
 		id: createEdgeId(edges),
-		fromNode,
-		fromSide: undefined,
+		fromNode: fromNode.id,
+		fromSide,
 		fromEnd: "none",
-		toNode,
-		toSide: undefined,
+		toNode: toNode.id,
+		toSide,
 		toEnd: "arrow",
 	};
 }

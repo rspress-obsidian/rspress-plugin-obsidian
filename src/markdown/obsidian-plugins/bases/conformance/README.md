@@ -1,0 +1,3 @@
+# Bases conformance fixtures
+
+`fixtures/oracle.json` (281 cases, recorded 2026-06-10, Obsidian build not recorded in that fixture) and `fixtures/diagnostics.json` (13 cases, recorded 2026-06-11 from Obsidian build `3918dcecdc0934db`, version not exposed) come from [callumalpass/obsidian-bases-expression](https://github.com/callumalpass/obsidian-bases-expression) at commit `1af9c81d8648407e56f7889cd78e7c02b4c258eb` (`test/fixtures/oracle.compact.json`, `test/fixtures/diagnostics.generated.json`), MIT-licensed: see `LICENSE-obsidian-bases-expression`. `fixtures/vault.json` is the vault that project's `scripts/generate-oracle-fixtures.mjs` creates.

@@ -3,8 +3,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { navigation } from "../../shared/usePathname.js";
 import WikiPicker from "./WikiPicker";
 
 const CANDIDATES = JSON.stringify([
@@ -93,5 +95,54 @@ describe("WikiPicker", () => {
 		const links = Array.from(container.querySelectorAll(".rp-wiki-picker-list a"));
 		expect(links).toHaveLength(1);
 		expect(links[0]?.getAttribute("href")).toBe("/a");
+	});
+});
+
+describe("WikiPicker navigation", () => {
+	test("hrefs carry the site base so a match opens in a new tab", () => {
+		const { container } = render(
+			<WikiPicker candidates={CANDIDATES} query="Setup" base="/repo/" />,
+		);
+		fireEvent.click(container.querySelector("button.rp-wiki-picker-trigger") as HTMLElement);
+		const links = Array.from(container.querySelectorAll(".rp-wiki-picker-list a"));
+		expect(links[0]?.getAttribute("href")).toBe("/repo/one/setup#setup-guide");
+	});
+
+	test("a plain click navigates by route inside the router instead of reloading", () => {
+		let current = "";
+		function Where() {
+			current = useLocation().pathname;
+			return null;
+		}
+		const { container } = render(
+			<MemoryRouter initialEntries={["/start"]}>
+				<WikiPicker candidates={CANDIDATES} query="Setup" base="/repo/" />
+				<Routes>
+					<Route path="*" element={<Where />} />
+				</Routes>
+			</MemoryRouter>,
+		);
+		fireEvent.click(container.querySelector("button.rp-wiki-picker-trigger") as HTMLElement);
+		const link = container.querySelector(".rp-wiki-picker-list a") as HTMLElement;
+		const notCancelled = fireEvent.click(link, { button: 0 });
+		expect(notCancelled).toBe(false);
+		expect(current).toBe("/one/setup");
+	});
+
+	test("outside a router a plain click loads the route; a modified click is left alone", () => {
+		const assign = mock((_href: string) => {});
+		const original = navigation.assign;
+		navigation.assign = assign;
+		try {
+			const { container } = render(<WikiPicker candidates={CANDIDATES} query="Setup" />);
+			fireEvent.click(container.querySelector("button.rp-wiki-picker-trigger") as HTMLElement);
+			const link = container.querySelector(".rp-wiki-picker-list a") as HTMLElement;
+			expect(fireEvent.click(link, { button: 0, metaKey: true })).toBe(true);
+			expect(assign).not.toHaveBeenCalled();
+			fireEvent.click(link, { button: 0 });
+			expect(assign).toHaveBeenCalledWith("/one/setup#setup-guide");
+		} finally {
+			navigation.assign = original;
+		}
 	});
 });

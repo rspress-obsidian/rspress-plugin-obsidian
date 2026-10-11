@@ -14,14 +14,7 @@
  * Returns `null` when the engine cannot render the input, so each caller can
  * decide how to show the failure without leaking a half-built element.
  */
-import katex from "katex";
-// Side-effect import: Obsidian renders math with MathJax, which ships the mhchem
-// extension, so `\ce{H2O}` works in notes. KaTeX's equivalent is a contrib
-// module that monkey-patches the shared katex instance via `__defineMacro`; the
-// package's export map exposes it as `katex/contrib/mhchem`. Importing it here
-// (the single entry point for every math call site) keeps the rest of the
-// package unaware of it.
-import "katex/contrib/mhchem";
+import { renderKatexHtml } from "./math-katex.js";
 
 /** Which engine renders `$…$` and `$$…$$`. */
 export type MathEngine = "katex" | "mathjax";
@@ -36,7 +29,6 @@ interface MathJaxRuntime {
 }
 
 let mathJaxRuntime: MathJaxRuntime | null = null;
-let mathJaxStylesheet: string | null = null;
 
 /**
  * Load the selected engine before any formula is rendered.
@@ -51,15 +43,23 @@ export async function prepareMathEngine(engine: MathEngine = "katex"): Promise<v
 	try {
 		// Dynamic by design: a static import would pull the whole engine into every
 		// build that loads this module, including the ones using KaTeX.
-		const [mathjaxModule, texModule, adaptorModule, handlerModule, chtmlModule, packagesModule] =
-			await Promise.all([
-				import("mathjax-full/js/mathjax.js"),
-				import("mathjax-full/js/input/tex.js"),
-				import("mathjax-full/js/adaptors/liteAdaptor.js"),
-				import("mathjax-full/js/handlers/html.js"),
-				import("mathjax-full/js/output/chtml.js"),
-				import("mathjax-full/js/input/tex/AllPackages.js"),
-			]);
+		const [
+			mathjaxModule,
+			texModule,
+			adaptorModule,
+			handlerModule,
+			chtmlModule,
+			packagesModule,
+			safeModule,
+		] = await Promise.all([
+			import("mathjax-full/js/mathjax.js"),
+			import("mathjax-full/js/input/tex.js"),
+			import("mathjax-full/js/adaptors/liteAdaptor.js"),
+			import("mathjax-full/js/handlers/html.js"),
+			import("mathjax-full/js/output/chtml.js"),
+			import("mathjax-full/js/input/tex/AllPackages.js"),
+			import("mathjax-full/js/ui/safe/SafeHandler.js"),
+		]);
 		const { mathjax } = mathjaxModule as { mathjax: unknown };
 		const { TeX } = texModule as { TeX: new (options: unknown) => unknown };
 		const { liteAdaptor } = adaptorModule as {
@@ -67,20 +67,24 @@ export async function prepareMathEngine(engine: MathEngine = "katex"): Promise<v
 				Parameters<typeof handlerModule.RegisterHTMLHandler>[0];
 		};
 		const { RegisterHTMLHandler } = handlerModule as {
-			RegisterHTMLHandler: (adaptor: unknown) => void;
+			RegisterHTMLHandler: (adaptor: unknown) => unknown;
 		};
 		const { CHTML } = chtmlModule as { CHTML: new (options?: unknown) => MathJaxRuntime["output"] };
 		const { AllPackages } = packagesModule as { AllPackages: unknown[] };
+		const { SafeHandler } = safeModule as { SafeHandler: (handler: unknown) => unknown };
 
 		const adaptor = liteAdaptor();
-		RegisterHTMLHandler(adaptor);
+		// The `safe` extension is MathJax's counterpart of KaTeX's `trust: false`:
+		// `\href{javascript:…}` loses its link and `\style{background:url(…)}`
+		// its unsafe properties, so the opt-in engine is no looser than the
+		// default one.
+		SafeHandler(RegisterHTMLHandler(adaptor));
 		const input = new TeX({ packages: AllPackages });
 		const output = new CHTML();
 		const document = (
 			mathjax as { document: (document: string, options: unknown) => MathJaxRuntime["document"] }
 		).document("", { InputJax: input, OutputJax: output });
 		mathJaxRuntime = { document, adaptor, output };
-		mathJaxStylesheet = null;
 	} catch (error) {
 		throw new Error(
 			`mathEngine: "mathjax" needs the optional "mathjax-full" package. Install it with \`bun add mathjax-full\` (or your package manager's equivalent) and keep mathEngine set. Original error: ${
@@ -94,22 +98,23 @@ export async function prepareMathEngine(engine: MathEngine = "katex"): Promise<v
  * The CSS the selected engine needs in the page.
  *
  * KaTeX ships its stylesheet, which the plugin loads as a file. MathJax's
- * CommonHTML output is styled by a stylesheet it generates at runtime, so the
- * build emits it inline instead. Empty until {@link prepareMathEngine} has run.
+ * CommonHTML output is styled by a stylesheet it generates — adaptively, one
+ * rule per glyph and wrapper rendered so far — so it is read again after every
+ * page's formulas: a sheet captured once, on the first page, left every glyph
+ * first used later (`\alpha` after a page with only `a`) blank. Empty until
+ * {@link prepareMathEngine} has run.
  */
 export function mathEngineStylesheet(engine: MathEngine = "katex"): string {
 	if (engine !== "mathjax" || !mathJaxRuntime) return "";
-	if (mathJaxStylesheet !== null) return mathJaxStylesheet;
 	try {
-		mathJaxStylesheet = mathJaxRuntime.adaptor.textContent(
+		return mathJaxRuntime.adaptor.textContent(
 			mathJaxRuntime.output.styleSheet(mathJaxRuntime.document),
 		);
 	} catch {
 		// A stylesheet we cannot generate is not a reason to fail the build; the
-		// diagrams still render, just unstyled.
-		mathJaxStylesheet = "";
+		// formulas still render, just unstyled.
+		return "";
 	}
-	return mathJaxStylesheet;
 }
 
 function renderWithMathJax(tex: string, displayMode: boolean): string | null {
@@ -135,10 +140,7 @@ export function renderMathHtml(
 	displayMode: boolean,
 	engine: MathEngine = "katex",
 ): string | null {
-	if (engine === "mathjax") return renderWithMathJax(tex, displayMode);
-	try {
-		return katex.renderToString(tex, { displayMode, throwOnError: false });
-	} catch {
-		return null;
-	}
+	return engine === "mathjax"
+		? renderWithMathJax(tex, displayMode)
+		: renderKatexHtml(tex, displayMode);
 }

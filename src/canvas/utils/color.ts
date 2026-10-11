@@ -48,37 +48,3 @@ export function resolveColor(color: string | undefined, fallback: string): strin
 	if (!value) return fallback;
 	return CANVAS_PRESET_COLORS[value] || (isSafeCssColor(value) ? value : fallback);
 }
-
-const GROUP_PRESET_BGS: Record<string, string> = {
-	"1": "rgba(239, 68, 68, 0.03)",
-	"2": "rgba(249, 115, 22, 0.03)",
-	"3": "rgba(234, 179, 8, 0.03)",
-	"4": "rgba(34, 197, 94, 0.03)",
-	"5": "rgba(6, 182, 212, 0.03)",
-	"6": "rgba(168, 85, 247, 0.03)",
-};
-
-const NODE_PRESET_BGS: Record<string, string> = {
-	"1": "var(--canvas-bg-color-1-tint)",
-	"2": "var(--canvas-bg-color-2-tint)",
-	"3": "var(--canvas-bg-color-3-tint)",
-	"4": "var(--canvas-bg-color-4-tint)",
-	"5": "var(--canvas-bg-color-5-tint)",
-	"6": "var(--canvas-bg-color-6-tint)",
-};
-
-/**
- * Resolve a node background color from a `canvasColor` value.
- * Preset colors use the theme's translucent tints; explicit supported CSS
- * colors are retained, while malformed values use the node/group default.
- */
-export function resolveBgColor(
-	color: string | undefined,
-	type: "group" | "other",
-): string | undefined {
-	const fallback = type === "group" ? "var(--canvas-group-bg)" : "var(--canvas-node-bg)";
-	const value = color?.trim();
-	if (!value) return fallback;
-	const preset = type === "group" ? GROUP_PRESET_BGS[value] : NODE_PRESET_BGS[value];
-	return preset || resolveColor(value, fallback);
-}

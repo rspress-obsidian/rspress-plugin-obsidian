@@ -1,0 +1,395 @@
+/* Kanban: styles for the markup `src/markdown/obsidian-plugins/kanban/` emits.
+ * Class names are the plugin's own, so CSS snippets written for Obsidian's
+ * Kanban view keep applying; colours come from the site theme, so light and
+ * dark mode follow it. */
+
+.kanban-plugin {
+	--lane-width: 272px;
+	position: relative;
+	max-width: 100%;
+	margin: 1rem 0;
+}
+
+/* The board scrolls sideways on its own, never the page; it takes focus so
+ * the arrow keys scroll it without a pointer. */
+.kanban-plugin__board {
+	display: flex;
+	max-width: 100%;
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+	border-radius: 8px;
+	scrollbar-width: thin;
+}
+
+.kanban-plugin__board:focus-visible,
+.kanban-plugin__table-wrapper:focus-visible {
+	outline: 2px solid var(--rp-c-brand);
+	outline-offset: 2px;
+}
+
+.kanban-plugin__board > div {
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-start;
+	width: max-content;
+	padding: 0.25rem 0 0.75rem;
+}
+
+.kanban-plugin__board.kanban-plugin__vertical > div {
+	flex-direction: column;
+	width: 100%;
+}
+
+.kanban-plugin__lane-wrapper {
+	display: flex;
+	flex-shrink: 0;
+	width: var(--lane-width);
+	max-width: 100%;
+	margin-inline-end: 10px;
+}
+
+.kanban-plugin__vertical > div > .kanban-plugin__lane-wrapper {
+	margin-inline-end: 0;
+	margin-block-end: 10px;
+}
+
+.kanban-plugin__lane {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	min-width: 0;
+	background-color: var(--rp-c-bg-soft);
+	border: 1px solid var(--rp-c-divider-light);
+	border-radius: 6px;
+}
+
+.kanban-plugin__archive .kanban-plugin__lane {
+	border-style: dashed;
+}
+
+.kanban-plugin__lane-header-wrapper {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 8px 12px 8px 10px;
+	border-bottom: 1px solid var(--rp-c-divider-light);
+}
+
+.kanban-plugin__lane-title {
+	display: flex;
+	flex-direction: column;
+	flex-grow: 1;
+	min-width: 0;
+	font-size: 0.875rem;
+	font-weight: 600;
+	line-height: 1.4;
+	color: var(--rp-c-text-1);
+	overflow-wrap: anywhere;
+}
+
+.kanban-plugin__lane-title-count {
+	flex-shrink: 0;
+	padding: 4px;
+	border-radius: 3px;
+	font-size: 13px;
+	line-height: 1;
+	color: var(--rp-c-text-2);
+}
+
+.kanban-plugin__lane-title-count.wip-exceeded {
+	font-weight: bold;
+	color: var(--rp-c-text-1);
+	background-color: color-mix(in srgb, var(--rp-c-danger, #e5484d) 25%, transparent);
+}
+
+.kanban-plugin__lane-items {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 0;
+	padding: 8px;
+}
+
+.kanban-plugin__lane-items:empty {
+	min-height: 2.5rem;
+}
+
+.kanban-plugin__lane-collapsed > summary {
+	padding: 6px 10px;
+	font-size: 12px;
+	color: var(--rp-c-text-2);
+	cursor: pointer;
+}
+
+.kanban-plugin__item {
+	overflow: hidden;
+	font-size: 0.875rem;
+	background-color: var(--rp-c-bg);
+	border: 1px solid var(--rp-c-divider-light);
+	border-radius: 6px;
+}
+
+.kanban-plugin__item-title-wrapper {
+	display: flex;
+	gap: 6px;
+	padding: 6px 8px;
+}
+
+.kanban-plugin__item-title-wrapper:not(:only-child) {
+	border-bottom: 1px solid var(--rp-c-divider-light);
+}
+
+.kanban-plugin__item-prefix-button-wrapper {
+	flex-shrink: 0;
+	padding-top: 3px;
+}
+
+.kanban-plugin__item-prefix-button-wrapper input[type="checkbox"] {
+	margin: 0;
+}
+
+.kanban-plugin__item-title {
+	width: 100%;
+	min-width: 0;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.kanban-plugin__item-markdown > :first-child {
+	margin-top: 0;
+}
+
+.kanban-plugin__item-markdown > :last-child {
+	margin-bottom: 0;
+}
+
+.kanban-plugin__item-markdown p,
+.kanban-plugin__item-markdown ul,
+.kanban-plugin__item-markdown ol,
+.kanban-plugin__item-markdown blockquote,
+.kanban-plugin__item-markdown pre {
+	margin: 0.3em 0;
+	font-size: inherit;
+	line-height: inherit;
+}
+
+.kanban-plugin__item-markdown ul,
+.kanban-plugin__item-markdown ol {
+	padding-inline-start: 1.25em;
+}
+
+.kanban-plugin__item-markdown li {
+	margin: 0;
+}
+
+.kanban-plugin__item-markdown img {
+	max-width: 100%;
+	border-radius: 4px;
+}
+
+.kanban-plugin__item.is-complete .kanban-plugin__item-markdown {
+	color: var(--rp-c-text-2);
+	text-decoration: line-through;
+}
+
+.kanban-plugin__item-metadata {
+	padding-top: 5px;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--rp-c-text-2);
+}
+
+.kanban-plugin__item-metadata > span {
+	display: block;
+}
+
+.kanban-plugin__item-metadata > span.kanban-plugin__item-metadata-date-wrapper {
+	display: inline-block;
+}
+
+.kanban-plugin__item-metadata a {
+	text-decoration: none;
+}
+
+.kanban-plugin__item-metadata-date-relative::first-letter {
+	text-transform: uppercase;
+}
+
+.kanban-plugin__date {
+	display: inline-block;
+	color: var(--date-color, inherit);
+	background-color: var(
+		--date-background-color,
+		color-mix(in srgb, var(--rp-c-text-1) 6%, transparent)
+	);
+	border-radius: 4px;
+}
+
+.kanban-plugin__date > span,
+.kanban-plugin__date > a {
+	padding-inline: 3px;
+}
+
+.kanban-plugin__date .is-unresolved {
+	opacity: 0.75;
+}
+
+.kanban-plugin__item-task-metadata {
+	margin-top: 2px;
+}
+
+.kanban-plugin__item-task-inline-metadata-item {
+	display: inline-flex;
+	gap: 4px;
+	margin: 3px 6px 0 0;
+	padding-inline: 2px;
+	background-color: var(--rp-c-bg-soft);
+	border-radius: 4px;
+}
+
+.kanban-plugin__item-tags {
+	padding-top: 2px;
+}
+
+/* Scoped under the root: Rspress colours every link through `.rp-link`. The
+ * default is the brand's darker step: the brand itself is under 4.5:1 on the
+ * tinted pill. */
+.kanban-plugin .kanban-plugin__item-tag {
+	display: inline-block;
+	margin: 3px 4px 0 0;
+	padding: 0 6px;
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--tag-color, var(--rp-c-brand-darker, #005fcc));
+	text-decoration: none;
+	background-color: var(--tag-background, color-mix(in srgb, var(--rp-c-brand) 12%, transparent));
+	border-radius: 999px;
+}
+
+.kanban-plugin a.kanban-plugin__item-tag:hover {
+	text-decoration: underline;
+}
+
+.kanban-plugin__item-metadata-wrapper {
+	padding: 6px 8px;
+	background-color: var(--rp-c-bg-soft);
+}
+
+/* The site's link blue is under 4.5:1 on this soft band. */
+.kanban-plugin .kanban-plugin__item-metadata-wrapper a:not(.kanban-plugin__item-tag) {
+	color: var(--obsidian-c-link, var(--rp-c-brand));
+}
+
+/* Rspress styles every table of a page (and wraps it in a scroll container);
+ * the card's metadata table is a layout. */
+.kanban-plugin .rp-table-scroll-container {
+	margin: 0;
+}
+
+.kanban-plugin .kanban-plugin__meta-table {
+	display: table;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	font-size: 0.75rem;
+	line-height: 1.4;
+	border: 0;
+	border-radius: 0;
+	border-collapse: collapse;
+	box-shadow: none;
+}
+
+.kanban-plugin .kanban-plugin__meta-table tbody,
+.kanban-plugin .kanban-plugin__meta-table tr,
+.kanban-plugin .kanban-plugin__meta-table td {
+	background: transparent;
+	border: 0;
+}
+
+.kanban-plugin .kanban-plugin__meta-table td {
+	width: 90%;
+	/* The theme gives every cell 8rem, which split key and value in half. */
+	min-width: 0;
+	padding: 3px 0 0;
+	font-size: inherit;
+	line-height: inherit;
+	vertical-align: top;
+}
+
+.kanban-plugin .kanban-plugin__meta-table td.kanban-plugin__meta-key {
+	width: 10%;
+	padding-inline-end: 8px;
+	white-space: nowrap;
+	color: var(--rp-c-text-2);
+}
+
+.kanban-plugin__meta-value:not(.mod-array) {
+	display: flex;
+	white-space: pre-wrap;
+}
+
+.kanban-plugin__error {
+	margin-bottom: 0.75rem;
+	padding: 0.5rem 0.75rem;
+	color: var(--rp-c-text-1);
+	background-color: color-mix(in srgb, var(--rp-c-danger, #e5484d) 10%, transparent);
+	border-inline-start: 3px solid var(--rp-c-danger, var(--obsidian-c-danger, #c62828));
+	border-radius: 4px;
+}
+
+/* The table view. */
+.kanban-plugin__table-wrapper {
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+.kanban-plugin .kanban-plugin__table-wrapper table {
+	display: table;
+	min-width: 100%;
+	margin: 0;
+	font-size: 0.875rem;
+}
+
+.kanban-plugin .kanban-plugin__table-wrapper th,
+.kanban-plugin .kanban-plugin__table-wrapper td {
+	text-align: start;
+	vertical-align: top;
+}
+
+.kanban-plugin .kanban-plugin__table-wrapper td:first-child {
+	min-width: 16rem;
+}
+
+.kanban-plugin__table-header {
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.kanban-plugin .kanban-plugin__table-wrapper .kanban-plugin__item-title-wrapper {
+	padding: 0;
+	border: 0;
+}
+
+.dark .kanban-plugin__item {
+	border-color: var(--rp-c-divider);
+}
+
+.dark .kanban-plugin__lane {
+	border-color: var(--rp-c-divider);
+}
+
+/* Dark mode: the default tag takes the brand's lighter step. Tag and date
+ * colours from the board's settings were picked in Obsidian against a light
+ * page; on a dark one a deep red or violet drops to about 2:1. Lifting the
+ * colour toward white keeps its hue and clears 4.5:1. */
+.dark .kanban-plugin .kanban-plugin__item-tag {
+	color: var(--rp-c-brand-light, #33adff);
+}
+
+.dark .kanban-plugin .kanban-plugin__item-tag[style*="--tag-color"] {
+	color: color-mix(in srgb, var(--tag-color) 45%, #fff);
+}
+
+.dark .kanban-plugin__date[style*="--date-color"] {
+	color: color-mix(in srgb, var(--date-color) 45%, #fff);
+}

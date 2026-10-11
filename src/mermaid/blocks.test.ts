@@ -12,18 +12,24 @@
  * anchor is injected instead and the assertions below fail.
  */
 
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as mermaidModule from "mermaid";
 import {
 	disposeMermaid,
+	MermaidUnavailableError,
+	mermaidFromModule,
 	renderMermaidBlocks,
 	retainMermaid,
+	setMermaidLoader,
 	setMermaidSecurityLevel,
 } from "./blocks";
 import {
 	MERMAID_BLOCK_CLASS,
 	MERMAID_ERROR_CLASS,
+	MERMAID_INSTALL_HINT,
 	MERMAID_RENDERED_CLASS,
 	MERMAID_SECURITY_ATTRIBUTE,
+	MERMAID_UNAVAILABLE_ATTRIBUTE,
 } from "./classes";
 
 const HOSTILE_DIAGRAM = [
@@ -224,4 +230,91 @@ test("keeps the observer while a second holder still claims it", async () => {
 	expect(first.block.classList.contains(MERMAID_RENDERED_CLASS)).toBe(true);
 
 	disposeMermaid();
+});
+
+describe("without the optional mermaid peer", () => {
+	afterEach(() => {
+		setMermaidLoader(null);
+	});
+
+	// What `import("mermaid")` yields once the plugins alias the missing package
+	// to an empty module (`src/mermaid/install.ts`).
+	const emptyModule = () => Promise.resolve({ default: {} });
+
+	test("leaves the diagram source readable and marks the block with an install hint", async () => {
+		setMermaidLoader(emptyModule);
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { block } = createBlock("graph TD; A-->B", false);
+			block.textContent = "graph TD; A-->B";
+			const settled = waitForSettled(block);
+			renderMermaidBlocks(block.parentElement as HTMLElement);
+			await settled;
+
+			expect(block.classList.contains(MERMAID_ERROR_CLASS)).toBe(true);
+			expect(block.textContent).toBe("graph TD; A-->B");
+			expect(block.hasAttribute(MERMAID_UNAVAILABLE_ATTRIBUTE)).toBe(true);
+			expect(block.title).toBe(MERMAID_INSTALL_HINT);
+			expect(warn.mock.calls.flat().join(" ")).toContain("npm install mermaid");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("prints the install hint once per page, not once per diagram", async () => {
+		setMermaidLoader(emptyModule);
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const first = createBlock("graph TD; A-->B", false);
+			const second = createBlock("graph TD; C-->D", false);
+			const settled = Promise.all([waitForSettled(first.block), waitForSettled(second.block)]);
+			renderMermaidBlocks(document.body);
+			await settled;
+
+			expect(second.block.hasAttribute(MERMAID_UNAVAILABLE_ATTRIBUTE)).toBe(true);
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("treats a bundler missing-module error as the missing peer", async () => {
+		setMermaidLoader(() =>
+			Promise.reject(
+				Object.assign(new Error("Cannot find module 'mermaid'"), { code: "MODULE_NOT_FOUND" }),
+			),
+		);
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { block } = await render("graph TD; A-->B");
+			expect(block.hasAttribute(MERMAID_UNAVAILABLE_ATTRIBUTE)).toBe(true);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("retries after a chunk download failure instead of caching it", async () => {
+		let attempts = 0;
+		setMermaidLoader(() => {
+			attempts += 1;
+			return Promise.reject(new Error("Loading chunk 42 failed"));
+		});
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const first = await render("graph TD; A-->B");
+			expect(first.block.hasAttribute(MERMAID_UNAVAILABLE_ATTRIBUTE)).toBe(false);
+			expect(first.block.classList.contains(MERMAID_ERROR_CLASS)).toBe(true);
+			await render("graph TD; C-->D");
+			expect(attempts).toBe(2);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("mermaidFromModule accepts the real API and rejects an empty namespace", async () => {
+		expect(() => mermaidFromModule({ default: {} })).toThrow(MermaidUnavailableError);
+		expect(() => mermaidFromModule(undefined)).toThrow(MermaidUnavailableError);
+		const real = mermaidFromModule(mermaidModule);
+		expect(typeof real.render).toBe("function");
+	});
 });

@@ -26,6 +26,13 @@ export default defineConfig({
 			enableMath: true,
 			enableMermaid: true,
 			enableDefaultStyles: true,
+			// The reproduced community/core plugins; the demo vault has a folder
+			// of notes for each under `Plugins/`.
+			enableTasks: true,
+			enableKanban: true,
+			enableExcalidraw: true,
+			enableBases: true,
+			enableTemplater: true,
 			onBrokenLink: "warn",
 		}),
 		canvas({

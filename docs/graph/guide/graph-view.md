@@ -1,77 +1,107 @@
 ---
 title: Graph View
-description: The interactive force-directed graph panel — navigation, filters and search, colour groups, hover highlighting, zoom controls, large-graph limits, and Obsidian content support.
+description: The interactive force-directed graph panel — navigation, Obsidian's filters, display and force settings, search syntax, colour groups, accessibility, large-graph limits, and how notes, tags, attachments and canvas boards become nodes.
 ---
 
 # Graph View
 
-The graph view shows how your documentation pages are connected through internal markdown links. Each page becomes a node, and each `[link](./path.md)` becomes an edge.
+The graph view shows how your pages are connected. Each published note is a node, and each link a note makes is an edge, the same links its page renders and its Backlinks pane lists. Tags, attachments and links to notes that do not exist yet can be shown as nodes too, as in Obsidian.
 
 ## Navigation
 
-Click any node in the graph to navigate directly to that page. The graph uses Rspress's internal router, so navigation is instant — no full page reload.
+Click a node to open its page. Pages and tag pages open through Rspress's router, so there is no full page reload; an attachment node opens the file. **Cmd/Ctrl-click** opens the node in a new tab. A tag without a generated tag page, and an unresolved link, cannot be opened.
 
-## Current Page Highlighting
+## Local and global graph
 
-The panel renders a **local graph** by default: the current page and its neighborhood within the filter depth, drawn as a force-directed field — direct neighbors at the default depth 1, up to five hops away at the maximum. Each page is a node and each internal markdown link between them is an edge. When you're on a page, the panel highlights the current node with a brighter fill.
+The panel draws the **local graph** by default: the current page and its neighborhood. Depth 1 shows direct neighbors, and the depth control goes up to five hops. The current page always has a node, so a page with no links shows on its own.
 
-A **Local / Global** switch in the filter bar changes the scope. Global draws every published page at once with the current one still highlighted — Obsidian's global graph — while the depth control steps aside, since a whole site has no neighborhood.
+The **Local / Global** switch in the settings drawer changes the scope. The global graph draws the whole site with the current page highlighted. It also works on a page that is not in the graph, such as a 404 page; nothing is highlighted then. The depth and link-direction controls apply to the local graph only.
 
-Node size is **uniform** — every node renders at the same radius regardless of degree. The graph re-centers on the current node as you navigate so you always find yourself.
+The graph re-centers as you navigate. A page whose route has spaces or non-ASCII characters (`/Deep Note`, `/日本語ノート`) finds its node: the browser's percent-encoded path is decoded before matching.
 
-If the current page has no links, the panel shows an empty state.
+## Settings
 
-## Filters and search
+The funnel button opens a search bar and a settings drawer laid out like Obsidian's.
 
-The funnel button in the control cluster toggles a filter bar under the panel header. The bar decides what the local graph draws:
+### Filters
+
+| Control | What it does | Default |
+|--------|----------------|---------|
+| Search | Narrows the graph to matching nodes; the current page always stays | empty |
+| Local / Global | Neighborhood or whole site | Local |
+| Depth | Hops from the current page, 1–5 (local graph) | 1 |
+| Incoming links | Follow links into the current page (local graph) | on |
+| Outgoing links | Follow links out of the current page (local graph) | on |
+| Neighbor links | Also draw links between neighbors at the same distance (local graph) | on |
+| Tags | Show tag nodes. A hidden tag does not connect the notes that share it | on |
+| Attachments | Show images, PDFs and other files that notes link or embed | off |
+| Existing files only | Hide links to notes that do not exist. Turn it off to see them as unresolved nodes | on |
+| Orphans | Keep nodes that have no link left in the view | on |
+
+### Display
 
 | Control | What it does |
 |--------|----------------|
-| Search box | Narrows the graph to nodes matching the query. The current page always stays visible. |
-| Local / Global | Draws the current page's neighborhood, or every published page. Local is the default. |
-| Neighborhood depth | Hops from the current page to show — 1 (the default, Obsidian's local graph) through 5. Local scope only. |
-| Tags toggle | Show or hide generated tag pages (`/tags/...`). On by default. |
-| Orphans toggle | Show or hide nodes left without any visible link after the other filters. On by default. |
+| Arrows | Draw an arrowhead at each link's target |
+| Text fade threshold | Labels fade in as you zoom; a higher value shows them from further out |
+| Node size | Scales every node. Nodes also grow with their number of links |
+| Link thickness | Scales every link |
+| Animate | Replays the graph growing: nodes appear in file-creation order, and tags, attachments and unresolved links appear with the first note that links them |
 
-The search box understands a small query language, shared with [colour groups](#colour-groups):
+### Forces
 
-- plain text matches a node's label or route path, case-insensitively
-- `path:some/folder` matches the route path
-- `file:name` matches the last route segment
-- `tag:project` matches the tag page and the pages linked to that tag (subtags included, so `project` also matches `project/ideas`)
-- `-term` hides matches; `"quoted phrase"` searches for the phrase literally
-- several terms are ANDed together
+| Control | What it does |
+|--------|----------------|
+| Center force | Pulls nodes toward the middle, so unlinked nodes and separate clusters stay in view |
+| Repel force | How strongly nodes push each other apart |
+| Link force | How strongly a link pulls its two ends together |
+| Link distance | The resting length of a link |
 
-Matching runs before the 250-neighbor render cap, so a search can find a page a hub would otherwise push out. Depth, tag and orphan settings are remembered per visitor in `localStorage`; the search text is not, so every page opens unsearched. **Escape** clears a non-empty search first, and only closes the panel on a second press.
+Every setting except the search text is remembered per visitor in `localStorage`, so the graph opens the way you left it. **Restore defaults** resets them.
 
-Search, tag, orphan and scope settings are remembered per visitor in `localStorage`, so the graph opens the way you left it.
+## Filters and search
+
+The search box uses Obsidian's search syntax, which [colour groups](#colour-groups) share:
+
+| Syntax | Matches |
+|--------|---------|
+| `word` | The node's name or path, case-insensitively, and the note's text once it has loaded |
+| `"a phrase"` | The phrase exactly |
+| `/regex/` | A regular expression (case-insensitive) instead of plain text |
+| `path:folder` | The file path |
+| `file:name` | The file name |
+| `tag:project` | Tag nodes and notes carrying the tag; subtags included, so `project` also matches `project/ideas` |
+| `content:text` | The note's text only |
+| `line:(a b)` | `a` and `b` on the same line |
+| `section:(a b)` | `a` and `b` under the same heading |
+| `a b` / `a OR b` / `-a` | Both / either / not |
+| `( … )` | Grouping; an operator applies to a whole group, as in `path:(daily OR journal)` |
+
+The note text that `content:`, `line:`, `section:` and plain words search is loaded as a separate file, the first time a query needs it. Until then, plain words match names and paths only. Text inside comments is never searched, because the page hides it.
+
+Matching runs before the render cap, so a search can find a page that a hub would otherwise push out. **Escape** clears a non-empty search first and closes the panel on the second press.
 
 ## Colour groups
 
-Colour groups pair a query in the search language with a CSS colour, configured in `rspress.config.ts` rather than the panel (see [Configuration](./configuration.md#groups)). Every node that matches a group paints in its colour — first group wins — while the current page keeps its dedicated "you are here" colour and an invalid colour falls back to the palette. A group query can be prototyped by typing it into the panel's search box first: whatever it matches is what the group would colour.
+Colour groups pair a query with a CSS colour. You configure them in `rspress.config.ts` rather than in the panel, because they describe the site's own taxonomy (see [Configuration](./configuration.md#groups)). A node that matches a group paints in its colour, and the first matching group wins. The current page keeps its own colour, and an invalid colour falls back to the palette. Type a group's query into the search box first to see which nodes it matches.
 
-## Hover Interactions
+Without a group, nodes are coloured by kind: notes in the node colour, tags in `tagNode`, attachments in `attachmentNode` and unresolved links in `unresolvedNode`.
 
-Hovering over a node:
-- Changes the node's fill color
-- Dims all nodes and links **not** connected to it — the neighborhood stays bright, matching Obsidian
-- Highlights the links connected to it
-- Reveals the node's label
-- Turns the cursor into a pointer to indicate the node is clickable
+## Hover interactions
 
-Hovering over a link highlights it and dims the other links. Nodes are unaffected — hover a *node* instead to dim its non-neighbors. The cursor also turns into a pointer over links.
+Hovering a node:
+- changes the node's fill colour
+- dims every node and link **not** connected to it, so the neighborhood stays bright
+- highlights the links connected to it
+- shows the node's label
 
-## Link Rendering
-
-Links are drawn as thin, straight lines — no arrows, no particles, no curves. This keeps the view clean and Obsidian-like, so you can scan the structure at a glance rather than follow edge decorations.
+Hovering a link highlights it and dims the other links. The highlight keeps working after the layout has settled. Each hover repaints the canvas without restarting the simulation, so nodes do not move under the cursor.
 
 ## Labels
 
-Like Obsidian's graph view, the graph starts as a clean dot-field — labels are hidden. Hover over a node, zoom past 1.4×, or open the node for the current page (always labeled) to reveal a title.
+A label is the note's frontmatter `title`, or else its file name, as in Obsidian. An `index` note takes its folder's name, and the docs home page is "Home". Labels fade in as you zoom past the text fade threshold. The current page and a hovered node are always labelled.
 
-## Zoom Controls
-
-The graph provides four actions via the control panel in the bottom-right:
+## Zoom controls
 
 | Button | Action |
 |--------|--------|
@@ -79,111 +109,75 @@ The graph provides four actions via the control panel in the bottom-right:
 | `−` | Zoom out (÷1.3) |
 | `⤢` | Toggle fullscreen for the panel |
 | `↺` | Reset to 1× zoom |
-| `▽` | Show or hide the filter bar |
+| `▽` | Show or hide the search bar and settings |
 
 You can also pan by dragging and zoom with the scroll wheel.
 
-## Large Graphs
+## Large graphs
 
-For documentation sites with **80+ nodes** or **160+ links**, the graph automatically optimizes:
-- Node dots shrink (uniform size — radius drops from 5 to 4, no per-degree scaling)
-- Link widths are thinned
-- Physics simulation uses faster decay rates
+When the view has **80+ nodes** or **160+ links**, nodes are drawn smaller, links are drawn thinner, and the physics settles faster.
 
-These optimizations keep the graph interactive even with hundreds of nodes. A strong repulsion force keeps nodes apart — hubs spread out instead of stacking on their neighbors.
+A local graph is capped at **250 neighbors**. If the current page links to more pages than that, the graph keeps the 250 with the most links (ties broken by id) and the footer reports it, for example `250 of 1234 neighbors`. Without the cap, a hub note would hand thousands of nodes to the force simulation and freeze the panel. The global graph has a higher ceiling of **1000 nodes**, and the footer says how many it left undrawn (`12 more not drawn`). Every filter and the search run before the cap, so the cap only trims what you asked to see.
 
-A local graph is additionally capped at **250 neighbors**. If the current page
-links to more pages than that, the graph keeps the 250 with the most links (ties
-broken by route path) and the footer reports it, for example
-`250 of 1234 neighbors`. Without the cap a hub note would hand thousands of
-nodes to the force simulation and freeze the panel. The global scope has its own,
-much higher ceiling of **1000 nodes**, and says in the footer how many it left
-undrawn (`12 more not drawn`) rather than passing a partial vault off as the
-whole one. Depth, tag, orphan and search filters all run before the cap, so the
-cap only ever trims what the reader asked to see.
+## Dark mode
 
-## Dark Mode
-
-The graph automatically detects your theme and switches palettes:
-- **Light mode**: slate-toned nodes with indigo accents
-- **Dark mode**: brighter nodes with enhanced glow for visibility
-
-Theme detection checks for:
+The graph detects the theme and switches palettes. It checks for:
 - `<html class="dark">`
 - `<html data-theme="dark">`
-- Any parent element with `data-theme="dark"`
+- any parent element with `data-theme="dark"`
 
-Changes are observed in real-time via `MutationObserver`, so switching themes while the graph is open updates colors instantly.
+A `MutationObserver` picks up theme changes, so switching themes while the graph is open updates the colours immediately.
 
-## Keyboard Accessibility
+## Keyboard and screen readers
 
-- **Escape** — clears a non-empty search first; otherwise closes the graph panel and returns focus to the FAB button
-- **Tab** — navigates through the filter and zoom controls when the panel is open
+- **`g`** opens or closes the panel. Opening it with `g` or the button moves focus into the panel, even when the panel's code is still loading.
+- **Tab** moves through the panel's controls and then on to the page. The floating panel is a non-modal dialog. In fullscreen it is modal, and Tab stays inside.
+- **Escape** clears a non-empty search, then closes the panel and returns focus to the button. It is handled only while focus is in the panel, so it never steals Escape from the search modal or another widget.
+- **Pages in this graph**: every node you can open is also a link in a list after the graph. The list is hidden until it takes focus, then it covers the graph so you can see where focus is. Screen readers can read it at any time.
 
 ## Performance
 
-The graph build runs during Rspress's route scanning phase. Measured with the synthetic benchmark (750 pages, 6 links/page, 5 iterations):
+The graph build runs once Rspress has its final route list. Measured with the synthetic benchmark (750 pages, 6 links per page, 3 iterations):
 
 | Scenario | Wikilink vault (default) | Markdown-link pages (`--style=markdown`) |
 |---|---|---|
-| Cold build (all files read + parsed) | **~10ms** | **~260ms** |
-| Warm rebuild (no changes) | **~0.8ms** | ~0.7ms |
-| Single-file change | **~8ms** | ~16ms |
+| Cold build (index, resolve, read every note) | ~28 ms | ~30 ms |
+| Warm rebuild (no changes) | ~1.2 ms | ~1.2 ms |
+| Single-file change | ~7 ms | ~8 ms |
 
-The difference is the link extractor: a note that contains only wikilinks and tags
-never needs a markdown parse — the masked-source scan finds the same targets for
-about 400× less time (measured 0.9µs vs 379µs per note), and 81% of the notes in
-this repo's own corpus take that path. Pages with markdown links (inline,
-reference, autolink) still go through the parser, which is why a
-documentation-style site pays the parse cost and a vault does not.
+A rebuild after one edit resolves every link again, which costs about 4,500 resolutions here, but it reads only the edited note. The benchmark's `filesRead` column counts the graph's own reads. `resolvedLinks` counts links run through the resolver. `moduleReuseRate` is the share of runs that reused the whole module.
 
-Two consequences worth knowing. A wikilink vault's cold build is no longer
-parse-bound: it is dominated by file stats and reads, so the *single-file change*
-is nearly as expensive as the whole cold build (8ms vs 9ms) — the percentage
-"improvement" is small for the same reason. And the parser path is only taken
-when the source actually contains markdown-link syntax, so a vault with a few
-markdown links pays it per note, not per site.
+The work counts, not the times, are what the tests assert (`src/graph/build/graph-build.test.ts`). An unchanged site resolves nothing and reads nothing. An edit re-reads only the edited note.
 
-The benchmark's `cacheHits`/`cacheMisses` columns count files, while `moduleReuseRate`
-is the share of runs that reused the whole module — a single-file change reports
-`749 hits / 1 miss` and `0%` module reuse, which is correct, not a contradiction.
-
-`src/graph/build/build-diagnostics.test.ts` holds the contract that keeps this
-honest — each file is read and parsed at most once per build, a warm cache
-re-parses nothing, and build time stays sub-quadratic as the site doubles.
-
-Run the synthetic benchmark yourself:
+Run the benchmark yourself:
 
 ```bash
 bun run bench:graph --pages=1000 --links=6 --iterations=5
-bun run bench:graph --pages=1000 --links=6 --style=markdown   # parser path
+bun run bench:graph --pages=1000 --links=6 --style=markdown
 ```
 
-Or profile your own site's build with `RSPRESS_GRAPH_VIEW_PROFILE=1`. The benchmark also accepts `--shape` (`sequential` | `ring` | `hub` | `clustered`), `--style` (`wikilink` | `markdown`, which decides whether the synthetic notes take the extractor's fast path), `--json`, and `--csv` for machine-readable output, and every flag takes its value either as `--pages=1000` or as `--pages 1000`; an unknown or valueless flag fails the run. Note the columns measure different things: `parseCpuMs` is parse CPU time (title, links, and content hash) summed across routes and, because parsing is main-thread work, it stays under `totalMs`; `statWaitMs` (`avgStatWaitMs` in the CSV report) is file-stat latency summed across routes, which can exceed `totalMs` because routes are stat'ed concurrently; `totalMs` is the wall-clock build duration.
-
-See also:
-- [Getting Started](./getting-started.md)
-- [Configuration](./configuration.md)
+The benchmark also accepts `--shape` (`sequential` | `ring` | `hub` | `clustered`), `--json` and `--csv`. Every flag takes its value as `--pages=1000` or as `--pages 1000`, and an unknown or valueless flag fails the run. To profile your own site's build, set `RSPRESS_GRAPH_VIEW_PROFILE=1`.
 
 ## Obsidian content support
 
-The graph is built from the same content surface used by the Obsidian plugins. These references become page-to-page edges when their targets publish as Rspress routes:
+Edges are the links each page makes, resolved by the markdown plugin's own resolver. A link in the graph is therefore exactly a link on the page and a backlink on its target.
 
-| Source feature | Graph behavior |
+| Source | Graph behaviour |
 |---|---|
-| Wikilinks: `[[Page]]`, `[[Page#Heading]]`, `[[Page\|Alias]]` | The page target becomes an edge; heading and alias text do not create separate nodes. A bare target is resolved by path first, then by file basename (case-insensitively) — an ambiguous basename creates no edge. |
-| Markdown links: `[Page](./page.md)` | Relative, extensionless, `.md`, `.mdx`, and reference-style links are resolved, with the same basename fallback when the path misses. |
-| Frontmatter and inline tags | Tag pages generated by `enableTagPages` are graph nodes; pages with tags link to those `/tags/...` nodes. |
-| Daily notes | Date pages are ordinary graph nodes. Wikilinks and generated previous/current/next navigation connect them. |
-| Canvas file nodes | Markdown file nodes point to their published page. Text nodes contribute their wikilinks, Markdown links, and tags. |
-| Canvas edges | Canvas-only visual edges are not duplicated as graph edges unless the node content also names a page target. |
+| Wikilinks and embeds: `[[Page]]`, `[[Page#Heading]]`, `[[Page\|Alias]]`, `![[Page]]` | An edge to the page, whatever the heading, block or alias, and also when the heading no longer exists. In a table, the escaped form `[[Page\|Alias]]` works. |
+| Markdown links: `[x](Page.md)`, `[x](My%20Note.md)`, reference definitions | An edge to the page. Escapes such as `%20` are decoded. |
+| `obsidian://open?file=Note` | An edge to the note it opens |
+| Frontmatter properties: `related: "[[X]]"`, `up: ["[[a/b]]"]` | Edges, as in Obsidian 1.4 and later |
+| Resolution | The resolver's own order: exact path, file name, then frontmatter `title`/`aliases`, then a case-insensitive match. Vault-root paths, path suffixes and links between the docs root and the vault resolve as they do on the page. |
+| Tags, inline and frontmatter | One tag node per tag, matched without regard to case or Unicode normalization (`#Project` and `#project` are one node; `#日本語` and `#café` are whole tags). The node links to the tag page when the markdown plugin generates it. |
+| Attachments: `![[diagram.png]]`, `[spec](assets/spec.pdf)` | Attachment nodes. Shown when **Attachments** is on. |
+| Links to missing notes | Unresolved nodes. Shown when **Existing files only** is off, and reported per `onUnresolvedLink`. |
+| Canvas boards | A board links to each file card's note or file and to the links and tags in its text cards, read from the `.canvas` file. Link cards (web pages) and canvas-only arrows add nothing. |
+| Daily notes | Ordinary notes |
 
-Code fences, inline code and frontmatter are not scanned: `[[Page]]` written inside
-backticks is documentation, and a `description` field that mentions a link is
-metadata, not an edge. References that resolve to no route are reported once per
-build with the source page and the target.
+Links inside fenced code, inline code, `%%comments%%` and `<!-- comments -->` are not links, because the page does not render them as links. Pages with `publish: false` are not in the graph. Their title, links and text are never shipped, and a link to one becomes an unresolved node named by the link text.
 
-Enable the features together:
+To use the features together:
 
 ```ts
 plugins: [
@@ -198,19 +192,10 @@ plugins: [
 ]
 ```
 
-`fileRoutePrefix` must match the markdown plugin's `vaultRoutePrefix`, or a Canvas file node links to the bare `/Welcome` instead of the published `/vault/Welcome`.
+`fileRoutePrefix` must match the markdown plugin's `vaultRoutePrefix`; otherwise a canvas file node links to the bare `/Welcome` instead of the published `/vault/Welcome`.
 
-The graph does not create standalone nodes for headings, block IDs, inline tags, or external assets. Those remain metadata or presentation details attached to their page.
+The graph does not create nodes for headings or block IDs; those are fragments of their page.
 
-## Example routes in a combined vault site
-
-With the configuration above, the graph can connect routes across all three surfaces:
-
-```text
-/vault/Welcome              # Markdown vault page
-/vault/guide/Setup Guide     # Wikilink target with a spaced filename
-/tags/project/ideas          # Generated nested tag page
-/canvas/demo                 # Canvas page
-```
-
-The graph links page references, not headings or assets. A link such as `[[Setup Guide#Installation]]` creates an edge to `/vault/guide/Setup Guide`; `#Installation` remains a fragment on that page.
+See also:
+- [Getting Started](./getting-started.md)
+- [Configuration](./configuration.md)

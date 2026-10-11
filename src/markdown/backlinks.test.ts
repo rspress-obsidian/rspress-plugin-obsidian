@@ -124,7 +124,9 @@ describe("renderBacklinksHtml", () => {
 		// A mention is not a link, so the reference list stays empty and only the
 		// mention section renders.
 		expect(html).not.toContain(">Backlinks<");
-		expect(html).toContain('<div class="obsidian-backlinks obsidian-unlinked-mentions">');
+		expect(html).toContain(
+			'<div class="obsidian-backlinks obsidian-unlinked-mentions rp-toc-exclude">',
+		);
 		expect(html).toContain('<a href="/notes/source">Source</a>');
 		expect(html).toContain(
 			'<span class="obsidian-mention-context">I read Widget Notes yesterday.</span>',
@@ -190,11 +192,14 @@ describe("buildBacklinksIndex", () => {
 		expect(backlinks.get("/target")).toEqual([
 			{ routePath: "/linker-heading", relativePath: "linker-heading.md", title: "My Heading" },
 			{ routePath: "/linker-plain", relativePath: "linker-plain.md", title: "linker plain" },
+			{ routePath: "/linker-section", relativePath: "linker-section.md", title: "linker section" },
 			{ routePath: "/linker-title", relativePath: "linker-title.md", title: "Custom Title" },
 		]);
 	});
 
-	test("records one backlink per source page when a target is ambiguous", async () => {
+	test("backlinks only the page an ambiguous link resolves to", async () => {
+		// The link itself resolves to the shortest path; a backlink on the other
+		// candidate would list a page that never links there.
 		const index = await buildContentIndex(ambiguousRoot);
 
 		const backlinks = await buildBacklinksIndex(index);
@@ -202,9 +207,7 @@ describe("buildBacklinksIndex", () => {
 		expect(backlinks.get("/guide/getting-started")).toEqual([
 			{ routePath: "/", relativePath: "index.md", title: "Home" },
 		]);
-		expect(backlinks.get("/reference/getting-started")).toEqual([
-			{ routePath: "/", relativePath: "index.md", title: "Home" },
-		]);
+		expect(backlinks.get("/reference/getting-started")).toBeUndefined();
 	});
 
 	test("records backlinks for alias and title targets", async () => {

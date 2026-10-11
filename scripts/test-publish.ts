@@ -3,11 +3,11 @@
  * Runs the packed-artifact suite and fails when there is nothing to test.
  *
  * The suite skips itself when `dist/` is absent so that a bare `bun test` on a
- * clean checkout does not fail — CI runs `bun test` before `bun run build`, and
- * a contributor's first run should not be red. That skip is wrong for the
- * release path: a build that produced nothing would let `prepublishOnly` go
- * green while the tarball contract went unchecked. This wrapper is the explicit
- * path, so it asserts the build output exists first.
+ * clean checkout does not fail — a contributor's first run should not be red.
+ * That skip is wrong for the release path: a build that produced nothing would
+ * let CI or the release build job go green while the tarball contract went
+ * unchecked. This wrapper is the explicit path, so it asserts the build output
+ * exists first.
  *
  * A script file rather than `VAR=1 bun test …` because the environment-prefix
  * form is POSIX-only, and rather than `test -f … && …` because that is

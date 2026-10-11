@@ -69,6 +69,9 @@ function GraphPanelFallback() {
  */
 export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelProps) {
 	const [isPanelRequested, setIsPanelRequested] = useState(defaultOpen ?? false);
+	// The reader's own request (FAB or `g`): the button they activated unmounts
+	// as the chunk loads, so the panel must take focus or it falls to <body>.
+	const [readerRequested, setReaderRequested] = useState(false);
 
 	const requestPanel = useCallback(() => {
 		// GraphPanel's hydration effect lets a stored value override its
@@ -80,6 +83,7 @@ export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelPr
 		} catch {
 			// localStorage may be unavailable (private mode, SSR, storage disabled)
 		}
+		setReaderRequested(true);
 		setIsPanelRequested(true);
 	}, []);
 
@@ -130,7 +134,12 @@ export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelPr
 
 	return (
 		<Suspense fallback={<GraphPanelFallback />}>
-			<GraphPanel defaultOpen={isPanelRequested} colors={colors} groups={groups} />
+			<GraphPanel
+				defaultOpen={isPanelRequested}
+				readerRequested={readerRequested}
+				colors={colors}
+				groups={groups}
+			/>
 		</Suspense>
 	);
 }

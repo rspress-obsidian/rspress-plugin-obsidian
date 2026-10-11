@@ -1,135 +1,103 @@
-import path from "node:path";
 import { escapeHtmlText } from "../shared/escape.js";
-import { normalizeLookupValue } from "../shared/slug.js";
 import type { MentionRef } from "./mentions.js";
-import type { BacklinkRef, ContentIndex, ContentPage } from "./types.js";
-import { backlinkLabel, normalizeFilePathKey, resolveRelativePathKey, routeHref } from "./utils.js";
+import { parseWikiLink } from "./parse-wikilink.js";
+import { resolveWikiLink } from "./resolve-wikilink.js";
+import type { BacklinkRef, ContentIndex, ContentPage, NormalizedPluginOptions } from "./types.js";
+import { backlinkLabel, routeHref } from "./utils.js";
 
 export type { BacklinkRef };
 
+type ResolveOptions = Partial<
+	Pick<NormalizedPluginOptions, "enableCaseInsensitiveLookup" | "enableFuzzyMatching">
+>;
+
 /**
- * Return the backlinks index for the given content index.
+ * Record in `into` every link from a page of `sourceIndex` to a page of
+ * `targetIndex`, keyed by the target's route.
  *
- * Backlinks are now built during content indexing (see `buildContentIndex`)
- * rather than as a separate pass, so this is a simple property access.
- * The WeakMap cache here allows code that constructs a ContentIndex manually
- * (without going through `buildContentIndex`) to still get cached results.
+ * Each link is resolved with {@link resolveWikiLink} — the resolver the
+ * rendered page uses — so a backlink exists exactly when the link renders as a
+ * link to that page (an ambiguous name counts for the file it resolves to, a
+ * missing heading still for its page). When the two indexes differ the source
+ * page's own tree is tried first, so a docs page only backlinks a vault note
+ * its link actually reaches.
  */
-const manualBacklinksCache = new WeakMap<ContentIndex, Map<string, BacklinkRef[]>>();
+export function collectBacklinks(
+	sourceIndex: ContentIndex,
+	targetIndex: ContentIndex,
+	options: ResolveOptions,
+	into: Map<string, BacklinkRef[]>,
+): void {
+	const fallbackIndexes = sourceIndex === targetIndex ? [] : [targetIndex];
+	for (const page of sourceIndex.pages) {
+		const links =
+			page.outlinks ?? page.wikilinkTargets.map((target) => parseWikiLink(target, `[[${target}]]`));
+		for (const link of links) {
+			const target = resolveWikiLink(link, {
+				currentPage: page,
+				index: sourceIndex,
+				fallbackIndexes,
+				options,
+			}).targetPage;
+			if (!target || target.absolutePath === page.absolutePath) continue;
+			if (targetIndex.byAbsolutePath.get(target.absolutePath) !== target) continue;
+			addBacklink(into, target.routePath, page);
+		}
+	}
+}
+
+/**
+ * Backlinks for the pages of `index`: its own, plus those from the other trees
+ * published on the site (`index.linkedIndexes`), so a docs page linking a
+ * vault note shows up in that note's panel and vice versa.
+ *
+ * Cached per index and per set of linked indexes; a hand-built index without
+ * a precomputed map gets one built here.
+ */
+const backlinksCache = new WeakMap<
+	ContentIndex,
+	{ linked: ContentIndex[]; result: Map<string, BacklinkRef[]> }
+>();
 
 export async function getCachedBacklinksIndex(
 	index: ContentIndex,
 ): Promise<Map<string, BacklinkRef[]>> {
-	if (index.backlinks.size > 0 || index.pages.length === 0) {
-		return index.backlinks;
+	const linked = index.linkedIndexes ?? [];
+	const cached = backlinksCache.get(index);
+	if (
+		cached &&
+		cached.linked.length === linked.length &&
+		cached.linked.every((entry, position) => entry === linked[position])
+	) {
+		return cached.result;
 	}
 
-	const cached = manualBacklinksCache.get(index);
-	if (cached) return cached;
-
-	const result = await buildBacklinksIndex(index);
-	manualBacklinksCache.set(index, result);
+	const own =
+		index.backlinks.size > 0 || index.pages.length === 0
+			? index.backlinks
+			: await buildBacklinksIndex(index);
+	let result = own;
+	if (linked.length > 0) {
+		result = new Map([...own].map(([route, refs]) => [route, [...refs]]));
+		for (const other of linked) {
+			if (other !== index)
+				collectBacklinks(other, index, { enableCaseInsensitiveLookup: true }, result);
+		}
+	}
+	backlinksCache.set(index, { linked: [...linked], result });
 	return result;
 }
 
 /**
- * Build a map from each page's routePath to the list of pages that link to it.
- *
- * Uses pre-extracted wikilink targets (collected during content indexing) to
- * skip regex scanning entirely — reduces per-page cost to just one Map lookup
- * and a few O(1) resolution calls.
+ * Build a map from each page's routePath to the list of pages that link to it,
+ * for an index assembled by hand (one from `buildContentIndex` already has it).
  */
 export async function buildBacklinksIndex(
 	index: ContentIndex,
 ): Promise<Map<string, BacklinkRef[]>> {
 	const backlinks = new Map<string, BacklinkRef[]>();
-
-	for (const page of index.pages) {
-		const targets = page.wikilinkTargets;
-
-		for (const normalizedTarget of targets) {
-			const resolved = resolveBacklinkTarget(index, normalizedTarget, page);
-			for (const candidate of resolved) {
-				if (candidate.absolutePath === page.absolutePath) continue;
-				addBacklink(backlinks, candidate.routePath, page);
-			}
-		}
-	}
-
+	collectBacklinks(index, index, { enableCaseInsensitiveLookup: true }, backlinks);
 	return backlinks;
-}
-
-/**
- * Resolve a wikilink target to candidate pages using the index maps.
- * Returns a deduplicated array of matching pages.
- */
-function resolveBacklinkTarget(
-	index: ContentIndex,
-	normalizedTarget: string,
-	sourcePage: ContentPage,
-): ContentPage[] {
-	const seen = new Set<string>();
-	const results: ContentPage[] = [];
-
-	const addPage = (page: ContentPage) => {
-		if (!seen.has(page.absolutePath)) {
-			seen.add(page.absolutePath);
-			results.push(page);
-		}
-	};
-
-	// Explicitly relative targets are resolved from the source page, just as
-	// normal wikilink navigation does. A missing relative target must not fall
-	// through to a global basename/title/alias match.
-	const relativePathKey = resolveRelativePathKey(sourcePage.relativePath, normalizedTarget);
-	if (relativePathKey !== undefined) {
-		const relativeCandidates = index.byFilePathKeyCI.get(relativePathKey.toLowerCase());
-		for (const page of relativeCandidates ?? []) {
-			addPage(page);
-		}
-		return results;
-	}
-
-	// Try exact vault-path lookup. The target was already lowercased for
-	// deduplication, so the case-insensitive map handles mixed-case paths.
-	const pathKey = normalizeFilePathKey(normalizedTarget).toLowerCase();
-	const exactCandidates = index.byFilePathKeyCI.get(pathKey);
-	if (exactCandidates) {
-		for (const page of exactCandidates) {
-			addPage(page);
-		}
-		return results;
-	}
-	// Try basename lookup.
-	const baseName = path.basename(pathKey) || pathKey;
-	const baseNameCandidates = index.byBaseName.get(baseName);
-	if (baseNameCandidates) {
-		for (const page of baseNameCandidates) {
-			addPage(page);
-		}
-	}
-
-	// Also try case-insensitive basename as fallback.
-	if (results.length === 0) {
-		const ciBaseCandidates = index.byBaseNameCI.get(baseName);
-		if (ciBaseCandidates) {
-			for (const page of ciBaseCandidates) {
-				addPage(page);
-			}
-		}
-	}
-	// Frontmatter title and alias lookups (whitespace-normalized).
-	if (results.length === 0) {
-		const folded = normalizeLookupValue(normalizedTarget);
-		for (const page of index.byTitle.get(folded) ?? []) {
-			addPage(page);
-		}
-		for (const page of index.byAlias.get(folded) ?? []) {
-			addPage(page);
-		}
-	}
-
-	return results;
 }
 
 function addBacklink(
@@ -153,7 +121,9 @@ function addBacklink(
  * Render a backlinks panel as raw HTML. Returns the empty string when
  * there are no refs so the caller can unconditionally append the result.
  * The output is wrapped in `<div class="obsidian-backlinks">` and uses the
- * `.obsidian-backlinks` selectors in the bundled stylesheet.
+ * `.obsidian-backlinks` selectors in the bundled stylesheet. `rp-toc-exclude`
+ * keeps its id-less headings out of Rspress's outline, where they would link
+ * nowhere; Obsidian's outline does not list the backlinks pane either.
  */
 export function renderBacklinksHtml(refs: BacklinkRef[], mentions: MentionRef[] = []): string {
 	const sections: string[] = [];
@@ -166,7 +136,7 @@ export function renderBacklinksHtml(refs: BacklinkRef[], mentions: MentionRef[] 
 			)
 			.join("\n");
 		sections.push(
-			`<div class="obsidian-backlinks">\n<h2>Backlinks</h2>\n<ul>\n${items}\n</ul>\n</div>`,
+			`<div class="obsidian-backlinks rp-toc-exclude">\n<h2>Backlinks</h2>\n<ul>\n${items}\n</ul>\n</div>`,
 		);
 	}
 
@@ -181,7 +151,7 @@ export function renderBacklinksHtml(refs: BacklinkRef[], mentions: MentionRef[] 
 			)
 			.join("\n");
 		sections.push(
-			`<div class="obsidian-backlinks obsidian-unlinked-mentions">\n<h2>Unlinked mentions</h2>\n<ul>\n${items}\n</ul>\n</div>`,
+			`<div class="obsidian-backlinks obsidian-unlinked-mentions rp-toc-exclude">\n<h2>Unlinked mentions</h2>\n<ul>\n${items}\n</ul>\n</div>`,
 		);
 	}
 

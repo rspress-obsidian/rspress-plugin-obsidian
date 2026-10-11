@@ -5,6 +5,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
+import { graphDataModule, graphNode } from "./graph-fixture";
 
 // The graph runtime reads the path from the document; this test renders a
 // panel anchored on /guide.
@@ -12,15 +13,12 @@ history.replaceState({}, "", "/guide");
 
 const { mock } = require("bun:test");
 
-const mockGraphData = {
-	nodes: [
-		{ id: "/", label: "Home", routePath: "/" },
-		{ id: "/guide", label: "Guide", routePath: "/guide" },
-	],
-	links: [{ source: "/", target: "/guide" }],
-};
-
-mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
+mock.module("virtual-graph-data", () =>
+	graphDataModule(
+		[graphNode("/", "Home"), graphNode("/guide", "Guide")],
+		[{ source: "/", target: "/guide" }],
+	),
+);
 
 // Capture the props the plugin passes to react-force-graph-2d so we can
 // assert the pointer-area painter is wired and paints the node radius.
@@ -60,7 +58,7 @@ describe("GraphView nodePointerAreaPaint", () => {
 		// Verify the painter fills a circle of the same radius as the rendered
 		// node — the observable hit-testing contract.
 		const painter = capturedProps?.nodePointerAreaPaint as (
-			node: { x?: number; y?: number },
+			node: { x?: number; y?: number; degree: number },
 			paintColor: string,
 			ctx: CanvasRenderingContext2D,
 			globalScale: number,
@@ -93,9 +91,9 @@ describe("GraphView nodePointerAreaPaint", () => {
 			},
 		) as CanvasRenderingContext2D;
 
-		painter({ x: 12, y: 34 }, "#ff00ff", ctx, 1);
+		painter({ x: 12, y: 34, degree: 0 }, "#ff00ff", ctx, 1);
 
-		// Node dot radius is 5 (NODE_HIT_RADIUS) for normal graphs.
+		// An unlinked node's dot has radius 5 in a normal-sized graph.
 		expect(lastArc.x).toBe(12);
 		expect(lastArc.y).toBe(34);
 		expect(lastArc.radius).toBe(5);

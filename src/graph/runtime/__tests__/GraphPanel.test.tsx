@@ -4,9 +4,10 @@ import { navigation } from "../../../shared/usePathname.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { MAX_NEIGHBORS } from "../deriveGraphViewData";
+import { graphDataModule, graphNode } from "./graph-fixture";
 
 // The graph runtime reads the path from the document; this test renders a
 // panel anchored on /guide.
@@ -15,18 +16,16 @@ history.replaceState({}, "", "/guide");
 const { mock } = require("bun:test");
 
 // "/guide" is a hub: more neighbors than the render cap, so the view truncates.
-const hubNeighbors = Array.from({ length: MAX_NEIGHBORS + 2 }, (_, index) => ({
-	id: `/note-${index}`,
-	label: `Note ${index}`,
-	routePath: `/note-${index}`,
-}));
+const hubNeighbors = Array.from({ length: MAX_NEIGHBORS + 2 }, (_, index) =>
+	graphNode(`/note-${index}`, `Note ${index}`),
+);
 
-const mockGraphData = {
-	nodes: [{ id: "/guide", label: "Guide", routePath: "/guide" }, ...hubNeighbors],
-	links: hubNeighbors.map((node) => ({ source: "/guide", target: node.id })),
-};
-
-mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
+mock.module("virtual-graph-data", () =>
+	graphDataModule(
+		[graphNode("/guide", "Guide"), ...hubNeighbors],
+		hubNeighbors.map((node) => ({ source: "/guide", target: node.id })),
+	),
+);
 
 // The panel navigates through the shared seam rather than `window.location`
 // directly, which is what makes it observable here.
@@ -74,7 +73,12 @@ describe("GraphPanel accessibility", () => {
 		fireEvent.keyDown(window, { key: "g" });
 		expect(container.querySelector("#rspress-graph-view-panel")).toBeTruthy();
 
-		// Escape → closes, focus returns to FAB
+		// Escape inside the panel → closes, focus returns to FAB
+		(
+			container.querySelector(
+				"#rspress-graph-view-panel button[aria-label='Close graph view']",
+			) as HTMLButtonElement
+		).focus();
 		fireEvent.keyDown(window, { key: "Escape" });
 		expect(container.querySelector("#rspress-graph-view-panel")).toBeFalsy();
 		expect(document.activeElement).toBe(fab);
@@ -125,24 +129,57 @@ describe("GraphPanel accessibility", () => {
 			`${MAX_NEIGHBORS + 1} nodes · ${MAX_NEIGHBORS} links · ${MAX_NEIGHBORS} of ${MAX_NEIGHBORS + 2} neighbors · 2 more not drawn`,
 		);
 	});
-	test("traps Tab focus inside the panel", () => {
+	test("leaves Escape alone when focus is outside the panel", () => {
+		// Escape meant for another widget (the search modal, say) must not close
+		// the graph or be swallowed by it.
+		const container = openPanel();
+		fireEvent.keyDown(window, { key: "g" });
+		const elsewhere = document.createElement("input");
+		document.body.appendChild(elsewhere);
+		elsewhere.focus();
+		try {
+			const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+			window.dispatchEvent(event);
+			expect(event.defaultPrevented).toBe(false);
+			expect(container.querySelector("#rspress-graph-view-panel")).toBeTruthy();
+		} finally {
+			elsewhere.remove();
+		}
+	});
+
+	test("the floating panel is non-modal: Tab moves on past its last control", () => {
 		const container = openPanel();
 		fireEvent.keyDown(window, { key: "g" });
 
 		const panel = container.querySelector("#rspress-graph-view-panel") as HTMLElement;
+		expect(panel.getAttribute("aria-modal")).toBe("false");
 		const focusable = panel.querySelectorAll<HTMLElement>("button:not([disabled])");
+		const last = focusable[focusable.length - 1];
+		last?.focus();
+		const event = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+		window.dispatchEvent(event);
+		expect(event.defaultPrevented).toBe(false);
+	});
+
+	test("fullscreen is modal and keeps Tab inside", () => {
+		const container = openPanel();
+		fireEvent.keyDown(window, { key: "g" });
+		fireEvent.click(container.querySelector("button[aria-label='Maximize']") as HTMLButtonElement);
+
+		const panel = container.querySelector("#rspress-graph-view-panel") as HTMLElement;
+		expect(panel.getAttribute("aria-modal")).toBe("true");
+		const focusable = panel.querySelectorAll<HTMLElement>(
+			"button:not([disabled]), [href], input:not([disabled])",
+		);
 		const first = focusable[0];
 		const last = focusable[focusable.length - 1];
 		if (!first || !last) throw new Error("panel has no focusable controls");
 
-		// Shift+Tab on the first control wraps to the last.
-		first?.focus();
-		expect(document.activeElement).toBe(first);
+		first.focus();
 		fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
 		expect(document.activeElement).toBe(last);
 
-		// Tab on the last control wraps back to the first.
-		last?.focus();
+		last.focus();
 		fireEvent.keyDown(window, { key: "Tab" });
 		expect(document.activeElement).toBe(first);
 	});
@@ -285,11 +322,9 @@ describe("GraphPanel accessibility", () => {
 
 		fireEvent.mouseEnter(close);
 
-		// The control turns the danger red so a destructive action reads as one.
-		// The restore-on-leave path sets `color-mix(...)`, which happy-dom cannot
-		// parse, so that half is asserted in the browser suite instead.
+		// The control turns a danger red dark enough for 4.5:1 on a light panel.
 		expect(close.style.color).not.toBe(restingColor);
-		expect(close.style.color.toLowerCase()).toMatch(/ef4444|239,\s*68,\s*68/);
+		expect(close.style.color.toLowerCase()).toMatch(/b91c1c|185,\s*28,\s*28/);
 	});
 
 	test("closes from the panel's own close button and returns focus to the FAB", async () => {
@@ -366,6 +401,42 @@ describe("GraphPanel accessibility", () => {
 		}
 	});
 
+	test("stays closed on a phone despite defaultOpen, until the reader opens it", async () => {
+		const narrow = vi
+			.spyOn(window, "matchMedia")
+			.mockImplementation(
+				(query: string) =>
+					({ matches: query === "(max-width: 639px)", media: query }) as MediaQueryList,
+			);
+		try {
+			const { container } = render(<GraphPanel defaultOpen />);
+			await act(async () => {});
+			expect(container.querySelector("#rspress-graph-view-panel")).toBeNull();
+
+			fireEvent.keyDown(window, { key: "g" });
+			expect(container.querySelector("#rspress-graph-view-panel")).toBeTruthy();
+			// Close so the 150ms stats timer does not fire after the test.
+			fireEvent.keyDown(window, { key: "g" });
+		} finally {
+			narrow.mockRestore();
+		}
+	});
+
+	test("keeps a phone reader's own choice to open the panel", async () => {
+		localStorage.setItem("rspress-graph-view-open", "true");
+		const narrow = vi
+			.spyOn(window, "matchMedia")
+			.mockImplementation((query: string) => ({ matches: true, media: query }) as MediaQueryList);
+		try {
+			const { container } = render(<GraphPanel />);
+			await act(async () => {});
+			expect(container.querySelector("#rspress-graph-view-panel")).toBeTruthy();
+			fireEvent.keyDown(window, { key: "g" });
+		} finally {
+			narrow.mockRestore();
+		}
+	});
+
 	test("takes focus when the reader opens it", async () => {
 		const container = openPanel();
 		fireEvent.keyDown(window, { key: "g" });
@@ -396,15 +467,44 @@ describe("GraphPanel accessibility", () => {
 		});
 
 		const onNodeClick = capturedGraphProps?.onNodeClick as
-			| ((node: { routePath?: string }) => void)
+			| ((node: ReturnType<typeof graphNode>) => void)
 			| undefined;
 		if (!onNodeClick) throw new Error("GraphView never wired onNodeClick");
 
-		onNodeClick({ routePath: "/guide/api" });
+		onNodeClick(graphNode("/guide/api"));
 
 		expect(navigateSpy).toHaveBeenCalledWith("/guide/api");
 
 		// Close so the 150ms stats timer does not fire after the test.
 		fireEvent.keyDown(window, { key: "g" });
+	});
+
+	test("a panel the reader requested before its chunk loaded takes focus on mount", () => {
+		// The FAB the reader activated belongs to the lazy wrapper and unmounts as
+		// the chunk loads; without this, focus fell to <body>.
+		vi.useFakeTimers();
+		try {
+			const { container } = render(<GraphPanel defaultOpen readerRequested />);
+			act(() => {
+				vi.advanceTimersByTime(200);
+			});
+			expect(document.activeElement).toBe(
+				container.querySelector("#rspress-graph-view-panel button[aria-label='Close graph view']"),
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test("secondary text uses the theme's full-strength secondary colour", () => {
+		const container = openPanel();
+		fireEvent.keyDown(window, { key: "g" });
+		const hint = [...container.querySelectorAll("#rspress-graph-view-panel span")].find((span) =>
+			span.textContent?.includes("to close"),
+		) as HTMLElement | undefined;
+		const footer = hint?.parentElement as HTMLElement;
+		// The old `color-mix(… 40%, transparent)` measured about 1.7:1.
+		expect(footer.style.color).not.toContain("color-mix");
+		expect(footer.style.color).toContain("--rp-c-text-2");
 	});
 });

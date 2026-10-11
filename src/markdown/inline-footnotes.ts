@@ -12,30 +12,54 @@
  * bracket-aware character stream that still records which child each character
  * came from, locates every `^[…]` by bracket depth across node boundaries, and
  * serializes the spanned inline nodes back to markdown — so the collected
- * definition is real source text, the same text the footnotes block re-renders.
- * That is why `**bold**`, `` `code` ``, `[[wikilink]]` and `[text](url)` inside
- * an inline footnote all come out as markup.
+ * content is real source text, which the footnote pass parses again. That is
+ * why `**bold**`, `` `code` ``, `[[wikilink]]` and `[text](url)` inside an
+ * inline footnote all come out as markup.
+ *
+ * Each construct is replaced by an {@link InlineFootnoteNode}; numbering is the
+ * footnote pass's job, because Obsidian numbers label and inline footnotes in
+ * one sequence, by first reference.
  */
 
-import type { HTML, Link, PhrasingContent, Text } from "mdast";
-import type { Parent } from "unist";
-import { escapeHtmlAttribute } from "../shared/escape.js";
+import type { Link, PhrasingContent, Root } from "mdast";
+import type { Node, Parent } from "unist";
+import { visit } from "unist-util-visit";
 
-/** An inline footnote definition collected for the footnotes block. */
-export interface InlineFootnoteDef {
-	id: string;
+/** The `^[…]` construct, before the footnote pass numbers it. */
+export interface InlineFootnoteNode extends Node {
+	type: "inlineFootnote";
+	/** The footnote's markdown, as written between `^[` and `]`. */
 	content: string;
 }
-
-/** The `<sup>` reference emitted in place of the `^[…]` construct. */
-function createFootnoteRef(id: string, counter: number, content: string): HTML {
-	return {
-		type: "html",
-		value: `<sup class="footnote-ref" id="fnref-${escapeHtmlAttribute(id)}"><a href="#fn-${escapeHtmlAttribute(id)}" title="${escapeHtmlAttribute(content)}">${counter}</a></sup>`,
-	};
+declare module "mdast" {
+	interface PhrasingContentMap {
+		inlineFootnote: InlineFootnoteNode;
+	}
+	interface RootContentMap {
+		inlineFootnote: InlineFootnoteNode;
+	}
 }
 
-function createText(value: string): Text {
+/** Node types whose children are phrasing content, where an inline footnote can sit. */
+const PHRASING_CONTAINER_TYPES: Record<string, true> = {
+	paragraph: true,
+	heading: true,
+	tableCell: true,
+	emphasis: true,
+	strong: true,
+	delete: true,
+	link: true,
+	highlight: true,
+};
+
+/** Inline nodes whose text is never prose, so never holds a footnote. */
+const LITERAL_TYPES: Record<string, true> = {
+	inlineCode: true,
+	html: true,
+	inlineMath: true,
+	wikiLink: true,
+};
+function createText(value: string): PhrasingContent {
 	return { type: "text", value };
 }
 
@@ -43,8 +67,8 @@ function createText(value: string): Text {
  * Markdown for one inline node, so a footnote spanning it keeps its formatting.
  *
  * Only the constructs remark actually splits on are serialized; anything else
- * (a highlight `<mark>`, an already-resolved embed) falls back to its plain text,
- * since the footnotes block re-renders the collected content from source.
+ * falls back to its plain text, since the footnote pass re-parses the collected
+ * content.
  */
 function serializeInline(node: PhrasingContent): string {
 	switch (node.type) {
@@ -58,6 +82,10 @@ function serializeInline(node: PhrasingContent): string {
 			return `*${node.children.map(serializeInline).join("")}*`;
 		case "delete":
 			return `~~${node.children.map(serializeInline).join("")}~~`;
+		case "highlight":
+			return `==${node.children.map(serializeInline).join("")}==`;
+		case "inlineMath":
+			return `$${node.value}$`;
 		case "link": {
 			const link = node as Link;
 			const label = link.children.map(serializeInline).join("");
@@ -70,8 +98,9 @@ function serializeInline(node: PhrasingContent): string {
 		case "html":
 			return node.value;
 		default: {
-			// An extension's node, or an inline run this pass does not model. Its
-			// text is kept so the footnote content is not lost.
+			// An extension's node (`wikiLink` keeps its raw source as `value`), or
+			// an inline run this pass does not model. Its text is kept so the
+			// footnote content is not lost.
 			const children = (node as Parent & { children?: PhrasingContent[] }).children;
 			if (Array.isArray(children)) {
 				return children.map((child) => serializeInline(child as PhrasingContent)).join("");
@@ -87,22 +116,9 @@ interface Char {
 	child: PhrasingContent;
 }
 
-/** Every character of the block's phrasing children, in order, with its owner. */
-function flatten(children: PhrasingContent[]): Char[] {
-	const chars: Char[] = [];
-	for (const child of children) {
-		for (const value of serializeInline(child)) {
-			chars.push({ value, child });
-		}
-	}
-	return chars;
-}
-
-/** A located `^[…]`. */
+/** A located `^[…]`: stream indexes of the `^` and of the closing `]`. */
 interface Match {
-	/** Stream index of the `^`. */
 	start: number;
-	/** Stream index of the `]`. */
 	end: number;
 }
 
@@ -114,6 +130,11 @@ interface Match {
  * returns to depth zero closes the construct. An unclosed opener is skipped, and
  * scanning resumes after it, so `^[dangling` stays literal text and a later
  * `^[…]` in the same block still resolves.
+ *
+ * A match lying wholly inside one non-text child (`**claim ^[x]**`, a code span,
+ * a raw HTML run) is not this level's to take: emphasis and links are visited
+ * on their own and rebuilt there with their formatting intact, and code and
+ * HTML never hold a footnote at all.
  */
 function findMatches(chars: Char[]): Match[] {
 	const matches: Match[] = [];
@@ -143,6 +164,15 @@ function findMatches(chars: Char[]): Match[] {
 			index += 2;
 			continue;
 		}
+		const owner = chars[index]?.child;
+		if (
+			owner &&
+			chars[close]?.child === owner &&
+			(PHRASING_CONTAINER_TYPES[owner.type] || LITERAL_TYPES[owner.type])
+		) {
+			index = close + 1;
+			continue;
+		}
 		matches.push({ start: index, end: close });
 		index = close + 1;
 	}
@@ -150,37 +180,24 @@ function findMatches(chars: Char[]): Match[] {
 	return matches;
 }
 
-/** Markdown content of a match: the characters between `^[` and `]`. */
-function contentOf(chars: Char[], match: Match): string {
-	return chars
-		.slice(match.start + 2, match.end)
-		.map((char) => char.value)
-		.join("");
-}
-
 /**
- * Replace the inline footnotes in a block's phrasing children.
- *
- * `startCounter` continues the document-wide inline-footnote numbering, so ids
- * stay unique across blocks.
+ * Replace the inline footnotes among one container's phrasing children.
+ * Returns the original array when there are none.
  */
-export function extractInlineFootnotes(
-	children: PhrasingContent[],
-	startCounter: number,
-): { children: PhrasingContent[]; defs: InlineFootnoteDef[] } {
-	const chars = flatten(children);
+export function extractInlineFootnotes(children: PhrasingContent[]): PhrasingContent[] {
+	const chars: Char[] = [];
+	for (const child of children) {
+		for (const value of serializeInline(child)) chars.push({ value, child });
+	}
 	if (!chars.some((char, index) => char.value === "^" && chars[index + 1]?.value === "[")) {
-		return { children, defs: [] };
+		return children;
 	}
 
 	const matches = findMatches(chars);
-	if (matches.length === 0) return { children, defs: [] };
+	if (matches.length === 0) return children;
 
-	const defs: InlineFootnoteDef[] = [];
 	const out: PhrasingContent[] = [];
-	let counter = startCounter;
 	let at = 0;
-
 	const textBetween = (from: number, to: number) =>
 		chars
 			.slice(from, to)
@@ -188,10 +205,10 @@ export function extractInlineFootnotes(
 			.join("");
 
 	for (const child of children) {
-		// `flatten` emits each child's characters contiguously, in order, so the
-		// span this child owns runs from the cursor to the first character owned
-		// by a different node. A child with no characters (a `footnoteReference`,
-		// for instance) spans nothing and is carried across untouched.
+		// Each child's characters are contiguous and in order, so the span this
+		// child owns runs from the cursor to the first character of another node.
+		// A child with no characters (a `footnoteReference`) spans nothing and is
+		// carried across untouched.
 		const start = at;
 		while (at < chars.length && chars[at]?.child === child) at += 1;
 		const end = at;
@@ -201,41 +218,48 @@ export function extractInlineFootnotes(
 		let last = first;
 		while (last < matches.length && (matches[last] as Match).start < end) last += 1;
 
-		// No construct inside this child: keep the node itself so emphasis, links
-		// and footnotes ahead of the rebuild survived as real nodes rather than
-		// being flattened to their text.
-		if (first === last) {
+		// No construct touches this child: keep the node itself so emphasis,
+		// links and footnote references survive as real nodes.
+		const touching = matches
+			.slice(first, last)
+			.some((match) => match.end >= start && match.start < end);
+		if (!touching) {
 			out.push(child);
 			continue;
 		}
 
-		const firstMatch = matches[first] as Match;
 		let cursorAt = start;
-		if (firstMatch.start > cursorAt) {
-			out.push(createText(textBetween(cursorAt, firstMatch.start)));
-			cursorAt = firstMatch.start;
-		}
-
 		for (let index = first; index < last; index += 1) {
 			const match = matches[index] as Match;
+			if (match.end < start) continue;
 			if (match.start > cursorAt) {
 				out.push(createText(textBetween(cursorAt, match.start)));
 				cursorAt = match.start;
 			}
-			// A match can span several children; the `<sup>` belongs to the one
+			// A match can span several children; the marker belongs to the one
 			// that owns its `^`, and the rest contribute only their tail text.
 			if (match.start >= start && match.start < end) {
-				counter += 1;
-				const id = `inline-${counter}`;
-				const content = contentOf(chars, match);
-				defs.push({ id, content });
-				out.push(createFootnoteRef(id, counter, content));
+				out.push({
+					type: "inlineFootnote",
+					content: textBetween(match.start + 2, match.end),
+				});
 			}
-			cursorAt = match.end + 1;
+			cursorAt = Math.max(cursorAt, match.end + 1);
 		}
 
 		if (end > cursorAt) out.push(createText(textBetween(cursorAt, end)));
 	}
 
-	return { children: out, defs };
+	return out;
+}
+
+/** Replace every inline footnote in the tree with an {@link InlineFootnoteNode}. */
+export function replaceInlineFootnotes(tree: Root): void {
+	visit(tree, (node) => {
+		if (!PHRASING_CONTAINER_TYPES[node.type]) return;
+		const container = node as Parent & { children: PhrasingContent[] };
+		if (!Array.isArray(container.children)) return;
+		container.children = extractInlineFootnotes(container.children);
+		// Descend regardless: a link or emphasis can itself hold one.
+	});
 }

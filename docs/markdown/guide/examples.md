@@ -187,6 +187,10 @@ Standard markdown links to vault pages resolve through the same rules — Obsidi
 - [Markdown link to the vault root](/markdown/) — resolves the section root page, not a relative path. The trailing slash is what makes an index page resolve: Rspress rewrites a slash-less route to `/markdown.html`, and the file it published is `markdown/index.html`
 - [Markdown link with an anchor](getting-started.md#Install) — `#anchor` destinations resolve to heading slugs
 
+A block link reaches one paragraph, list item or table of another note:
+
+- [[intro#^anchor-demo|A block in the vault's intro]] — hovering it previews only that paragraph
+
 Current page anchor links:
 
 - [[#Callouts]] — jump to the callouts section
@@ -209,16 +213,18 @@ A footnote or citation definition *looks* like one of these but addresses
 nothing, so neither becomes a backlink: a note[^ref-not-a-link] and a
 citation[~cite] stay out.
 
-## Dataview Inline Expressions
+## Dataview Inline Queries
 
-With `enableDataview` on, a bare `= expression` in prose is evaluated and the
-value is rendered in place. This page's own name resolves:
+With `enableDataview` on, inline code that starts with `=` is a Dataview
+inline query, evaluated with `this` as the current page — Dataview's own
+syntax. This page's own name resolves:
 
-The file name is = file.name, and its folder is = file.folder.
+The file name is `= this.file.name`, and its folder is `= this.file.folder`.
 
-An expression that resolves to nothing is left exactly as written rather than
-collapsed into an empty span — ordinary prose survives untouched, which is why
-the sentence below still reads as prose and reports no diagnostic:
+Inline code that starts with `$=` is inline DataviewJS: this site has
+`$= dv.pages().length` pages.
+
+Plain prose is never evaluated, so the sentence below reads exactly as written:
 
 The speed = value.
 

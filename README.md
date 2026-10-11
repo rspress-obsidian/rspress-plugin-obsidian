@@ -18,12 +18,33 @@ bun add rspress-plugin-obsidian
 
 Requires **Node.js ≥ 22.14.0** and **Rspress `^2.0.21`**.
 
-`graphview()` renders through `react-force-graph-2d`, which is an optional peer
-and so is *not* installed for you — without it the build fails at bundle time,
-before any runtime fallback can run:
+`graphview()` draws the graph with `react-force-graph-2d`, an optional peer that
+is *not* installed for you. Without it the site still builds and the build says
+which package to install, but the panel lists the pages instead of drawing the
+graph:
 
 ```bash
 bun add react-force-graph-2d
+```
+
+More optional peers are needed only by the features that use them. Without
+one, the site still builds, the feature falls back as described, and the build
+says which package to install.
+
+| Peer | Used for | Without it |
+| --- | --- | --- |
+| `mermaid` | `enableMermaid` diagrams, Mermaid in canvas cards and Excalidraw drawings | diagrams stay on the page as source |
+| `mathjax-full` | `mathEngine: "mathjax"` | — (KaTeX is the default engine) |
+| `@excalidraw/excalidraw` | Excalidraw's own fonts, and exact text measurement, in `enableExcalidraw` drawings | a fallback font stack and estimated text wrapping |
+| `maplibre-gl` | interactive Bases map views | a table of the located notes |
+| `lucide-static` | the icons Bases' `icon()` draws | the icon's name |
+
+```bash
+bun add mermaid                 # only for Mermaid diagrams
+bun add mathjax-full            # only for mathEngine: "mathjax"
+bun add @excalidraw/excalidraw  # only for Excalidraw's fonts and text metrics
+bun add maplibre-gl             # only for Bases map views
+bun add lucide-static           # only for Bases icon()
 ```
 
 ## Use
@@ -69,15 +90,18 @@ feature is importable on its own.
 
 | Feature | Export | What you get | Stylesheet |
 | --- | --- | --- | --- |
-| Markdown | `markdown` | wikilinks, embeds, callouts, backlinks, transclusion, media embeds, tags + tag pages, daily notes, Dataview, math, Mermaid — see below | `rspress-plugin-obsidian/markdown/styles.css` |
+| Markdown | `markdown` | wikilinks, embeds, callouts, backlinks, transclusion, media embeds, tags + tag pages, daily notes, Dataview, Tasks, Kanban, Excalidraw, Bases, Templater, math, Mermaid — see below | `rspress-plugin-obsidian/markdown/styles.css` |
 | Canvas | `canvas` | `.canvas` boards as interactive pages, with an in-browser editor | `rspress-plugin-obsidian/canvas/styles.css` |
-| Graph view | `graphview` | the interactive link graph, local and global | `rspress-plugin-obsidian/styles.css` (aggregate) |
+| Graph view | `graphview` | the interactive link graph, local and global, and Obsidian's Page preview of linked notes on hover (`enableHoverPreviews`) | `rspress-plugin-obsidian/styles.css` (aggregate) |
 
 ## What `markdown()` turns on
 
 Always on: `[[wikilinks]]`, `![[embeds]]`, `#heading` and `#^block` anchors,
 `==highlights==`, `%%comments%%`, `[^1]` and `^[…]` footnotes, frontmatter.
-On by default: `[text](Note.md)` links, case-insensitive lookup.
+On by default: `[text](Note.md)` links, case-insensitive lookup, and — in vault
+notes — Obsidian's soft line breaks (a single newline is a `<br>`;
+`strictLineBreaks: true` turns that off, `false` extends it to docs pages).
+Attachments are published only when a published page references them.
 
 Everything else is opt-in, because a docs site may not want it:
 
@@ -91,21 +115,54 @@ Everything else is opt-in, because a docs site may not want it:
 | `enableTagLinking` | `#tag` becomes a link to its generated `/tags/<tag>` page |
 | `enableTagPages` | generates those `/tags/<tag>` pages |
 | `enableDailyNotes` | date-filed notes, `{{date}}` tokens, prev/next navigation |
-| `enableDataview` | DQL blocks (`TABLE`/`LIST`/`TASK`/`CALENDAR`) and inline `= expr` |
+| `enableDataview` | DQL blocks (`TABLE`/`LIST`/`TASK`/`CALENDAR`), DataviewJS, and inline `` `= expr` `` / `` `$= expr` `` queries, as Dataview writes them |
 | `enableMath` | `$inline$` and `$$display$$` via KaTeX, or MathJax with `mathEngine` |
-| `enableMermaid` | ` ```mermaid ` fences drawn in the browser |
+| `enableMermaid` | ` ```mermaid ` fences drawn in the browser (needs the optional `mermaid` package) |
+| `enableTasks` | ` ```tasks ` queries over every published task, with the Tasks plugin's filters, sorting, grouping, layout and markup |
+| `enableKanban` | notes saved by the Kanban plugin publish as read-only boards (board, list and table views) |
+| `enableExcalidraw` | Excalidraw drawings — `.excalidraw.md` notes, plain `.excalidraw` files, `![[Drawing]]` embeds and crops — as static hand-drawn SVG |
+| `enableBases` | `.base` files as pages, `![[x.base]]` embeds and ` ```base ` blocks: filters, formulas, table/cards/list/kanban views |
+| `enableTemplater` | Templater templates applied to empty daily, folder and regex-matched notes, `<%+ %>` dynamic commands; the templates folder stays private |
 | `enableDefaultStyles` | injects the stylesheet the above need to be visible |
 
-`enableCallouts`, `enableBacklinks` and `enableTagPages` emit markup but no
-rules, so they need `enableDefaultStyles` (or the stylesheet imported by hand)
-before any of it shows. `onBrokenLink` and `onAmbiguousLink` default to
-`"error"`, so an unresolvable `[[wikilink]]` fails the build — that is the
-diagnostic working, not a bug.
+`enableCallouts`, `enableBacklinks`, `enableTagPages` and the Kanban, Bases
+and Tasks layouts emit markup but no rules, so they need `enableDefaultStyles`
+(or the stylesheet imported by hand) before any of it shows. The five plugin
+features read the vault's own plugin settings
+(`.obsidian/plugins/<id>/data.json`); a `tasks`/`kanban`/`excalidraw`/`bases`/
+`templater` option object overrides them — each guide lists its keys.
+`onBrokenLink` defaults to `"error"`, so an unresolvable `[[wikilink]]` fails
+the build — that is the diagnostic working, not a bug. `onAmbiguousLink`
+defaults to `"warn"`. `onPluginError` (default `"error"`) fails the build for a
+plugin block that will not render, which is also shown in place.
+
+## Coming from `rspress-plugin-graph-view`
+
+`graphview()` replaces the standalone `rspress-plugin-graph-view` package, which
+this one supersedes. `defaultOpen`, `profileBuild`, `colors` and the
+`RSPRESS_GRAPH_VIEW_PROFILE=1` variable work as before (`colors` accepts every
+key the old package documented, plus a few more).
+
+```diff
+-import { pluginGraphview } from "rspress-plugin-graph-view";
++import { graphview } from "rspress-plugin-obsidian";
+
+-  plugins: [pluginGraphview()],
++  plugins: [graphview()],
+```
+
+- A custom theme's sidebar graph imports
+  `rspress-plugin-obsidian/graph/runtime/GraphSidebar` instead of
+  `rspress-plugin-graph-view/runtime/GraphSidebar`.
+- The panel stylesheet is not injected unless you set `enableDefaultStyles: true`;
+  otherwise import `rspress-plugin-obsidian/graph/styles.css`.
+- Keep `react-force-graph-2d` installed, then remove `rspress-plugin-graph-view`.
 
 ## Documentation
 
 - [Getting started](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/getting-started.md)
 - [Live examples](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/markdown/guide/examples.md) — every feature, rendered by this plugin
+- Plugin guides: [Tasks](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/markdown/guide/tasks.md), [Kanban](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/markdown/guide/kanban.md), [Excalidraw](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/markdown/guide/excalidraw.md), [Bases](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/markdown/guide/bases.md), [Templater](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/markdown/guide/templater.md)
 - [Obsidian compatibility](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md) — the per-feature support matrix
 
 The documentation site is built by this plugin with every feature enabled, so
@@ -135,22 +192,44 @@ configures the Markdown pipeline only.
 
 ## Development
 
+Contributors need **Bun ≥ 1.4** (`packageManager` pins the exact version CI
+uses): the committed `bun.lock` is a v2 lockfile that older Bun cannot read.
+
 ```bash
 bun install
 bun run typecheck
+bun test               # unit tests only
+bun run test:coverage  # the same suite under the coverage gate CI enforces
+bun run build          # tsup → dist/ (ESM+CJS, d.ts/d.cts, css)
+bun run test:publish   # packs the tarball and checks every exports entry (after build)
+bun run test:types     # publint + attw against the packed tarball (after build)
+bun run test:doc-examples  # type-checks the configs the docs tell you to copy (after build)
 bun run docs:build     # required before the build-integration and e2e suites
-bun test               # unit tests + rspress build-integration tests
-bun run test:doc-examples  # type-checks the configs the docs tell you to copy
-bun run build          # tsup → dist/ (ESM+CJS, d.ts, css)
-bun run test:publish   # asserts every exports entry resolves from dist/ (after build)
+RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts  # asserts the docs build
 bun run test:e2e       # playwright against doc_build/
 ```
 
-Releases are cut by semantic-release (`bun run release`): versions and released
-CHANGELOG sections are generated from Conventional Commits, so do not hand-edit
-released sections. npm provenance attestations are only produced when publishing
-from GitHub Actions with `id-token: write`; the local release flow publishes
-without them.
+CI also installs the packed tarball into the minimal site in
+`test/consumer-site/`, builds it with `rspress build`, with and without
+`mermaid`, and smoke-checks the output.
+
+## Releases
+
+Releases are cut by semantic-release from Conventional Commits on `main`
+(`fix:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major). The version is
+not kept in git: `package.json` holds the `0.0.0-development` placeholder that
+semantic-release recommends, and the released version lives in the git tag, the
+npm registry and `CHANGELOG.md`. The first release is `1.0.0`. Release sections
+in `CHANGELOG.md` are generated, so describe a change in its commit message
+rather than editing the file.
+
+The Release workflow runs only after CI passes for a push to `main`, and only
+for the commit that CI verified. A read-only job repeats lint, typecheck, build,
+the coverage gate, the packed-tarball and type checks and the doc-example check,
+then packs the tarball. A second job holds the write and OIDC tokens and runs no
+project code. It stamps the computed version into the unpacked tarball, pushes
+the CHANGELOG commit and the tag, and publishes those files through npm trusted
+publishing, with provenance.
 
 ## License
 

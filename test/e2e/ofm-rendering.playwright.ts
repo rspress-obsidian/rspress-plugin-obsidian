@@ -12,7 +12,7 @@ test.describe("Math and Mermaid rendering", () => {
 
 	test("applies KaTeX styling to inline and display math", async ({ page }) => {
 		const inline = page.locator("span.obsidian-math .katex").first();
-		const display = page.locator("span.obsidian-math-display .katex-display").first();
+		const display = page.locator(".obsidian-math-display .katex-display").first();
 
 		await expect(inline).toBeVisible();
 		await expect(display).toBeVisible();

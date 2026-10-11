@@ -15,8 +15,9 @@ footnotes and frontmatter. Callouts, transclusion, media embeds, tags and tag
 pages, daily notes, Dataview, math, Mermaid and the backlinks panel are each
 behind an `enable*` flag described [below](#optional-features).
 
-> `onBrokenLink` and `onAmbiguousLink` default to `"error"`, so the first build
-> of a real vault **fails on every unresolved `[[link]]`**. That is the
+> `onBrokenLink` defaults to `"error"`, so the first build of a real vault
+> **fails on every unresolved `[[link]]`** (an ambiguous one resolves like
+> Obsidian and only warns, through `onAmbiguousLink`). That is the
 > diagnostic doing its job. See
 > [how to check your own vault](/obsidian-compatibility#how-to-check-your-own-vault)
 > for downgrading it to a warning.
@@ -253,7 +254,7 @@ Full configuration example:
 ```ts
 markdown({
   onBrokenLink: "error",
-  onAmbiguousLink: "error",
+  onAmbiguousLink: "warn",
   enableFuzzyMatching: false,
   enableCaseInsensitiveLookup: false,
   enableTagLinking: true,

@@ -1,507 +1,419 @@
-import { escapeHtmlAttribute, escapeHtmlText, sanitizeUrl } from "../shared/escape.js";
+/**
+ * DataviewJS, interpreted — never evaluated as JavaScript.
+ *
+ * A small JavaScript subset is tokenized, parsed and run by this module and its
+ * `dataview-js-*` siblings: `const`/`let`/`var`, assignment to declared
+ * variables, `if`/`else`, `for (… of …)`, arrow functions, template literals,
+ * the usual operators, and the `dv` API over the content index. Identifiers
+ * resolve only to variables the script declared, `dv` and a few safe globals;
+ * properties are read only from a value's own enumerable fields; methods are an
+ * explicit allowlist per value type. Nothing reaches the host: there is no
+ * `eval`, `Function`, global object or prototype access.
+ */
 import type { DailyNoteConfig } from "./daily-notes.js";
-import { parseDailyNoteDate } from "./daily-notes.js";
+import {
+	createDataviewEnvironment,
+	type DataviewEnvironment,
+	type DataviewSettings,
+} from "./dataview.js";
+import { callDataviewFunction } from "./dataview-expression.js";
+import { callDv } from "./dataview-js-api.js";
+import { tokenize } from "./dataview-js-lexer.js";
+import {
+	binary,
+	callArrayMethod,
+	callStringMethod,
+	DV,
+	DV_FUNC,
+	describe,
+	invoke,
+	jsString,
+	MATH,
+	readProperty,
+} from "./dataview-js-methods.js";
+import { type Expr, Parser, type Stmt } from "./dataview-js-parser.js";
+import { renderValue } from "./dataview-render.js";
+import {
+	addDuration,
+	DataviewDuration,
+	DataviewFunction,
+	DataviewLink,
+	formatLuxonDate,
+	parseDuration,
+	valueToString,
+} from "./dataview-values.js";
+import {
+	checkSize,
+	concatTexts,
+	isStackOverflow,
+	STACK_OVERFLOW_MESSAGE,
+	WorkBudget,
+} from "./interpreter-limits.js";
 import type { ContentIndex, ContentPage } from "./types.js";
-import { normalizeFilePathKey, routeHref } from "./utils.js";
-
-interface JsLink {
-	kind: "link";
-	label: string;
-	href: string;
-}
-
-interface JsPage {
-	[key: string]: unknown;
-	file: Record<string, unknown>;
-}
-
-interface JsEnvironment {
-	values: Map<string, unknown>;
-}
 
 export interface DataviewJsResult {
 	html?: string;
 	error?: string;
 }
 
-const FORBIDDEN_SOURCE =
-	/\b(?:globalThis|global|process|require|import|export|fetch|Bun|Deno|window|document|eval|Function|constructor|prototype|__proto__|setTimeout|setInterval|fs|node:)\b/i;
+// ---------------------------------------------------------------------------
+// Evaluation
+// ---------------------------------------------------------------------------
 
+class Scope {
+	private readonly values = new Map<string, { value: unknown; constant: boolean }>();
+
+	constructor(private readonly parent?: Scope) {}
+
+	declare(name: string, value: unknown, constant: boolean): void {
+		if (this.values.has(name)) throw new Error(`DataviewJS: "${name}" is already declared.`);
+		this.values.set(name, { value, constant });
+	}
+
+	lookup(name: string): { value: unknown; constant: boolean } | undefined {
+		return this.values.get(name) ?? this.parent?.lookup(name);
+	}
+
+	assign(name: string, value: unknown): void {
+		const binding = this.values.get(name);
+		if (binding) {
+			if (binding.constant) throw new Error(`DataviewJS: cannot assign to the constant "${name}".`);
+			binding.value = value;
+			return;
+		}
+		if (!this.parent) throw new Error(`DataviewJS: "${name}" is not declared.`);
+		this.parent.assign(name, value);
+	}
+}
+
+class ReturnSignal {
+	constructor(readonly value: unknown) {}
+}
+
+const MAX_CALL_DEPTH = 200;
+/**
+ * Evaluation steps, plus what the script builds, before a runaway script is
+ * stopped: room for a script that compares every page with every other.
+ */
+const MAX_WORK = 50_000_000;
+
+export interface Runtime {
+	env: DataviewEnvironment;
+	output: string[];
+	depth: number;
+	budget: WorkBudget;
+}
+
+function run(statements: Stmt[], scope: Scope, rt: Runtime): void {
+	for (const statement of statements) execute(statement, scope, rt);
+}
+
+function execute(statement: Stmt, scope: Scope, rt: Runtime): void {
+	rt.budget.spend();
+	switch (statement.k) {
+		case "empty":
+			return;
+		case "declare":
+			scope.declare(
+				statement.name,
+				statement.init ? evaluate(statement.init, scope, rt) : undefined,
+				statement.kind === "const",
+			);
+			return;
+		case "expression":
+			evaluate(statement.expr, scope, rt);
+			return;
+		case "if":
+			if (evaluate(statement.test, scope, rt)) execute(statement.then, new Scope(scope), rt);
+			else if (statement.otherwise) execute(statement.otherwise, new Scope(scope), rt);
+			return;
+		case "forOf": {
+			const iterable = evaluate(statement.iterable, scope, rt);
+			if (!Array.isArray(iterable)) throw new Error("DataviewJS: for (… of …) needs an array.");
+			for (const item of iterable) {
+				const inner = new Scope(scope);
+				inner.declare(statement.name, item, false);
+				execute(statement.body, inner, rt);
+			}
+			return;
+		}
+		case "block":
+			run(statement.body, new Scope(scope), rt);
+			return;
+		case "return":
+			throw new ReturnSignal(statement.value ? evaluate(statement.value, scope, rt) : undefined);
+	}
+}
+
+function makeFunction(
+	params: string[],
+	body: Expr | Stmt[],
+	scope: Scope,
+	rt: Runtime,
+): DataviewFunction {
+	return new DataviewFunction((args) => {
+		if (rt.depth >= MAX_CALL_DEPTH) throw new Error("DataviewJS: too much recursion.");
+		rt.depth += 1;
+		try {
+			const inner = new Scope(scope);
+			params.forEach((name, position) => {
+				inner.declare(name, args[position], false);
+			});
+			if (!Array.isArray(body)) return evaluate(body, inner, rt);
+			try {
+				run(body, inner, rt);
+			} catch (signal) {
+				if (signal instanceof ReturnSignal) return signal.value;
+				throw signal;
+			}
+			return undefined;
+		} finally {
+			rt.depth -= 1;
+		}
+	});
+}
+
+function evaluate(expr: Expr, scope: Scope, rt: Runtime): unknown {
+	rt.budget.spend();
+	switch (expr.k) {
+		case "literal":
+			return expr.value;
+		case "template": {
+			let text = expr.quasis[0] ?? "";
+			expr.expressions.forEach((part, position) => {
+				text = concatTexts(
+					text,
+					jsString(evaluate(part, scope, rt)) + (expr.quasis[position + 1] ?? ""),
+				);
+			});
+			return text;
+		}
+		case "identifier": {
+			const binding = scope.lookup(expr.name);
+			if (binding) return binding.value;
+			if (expr.name === "dv") return DV;
+			if (expr.name === "Math") return MATH;
+			if (expr.name === "String" || expr.name === "Number" || expr.name === "Boolean") {
+				return new DataviewFunction(([value]) =>
+					expr.name === "String"
+						? jsString(value)
+						: expr.name === "Number"
+							? Number(value)
+							: Boolean(value),
+				);
+			}
+			throw new Error(`DataviewJS: "${expr.name}" is not defined.`);
+		}
+		case "array":
+			return expr.items.map((item) => evaluate(item, scope, rt));
+		case "object":
+			return Object.fromEntries(
+				expr.props.map(([key, value]) => [key, evaluate(value, scope, rt)]),
+			);
+		case "member": {
+			const object = evaluate(expr.object, scope, rt);
+			if (expr.optional && object == null) return undefined;
+			return readProperty(object, expr.property);
+		}
+		case "index": {
+			const object = evaluate(expr.object, scope, rt);
+			if (expr.optional && object == null) return undefined;
+			const index = evaluate(expr.index, scope, rt);
+			if (typeof index === "number" && Array.isArray(object)) return object[index];
+			if (typeof index === "number" && typeof object === "string") return object[index];
+			if (typeof index !== "string" && typeof index !== "number") {
+				throw new Error("DataviewJS: an index must be a string or a number.");
+			}
+			return readProperty(object, String(index));
+		}
+		case "call":
+			return callExpression(expr, scope, rt);
+		case "unary": {
+			const value = evaluate(expr.argument, scope, rt);
+			if (expr.op === "!") return !value;
+			if (expr.op === "-") return -Number(value);
+			if (expr.op === "+") return Number(value);
+			if (expr.op === "await") return value;
+			return value instanceof DataviewFunction
+				? "function"
+				: value === null
+					? "object"
+					: typeof value;
+		}
+		case "binary": {
+			if (expr.op === "&&") {
+				const left = evaluate(expr.left, scope, rt);
+				return left ? evaluate(expr.right, scope, rt) : left;
+			}
+			if (expr.op === "||") {
+				const left = evaluate(expr.left, scope, rt);
+				return left ? left : evaluate(expr.right, scope, rt);
+			}
+			if (expr.op === "??") {
+				const left = evaluate(expr.left, scope, rt);
+				return left ?? evaluate(expr.right, scope, rt);
+			}
+			return binary(expr.op, evaluate(expr.left, scope, rt), evaluate(expr.right, scope, rt));
+		}
+		case "conditional":
+			return evaluate(expr.test, scope, rt)
+				? evaluate(expr.then, scope, rt)
+				: evaluate(expr.otherwise, scope, rt);
+		case "arrow":
+			return makeFunction(expr.params, expr.body, scope, rt);
+		case "assign": {
+			const binding = scope.lookup(expr.target);
+			if (!binding) throw new Error(`DataviewJS: "${expr.target}" is not declared.`);
+			const value = evaluate(expr.value, scope, rt);
+			const next = expr.op === "=" ? value : binary(expr.op.slice(0, 1), binding.value, value);
+			scope.assign(expr.target, next);
+			return next;
+		}
+	}
+}
+
+function callExpression(expr: Extract<Expr, { k: "call" }>, scope: Scope, rt: Runtime): unknown {
+	const callee = expr.callee;
+	if (callee.k === "member") {
+		const receiver = evaluate(callee.object, scope, rt);
+		if (callee.optional && receiver == null) return undefined;
+		const args = expr.args.map((arg) => evaluate(arg, scope, rt));
+		const result = callMethod(receiver, callee.property, args, rt);
+		checkSize(result);
+		rt.budget.charge(result, receiver);
+		return result;
+	}
+	const fn = evaluate(callee, scope, rt);
+	if (expr.optional && fn == null) return undefined;
+	return invoke(
+		fn,
+		expr.args.map((arg) => evaluate(arg, scope, rt)),
+	);
+}
+
+function callMethod(receiver: unknown, name: string, args: unknown[], rt: Runtime): unknown {
+	if (receiver === DV) {
+		const emitted = rt.output.length;
+		const result = callDv(name, args, rt);
+		// Rendered output is built too: a loop rendering a huge value each pass must still stop.
+		for (const html of rt.output.slice(emitted)) rt.budget.charge(html, undefined);
+		return result;
+	}
+	if (receiver === DV_FUNC) return callDataviewFunction(name, rt.env.ctx, args);
+	if (receiver === MATH) {
+		const numbers = args.map(Number);
+		switch (name) {
+			case "round":
+				return Math.round(numbers[0] ?? Number.NaN);
+			case "floor":
+				return Math.floor(numbers[0] ?? Number.NaN);
+			case "ceil":
+				return Math.ceil(numbers[0] ?? Number.NaN);
+			case "abs":
+				return Math.abs(numbers[0] ?? Number.NaN);
+			case "min":
+				return Math.min(...numbers);
+			case "max":
+				return Math.max(...numbers);
+		}
+		throw new Error(`Unsupported DataviewJS function: Math.${name}.`);
+	}
+	if (Array.isArray(receiver)) return callArrayMethod(receiver, name, args, rt.budget);
+	if (typeof receiver === "string") return callStringMethod(receiver, name, args);
+	if (typeof receiver === "number") {
+		if (name === "toFixed") return receiver.toFixed(Number(args[0] ?? 0));
+		if (name === "toString") return String(receiver);
+	}
+	if (receiver instanceof Date) {
+		if (name === "toFormat") return formatLuxonDate(receiver, String(args[0] ?? ""));
+		if (name === "toISODate") return formatLuxonDate(receiver, "yyyy-MM-dd");
+		if (name === "toMillis" || name === "valueOf") return receiver.getTime();
+		if (name === "plus" || name === "minus") {
+			const duration =
+				args[0] instanceof DataviewDuration ? args[0] : parseDuration(String(args[0] ?? ""));
+			if (!duration) throw new Error(`DataviewJS: ${name}() needs a duration.`);
+			return addDuration(receiver, duration, name === "plus" ? 1 : -1);
+		}
+		if (name === "toString") return valueToString(receiver);
+	}
+	if (receiver instanceof DataviewDuration) {
+		if (name === "toMillis") return receiver.toMillis();
+		if (name === "toHuman" || name === "toString") return receiver.toHuman();
+	}
+	if (receiver instanceof DataviewLink && name === "toString") return receiver.markdown();
+	const property =
+		receiver !== null && receiver !== undefined ? readProperty(receiver, name) : undefined;
+	if (property instanceof DataviewFunction) return property.invoke(args);
+	throw new Error(`Unsupported DataviewJS method: ${name}() on ${describe(receiver)}.`);
+}
+
+function newRuntime(
+	currentPage: ContentPage,
+	index: ContentIndex,
+	dailyConfig: DailyNoteConfig | undefined,
+	settings: DataviewSettings | undefined,
+): Runtime {
+	return {
+		env: createDataviewEnvironment(currentPage, index, dailyConfig, settings),
+		output: [],
+		depth: 0,
+		budget: new WorkBudget(MAX_WORK, "DataviewJS: the script"),
+	};
+}
+
+/** A failed script's result; a stack overflow (deep nesting) is named as such. */
+function failure(error: unknown): DataviewJsResult {
+	if (isStackOverflow(error)) return { error: `DataviewJS: ${STACK_OVERFLOW_MESSAGE}` };
+	return { error: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * Run a `dataviewjs` block. Statements may be separated by `;` or line breaks;
+ * anything outside the supported subset is an error naming the line, never a
+ * silently skipped statement.
+ */
 export function renderDataviewJs(
 	source: string,
 	currentPage: ContentPage,
 	index: ContentIndex,
 	dailyConfig?: DailyNoteConfig,
+	settings?: DataviewSettings,
 ): DataviewJsResult {
-	if (FORBIDDEN_SOURCE.test(source)) {
-		return {
-			error: "DataviewJS source references a forbidden host or runtime API.",
-		};
-	}
-
 	try {
-		const environment: JsEnvironment = { values: new Map() };
-		const output: string[] = [];
-		for (const statement of splitStatements(source)) {
-			if (!statement.trim()) continue;
-			const declaration = /^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([\s\S]+)$/.exec(
-				statement.trim(),
-			);
-			if (declaration?.[1] && declaration[2]) {
-				environment.values.set(
-					declaration[1],
-					evaluateExpression(declaration[2], environment, currentPage, index, dailyConfig),
-				);
-				continue;
-			}
-			const call = /^dv\.(table|list|taskList|paragraph|header)\s*\(([\s\S]*)\)$/.exec(
-				statement.trim(),
-			);
-			if (!call?.[1]) {
-				throw new Error(`Unsupported DataviewJS statement: ${statement.trim()}`);
-			}
-			const args = splitTopLevel(call[2] ?? "").map((argument) =>
-				evaluateExpression(argument, environment, currentPage, index, dailyConfig),
-			);
-			output.push(renderApiCall(call[1], args));
+		const program = new Parser(tokenize(source), source).program();
+		const rt = newRuntime(currentPage, index, dailyConfig, settings);
+		try {
+			run(program, new Scope(), rt);
+		} catch (signal) {
+			if (!(signal instanceof ReturnSignal)) throw signal;
 		}
-		return { html: output.join("\n") };
+		return { html: rt.output.join("\n") };
 	} catch (error) {
-		return { error: error instanceof Error ? error.message : String(error) };
+		return failure(error);
 	}
 }
 
-function evaluateExpression(
+/** An inline DataviewJS query — the `expr` of `` `$= expr` ``: its value, rendered inline. */
+export function renderDataviewJsInline(
 	source: string,
-	environment: JsEnvironment,
 	currentPage: ContentPage,
 	index: ContentIndex,
 	dailyConfig?: DailyNoteConfig,
-): unknown {
-	const value = source.trim();
-	if (!value) return null;
-	const arrow = splitTopLevelOperator(value, "=>");
-	if (arrow) {
-		const parameter = arrow.left.replace(/[()]/g, "").trim();
-		return { kind: "function", parameter, body: arrow.right };
+	settings?: DataviewSettings,
+): DataviewJsResult {
+	try {
+		const program = new Parser(tokenize(source), source).program();
+		const rt = newRuntime(currentPage, index, dailyConfig, settings);
+		// The value of the last expression statement is the result, as in Dataview.
+		const last = program[program.length - 1];
+		const scope = new Scope();
+		run(program.slice(0, -1), scope, rt);
+		let value: unknown;
+		if (last?.k === "expression") value = evaluate(last.expr, scope, rt);
+		else if (last) execute(last, scope, rt);
+		const rendered = value === undefined ? "" : renderValue(value, rt.env.rc, true);
+		return { html: `<span class="dataview-inline">${rt.output.join("")}${rendered}</span>` };
+	} catch (error) {
+		return failure(error);
 	}
-	for (const operator of ["||", "&&", "===", "!==", "==", "!=", ">=", "<=", ">", "<"]) {
-		const split = splitTopLevelOperator(value, operator);
-		if (split) {
-			const left = evaluateExpression(split.left, environment, currentPage, index, dailyConfig);
-			const right = evaluateExpression(split.right, environment, currentPage, index, dailyConfig);
-			return applyOperator(operator, left, right);
-		}
-	}
-	if (value.startsWith("!")) {
-		return !evaluateExpression(value.slice(1), environment, currentPage, index, dailyConfig);
-	}
-	if (isQuoted(value)) return value.slice(1, -1).replace(/\\([\\"'])/g, "$1");
-	if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
-	if (value === "true") return true;
-	if (value === "false") return false;
-	if (value === "null" || value === "undefined") return null;
-	if (value.startsWith("[") && value.endsWith("]")) {
-		return splitTopLevel(value.slice(1, -1)).map((item) =>
-			evaluateExpression(item, environment, currentPage, index, dailyConfig),
-		);
-	}
-	if (value.startsWith("{") && value.endsWith("}")) {
-		const object: Record<string, unknown> = {};
-		for (const field of splitTopLevel(value.slice(1, -1))) {
-			const separator = splitTopLevelOperator(field, ":");
-			if (!separator) throw new Error(`Invalid object field: ${field}.`);
-			object[stripQuotes(separator.left.trim())] = evaluateExpression(
-				separator.right,
-				environment,
-				currentPage,
-				index,
-				dailyConfig,
-			);
-		}
-		return object;
-	}
-	const call = splitCall(value);
-	if (call && (!call.name.includes(".") || call.name.startsWith("dv."))) {
-		const args = splitTopLevel(call.arguments).map((argument) =>
-			evaluateExpression(argument, environment, currentPage, index, dailyConfig),
-		);
-		return evaluateCall(call.name, args, currentPage, index, dailyConfig);
-	}
-	const chain = splitMemberChain(value);
-	if (chain.length > 1) {
-		const first = chain.shift() ?? "";
-		let result: unknown;
-		const firstCall = chain[0] ? splitCall(chain[0]) : undefined;
-		if (first === "dv" && firstCall) {
-			chain.shift();
-			const args = splitTopLevel(firstCall.arguments).map((argument) =>
-				evaluateExpression(argument, environment, currentPage, index, dailyConfig),
-			);
-			result = evaluateCall(`dv.${firstCall.name}`, args, currentPage, index, dailyConfig);
-		} else {
-			result = evaluateExpression(first, environment, currentPage, index, dailyConfig);
-		}
-		for (const part of chain) {
-			const methodCall = splitCall(part);
-			if (methodCall) {
-				const args = splitTopLevel(methodCall.arguments).map((argument) =>
-					evaluateExpression(argument, environment, currentPage, index, dailyConfig),
-				);
-				result = applyCollectionMethod(
-					result,
-					methodCall.name,
-					args,
-					environment,
-					currentPage,
-					index,
-					dailyConfig,
-				);
-			} else {
-				result = readProperty(result, part);
-			}
-		}
-		return result;
-	}
-	if (environment.values.has(value)) return environment.values.get(value);
-	return readProperty(pageValue(currentPage, index, dailyConfig), value);
-}
-
-function evaluateCall(
-	name: string,
-	args: unknown[],
-	currentPage: ContentPage,
-	index: ContentIndex,
-	dailyConfig?: DailyNoteConfig,
-): unknown {
-	if (name === "dv.pages") return pagesForSource(args[0], index, dailyConfig);
-	if (name === "dv.current") return pageValue(currentPage, index, dailyConfig);
-	if (name === "dv.page") {
-		const target = normalizeFilePathKey(String(args[0] ?? "")).toLowerCase();
-		const page = index.byFilePathKeyCI.get(target)?.[0] ?? index.byBaseNameCI.get(target)?.[0];
-		return page ? pageValue(page, index, dailyConfig) : null;
-	}
-	if (name === "dv.array") return Array.isArray(args[0]) ? args[0] : [args[0]];
-	if (name === "dv.date" || name === "date") {
-		const date = new Date(String(args[0] ?? ""));
-		return Number.isNaN(date.getTime()) ? null : date;
-	}
-	throw new Error(`Unsupported DataviewJS function: ${name}.`);
-}
-
-function applyCollectionMethod(
-	value: unknown,
-	method: string,
-	args: unknown[],
-	environment: JsEnvironment,
-	currentPage: ContentPage,
-	index: ContentIndex,
-	dailyConfig?: DailyNoteConfig,
-): unknown {
-	let collection: unknown[];
-	if (Array.isArray(value)) {
-		collection = value;
-	} else if (
-		value &&
-		typeof value === "object" &&
-		"kind" in value &&
-		value.kind === "collection-method" &&
-		"collection" in value &&
-		Array.isArray(value.collection)
-	) {
-		collection = value.collection;
-	} else {
-		throw new Error(`.${method}() is only supported on Dataview collections.`);
-	}
-	const callback = args[0];
-	const applyCallback = (item: unknown): unknown => {
-		if (
-			!callback ||
-			typeof callback !== "object" ||
-			!("kind" in callback) ||
-			callback.kind !== "function" ||
-			!("parameter" in callback) ||
-			!("body" in callback)
-		) {
-			throw new Error(`.${method}() requires a restricted arrow callback.`);
-		}
-		const child: JsEnvironment = {
-			values: new Map(environment.values),
-		};
-		const parameter = callback.parameter;
-		const body = callback.body;
-		if (typeof parameter !== "string" || typeof body !== "string") {
-			throw new Error(`.${method}() received an invalid arrow callback.`);
-		}
-		child.values.set(parameter, item);
-		return evaluateExpression(body, child, currentPage, index, dailyConfig);
-	};
-	if (method === "where" || method === "filter")
-		return collection.filter((item) => Boolean(applyCallback(item)));
-	if (method === "map") return collection.map((item) => applyCallback(item));
-	if (method === "sort") {
-		const direction = String(args[1] ?? "asc").toLowerCase() === "desc" ? -1 : 1;
-		return [...collection].sort(
-			(left, right) =>
-				direction *
-				String(applyCallback(left)).localeCompare(String(applyCallback(right)), undefined, {
-					numeric: true,
-					sensitivity: "base",
-				}),
-		);
-	}
-	if (method === "limit") return collection.slice(0, Number(args[0] ?? 0));
-	if (method === "slice")
-		return collection.slice(Number(args[0] ?? 0), Number(args[1] ?? collection.length));
-	if (method === "join") return collection.join(String(args[0] ?? ", "));
-	if (method === "flat") return collection.flat(Number(args[0] ?? 1));
-	throw new Error(`Unsupported DataviewJS collection method: ${method}.`);
-}
-
-function readProperty(value: unknown, property: string): unknown {
-	if (Array.isArray(value)) {
-		if (property === "length") return value.length;
-		if (["where", "filter", "map", "sort", "limit", "slice", "join", "flat"].includes(property)) {
-			return { kind: "collection-method", collection: value, method: property };
-		}
-		return value.map((item) => readProperty(item, property));
-	}
-	if (!value || typeof value !== "object") return undefined;
-	const entry = Object.entries(value).find(
-		([key]) => key === property || key.toLowerCase() === property.toLowerCase(),
-	);
-	return entry?.[1];
-}
-
-function renderApiCall(name: string, args: unknown[]): string {
-	if (name === "paragraph") return `<p class="dataviewjs-paragraph">${renderValue(args[0])}</p>`;
-	if (name === "header") {
-		const level = Math.min(6, Math.max(1, Number(args[0] ?? 2)));
-		return `<h${level}>${renderValue(args[1])}</h${level}>`;
-	}
-	if (name === "list") {
-		const values = flattenValues(args[0]);
-		return `<ul class="dataviewjs-list">${values.map((value) => `<li>${renderValue(value)}</li>`).join("")}</ul>`;
-	}
-	if (name === "taskList") {
-		const values = flattenValues(args[0]);
-		return `<ul class="dataviewjs-task-list">${values.map((value) => renderTask(value)).join("")}</ul>`;
-	}
-	const headers = Array.isArray(args[0]) ? args[0] : [];
-	const rows = Array.isArray(args[1]) ? args[1] : [];
-	return `<table class="dataviewjs-table"><thead><tr>${headers.map((header) => `<th>${escapeHtmlText(String(header ?? ""))}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${(Array.isArray(row) ? row : [row]).map((value) => `<td>${renderValue(value)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-}
-
-function renderTask(value: unknown): string {
-	if (!value || typeof value !== "object") return `<li>${renderValue(value)}</li>`;
-	const completed = "completed" in value && value.completed === true;
-	const text = "text" in value ? String(value.text ?? "") : String(value);
-	return `<li><input type="checkbox" disabled${completed ? " checked" : ""} /> ${escapeHtmlText(text)}</li>`;
-}
-
-function renderValue(value: unknown): string {
-	if (value == null) return "";
-	if (isLink(value)) {
-		// dataviewjs can build a link object from arbitrary data, so the href is
-		// treated as untrusted for the same reason as the static query renderer.
-		const href = sanitizeUrl(value.href);
-		return href
-			? `<a href="${escapeHtmlAttribute(href)}">${escapeHtmlText(value.label)}</a>`
-			: escapeHtmlText(value.label);
-	}
-	if (value instanceof Date) return escapeHtmlText(value.toISOString().slice(0, 10));
-	if (Array.isArray(value)) return value.map(renderValue).join(", ");
-	if (typeof value === "object") return escapeHtmlText(JSON.stringify(value));
-	return escapeHtmlText(String(value));
-}
-
-function pageValue(page: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig): JsPage {
-	const dailyDate = dailyConfig ? parseDailyNoteDate(page.relativePath, dailyConfig) : undefined;
-	const file: Record<string, unknown> = {
-		path: page.relativePath,
-		name: page.baseName,
-		folder: page.relativePath.includes("/")
-			? page.relativePath.slice(0, page.relativePath.lastIndexOf("/"))
-			: "",
-		ext: page.relativePath.split(".").pop() ?? "md",
-		link: pageLink(page),
-		tags: page.tags.map((tag) => `#${tag}`),
-		day: dailyDate,
-		tasks: page.dataviewTasks,
-		lists: page.dataviewLists,
-		outlinks: page.wikilinkTargets.map((target) => linkForTarget(target, index)),
-	};
-	return {
-		...page.dataviewFields,
-		file,
-		tags: file.tags,
-		name: page.title ?? page.baseName,
-	};
-}
-
-function pagesForSource(
-	source: unknown,
-	index: ContentIndex,
-	dailyConfig?: DailyNoteConfig,
-): JsPage[] {
-	const pages = index.pages.map((page) => pageValue(page, index, dailyConfig));
-	if (source == null) return pages;
-	const query = String(source);
-	if (query.startsWith("#"))
-		return pages.filter((page) => Array.isArray(page.file.tags) && page.file.tags.includes(query));
-	if (query.startsWith('"') || query.startsWith("'")) {
-		const folder = stripQuotes(query).replace(/\/$/, "");
-		return pages.filter(
-			(page) => page.file.path === folder || String(page.file.path).startsWith(`${folder}/`),
-		);
-	}
-	return pages;
-}
-
-function applyOperator(operator: string, left: unknown, right: unknown): unknown {
-	if (operator === "||") return Boolean(left) || Boolean(right);
-	if (operator === "&&") return Boolean(left) && Boolean(right);
-	if (operator === "===" || operator === "==") return comparable(left) === comparable(right);
-	if (operator === "!==" || operator === "!=") return comparable(left) !== comparable(right);
-	if (operator === ">") return Number(left) > Number(right);
-	if (operator === "<") return Number(left) < Number(right);
-	if (operator === ">=") return Number(left) >= Number(right);
-	return Number(left) <= Number(right);
-}
-
-function comparable(value: unknown): unknown {
-	return isLink(value) ? value.href : value instanceof Date ? value.getTime() : value;
-}
-
-function flattenValues(value: unknown): unknown[] {
-	return Array.isArray(value) ? value.flat(Infinity) : value == null ? [] : [value];
-}
-
-function splitCall(value: string): { name: string; arguments: string } | undefined {
-	const open = value.indexOf("(");
-	if (open <= 0 || !value.endsWith(")")) return undefined;
-	let depth = 0;
-	let quote = "";
-	for (let index = open; index < value.length; index += 1) {
-		const char = value[index];
-		if (quote) {
-			if (char === quote && value[index - 1] !== "\\") quote = "";
-			continue;
-		}
-		if (char === '"' || char === "'") quote = char;
-		else if (char === "(") depth += 1;
-		else if (char === ")") depth -= 1;
-		if (depth === 0 && index !== value.length - 1) return undefined;
-	}
-	return depth === 0
-		? {
-				name: value.slice(0, open).trim(),
-				arguments: value.slice(open + 1, -1),
-			}
-		: undefined;
-}
-
-function splitMemberChain(value: string): string[] {
-	const result: string[] = [];
-	let start = 0;
-	let depth = 0;
-	let quote = "";
-	for (let index = 0; index < value.length; index += 1) {
-		const char = value[index];
-		if (quote) {
-			if (char === quote && value[index - 1] !== "\\") quote = "";
-			continue;
-		}
-		if (char === '"' || char === "'") quote = char;
-		else if (char === "(") depth += 1;
-		else if (char === ")") depth -= 1;
-		else if (char === "." && depth === 0) {
-			result.push(value.slice(start, index).trim());
-			start = index + 1;
-		}
-	}
-	result.push(value.slice(start).trim());
-	return result.filter(Boolean);
-}
-
-function splitTopLevelOperator(
-	value: string,
-	operator: string,
-): { left: string; right: string } | undefined {
-	let depth = 0;
-	let quote = "";
-	for (let index = 0; index <= value.length - operator.length; index += 1) {
-		const char = value[index];
-		if (quote) {
-			if (char === quote && value[index - 1] !== "\\") quote = "";
-			continue;
-		}
-		if (char === '"' || char === "'") quote = char;
-		else if (char === "(" || char === "[" || char === "{") depth += 1;
-		else if (char === ")" || char === "]" || char === "}") depth -= 1;
-		else if (depth === 0 && value.slice(index, index + operator.length) === operator)
-			return {
-				left: value.slice(0, index),
-				right: value.slice(index + operator.length),
-			};
-	}
-	return undefined;
-}
-
-function splitTopLevel(value: string): string[] {
-	const result: string[] = [];
-	let start = 0;
-	let depth = 0;
-	let quote = "";
-	for (let index = 0; index < value.length; index += 1) {
-		const char = value[index] ?? "";
-		if (quote) {
-			if (char === quote && value[index - 1] !== "\\") quote = "";
-			continue;
-		}
-		if (char === '"' || char === "'") quote = char;
-		else if (["(", "[", "{"].includes(char)) depth += 1;
-		else if ([")", "]", "}"].includes(char)) depth -= 1;
-		else if ((char === "," || char === ";") && depth === 0) {
-			result.push(value.slice(start, index).trim());
-			start = index + 1;
-		}
-	}
-	result.push(value.slice(start).trim());
-	return result.filter(Boolean);
-}
-
-function splitStatements(source: string): string[] {
-	return splitTopLevel(source.replace(/\/\/[^\n]*/g, ""));
-}
-
-function isQuoted(value: string): boolean {
-	return (
-		value.length >= 2 &&
-		((value.startsWith('"') && value.endsWith('"')) ||
-			(value.startsWith("'") && value.endsWith("'")))
-	);
-}
-
-function stripQuotes(value: string): string {
-	return isQuoted(value) ? value.slice(1, -1) : value;
-}
-
-function pageLink(page: ContentPage): JsLink {
-	return {
-		kind: "link",
-		label: page.title ?? page.baseName,
-		href: routeHref(page.routePath, page.relativePath),
-	};
-}
-
-function linkForTarget(target: string, index: ContentIndex): JsLink {
-	const key = normalizeFilePathKey(target).toLowerCase();
-	const page =
-		index.byFilePathKeyCI.get(key)?.[0] ?? index.byBaseNameCI.get(key.split("/").pop() ?? key)?.[0];
-	return page ? pageLink(page) : { kind: "link", label: target, href: `/${target}` };
-}
-
-function isLink(value: unknown): value is JsLink {
-	return Boolean(value && typeof value === "object" && "kind" in value && value.kind === "link");
 }

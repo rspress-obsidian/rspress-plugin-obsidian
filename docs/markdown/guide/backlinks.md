@@ -9,9 +9,17 @@ Backlinks automatically show which pages link to the current page, creating a bi
 ## How It Works
 
 When `enableBacklinks` is on, the plugin:
-1. Scans all pages for wikilinks during build
-2. Builds a reverse index (target → sources)
+1. Collects every link each page makes during build: wikilinks and embeds,
+   Markdown links and images, reference definitions, `obsidian://open` URIs, and
+   wikilinks in frontmatter properties (`related: "[[Target]]"`, `up: ["[[a/b]]"]`,
+   which Obsidian 1.4+ counts as links)
+2. Resolves each one exactly as the rendered link is resolved, and records a
+   backlink on the page it reaches — an ambiguous name only on the page it
+   resolved to
 3. Appends a backlinks panel to each page
+
+With `vaultRoot` set, a docs page linking a vault note shows up in that note's
+panel, and the other way round.
 
 ## Unlinked Mentions
 

@@ -3,6 +3,8 @@
 > [!tip] Transcluded callout
 > ==Important== text.
 
+A claim[^note].
+
 [^note]: First line.
   Second line.
 

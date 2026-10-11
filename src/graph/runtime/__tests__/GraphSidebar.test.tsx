@@ -6,6 +6,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 import { DARK_COLORS, LIGHT_COLORS } from "../palette/colors";
+import { graphDataModule, graphNode } from "./graph-fixture";
 
 // The graph runtime reads the path from the document; this test renders a
 // panel anchored on /guide.
@@ -14,19 +15,15 @@ history.replaceState({}, "", "/guide");
 const { mock } = require("bun:test");
 
 // `virtual-graph-data` is a build-time module; provide a stable fixture.
-const mockGraphData = {
-	nodes: [
-		{ id: "/", label: "Home", routePath: "/" },
-		{ id: "/guide", label: "Guide", routePath: "/guide" },
-		{ id: "/api", label: "API", routePath: "/api" },
-	],
-	links: [
-		{ source: "/", target: "/guide" },
-		{ source: "/guide", target: "/api" },
-	],
-};
-
-mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
+mock.module("virtual-graph-data", () =>
+	graphDataModule(
+		[graphNode("/", "Home"), graphNode("/guide", "Guide"), graphNode("/api", "API")],
+		[
+			{ source: "/", target: "/guide" },
+			{ source: "/guide", target: "/api" },
+		],
+	),
+);
 // `react-force-graph-2d` renders to a canvas, so it has no DOM of its own and
 // the palette it is handed would otherwise be invisible to a test. Echo it back
 // as an attribute so the resolved theme can be read from the DOM.

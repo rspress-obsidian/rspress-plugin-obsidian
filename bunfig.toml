@@ -24,19 +24,18 @@ frozenLockfile = true
 # neither.
 # happy-dom for component tests (graph runtime, canvas embed)
 preload = ["./test/test-setup.ts"]
-# Coverage must measure the code we ship, not build output or test helpers:
-# `dist/` is the built bundle (the publish test imports it) and `doc_build/` is a
-# generated site.
+# Coverage must measure the code we ship, not build output, tests or tooling:
+# `dist/` is the built bundle (the publish test imports it), `doc_build/` is a
+# generated site, and `scripts/` is not in package.json `files`.
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = ["dist/**", "doc_build/**", "coverage/**", "test/**", "scripts/**"]
-# Backstop only, and deliberately weak: Bun applies this to *every* file and has
-# no exception mechanism, so it has to sit below the weakest measured file
-# (`scripts/obsidian-sync.ts`, 52.8% lines) or `bun test` would fail outright. It
-# still trips on a module that gets imported and never exercised (0%), but it is
-# not the gate. The real floors live in `scripts/check-coverage.ts`, which CI runs
-# against the lcov report: 0.85 per shipped `src/` module (no exceptions — every
-# entry in its allow-list is printed with its reason on every run) plus 97% over
-# `src/` as a whole. `statements` is accepted, not enforced.
+# Backstop only, and deliberately weak: Bun applies this to *every* measured
+# file and has no exception mechanism, so it trips on a module that is imported
+# and never exercised (0%) without being the gate. The real floors live in
+# `scripts/check-coverage.ts`, which CI runs against the lcov report: 0.85 per
+# shipped `src/` module, with no exceptions (only modules no unit test can load
+# are listed, each printed with its reason on every run), plus 97% over `src/`
+# as a whole. `statements` is accepted, not enforced.
 coverageThreshold = { lines = 0.5, functions = 0.5 }
 
 [debug]

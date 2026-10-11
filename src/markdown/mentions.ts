@@ -45,7 +45,10 @@ function stripLeadingFrontmatter(markdown: string): string {
 	return end === -1 ? markdown : lines.slice(end + 1).join("\n");
 }
 
-/** Strip frontmatter, fenced blocks, inline code and comments; keep prose. */
+/** A table's `|---|:---:|` delimiter row: layout, not prose. */
+const TABLE_DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/;
+
+/** Strip frontmatter, fenced blocks, inline code, comments and table syntax; keep prose. */
 export function stripMentionText(markdown: string): string {
 	const kept: string[] = [];
 	let fence: string | null = null;
@@ -58,8 +61,10 @@ export function stripMentionText(markdown: string): string {
 			else if (marker[0] === fence) fence = null;
 			continue;
 		}
-		if (fence !== null) continue;
-		kept.push(line);
+		if (fence !== null || TABLE_DELIMITER_ROW.test(line)) continue;
+		// A table row's cell pipes would show in a snippet as `| | |`; an
+		// escaped `\|` is part of the cell's text.
+		kept.push(line.trimStart().startsWith("|") ? line.replace(/(?<!\\)\|/g, " ") : line);
 	}
 
 	return (
@@ -90,8 +95,45 @@ function namesFor(page: ContentPage): string[] {
 	return [...names].filter((name) => name.trim().length >= MIN_NAME_LENGTH);
 }
 
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+interface Token {
+	/** Lowercased token text. */
+	value: string;
+	start: number;
+	end: number;
+	/** Whitespace separates it from the previous token. */
+	spaced: boolean;
+	/** A run of letters, numbers, `_` and `-` rather than one other character. */
+	word: boolean;
+}
+
+const TOKEN = /[\p{L}\p{M}\p{N}_-]+|[^\s\p{L}\p{M}\p{N}_-]/gu;
+
+/**
+ * Split text into word runs and single other characters. A name and the text
+ * it is looked for in are tokenized alike, so matching is a comparison of token
+ * sequences — and word runs are maximal, so a match cannot start or end in the
+ * middle of a word.
+ */
+function tokenize(text: string): Token[] {
+	const tokens: Token[] = [];
+	let previousEnd = 0;
+	for (const match of text.matchAll(TOKEN)) {
+		const value = match[0];
+		tokens.push({
+			value: value.toLowerCase(),
+			start: match.index,
+			end: match.index + value.length,
+			spaced: match.index > previousEnd,
+			word: /^[\p{L}\p{M}\p{N}_-]/u.test(value),
+		});
+		previousEnd = match.index + value.length;
+	}
+	return tokens;
+}
+
+interface NameEntry {
+	tokens: Token[];
+	route: string;
 }
 
 /**
@@ -101,9 +143,12 @@ function escapeRegExp(value: string): string {
  * ambiguous link target rather than guessing. Callers subtract the linked
  * mentions (`index.backlinks`) themselves; this function does not read the
  * index.
+ *
+ * Names are matched through a table keyed by their first token rather than one
+ * alternation of every name: each text token is looked up once, so the cost is
+ * linear in the text instead of text × names.
  */
 export function buildMentionsIndex(sources: MentionSource[]): Map<string, MentionRef[]> {
-	const routeByName = new Map<string, string>();
 	const ambiguousNames = new Set<string>();
 	const nameToRoute = new Map<string, string>();
 
@@ -119,38 +164,47 @@ export function buildMentionsIndex(sources: MentionSource[]): Map<string, Mentio
 		}
 	}
 
+	const byFirstToken = new Map<string, NameEntry[]>();
 	for (const [key, route] of nameToRoute) {
-		if (!ambiguousNames.has(key)) routeByName.set(key, route);
+		if (ambiguousNames.has(key)) continue;
+		const tokens = tokenize(key);
+		const first = tokens[0];
+		if (!first) continue;
+		const bucket = byFirstToken.get(first.value) ?? [];
+		bucket.push({ tokens, route });
+		byFirstToken.set(first.value, bucket);
+	}
+	// Longest first so "Getting Started Guide" wins over "Getting Started".
+	for (const bucket of byFirstToken.values()) {
+		bucket.sort((left, right) => right.tokens.length - left.tokens.length);
 	}
 
-	const pattern = [...routeByName.keys()]
-		// Longest first so "Getting Started Guide" wins over "Getting Started".
-		.sort((left, right) => right.length - left.length)
-		.map(escapeRegExp)
-		.join("|");
-
 	const mentions = new Map<string, MentionRef[]>();
-	if (!pattern) return mentions;
-
-	const matcher = new RegExp(`(?<![\\p{L}\\p{N}_-])(?:${pattern})(?![\\p{L}\\p{N}_-])`, "giu");
+	if (byFirstToken.size === 0) return mentions;
 
 	for (const { page, text } of sources) {
 		// Same fold as the name keys: a composed mention in a decomposed body
-		// (or vice versa) would otherwise miss the pattern entirely.
+		// (or vice versa) would otherwise miss entirely.
 		const haystack = normalizeUnicode(text);
-		matcher.lastIndex = 0;
-		for (const match of haystack.matchAll(matcher)) {
-			const targetRoute = routeByName.get(match[0].toLowerCase());
-			if (!targetRoute || targetRoute === page.routePath) continue;
+		const tokens = tokenize(haystack);
+		for (let position = 0; position < tokens.length; position += 1) {
+			const head = tokens[position];
+			const candidates = head && byFirstToken.get(head.value);
+			if (!head || !candidates) continue;
+			const entry = candidates.find((candidate) => matchesAt(tokens, position, candidate.tokens));
+			if (!entry) continue;
+			const last = tokens[position + entry.tokens.length - 1] ?? head;
+			position += entry.tokens.length - 1;
+			if (entry.route === page.routePath) continue;
 
-			const start = Math.max(0, match.index - SNIPPET_RADIUS);
-			const end = Math.min(haystack.length, match.index + match[0].length + SNIPPET_RADIUS);
+			const start = Math.max(0, head.start - SNIPPET_RADIUS);
+			const end = Math.min(haystack.length, last.end + SNIPPET_RADIUS);
 			const snippet = `${start > 0 ? "…" : ""}${haystack.slice(start, end).trim()}${
 				end < haystack.length ? "…" : ""
 			}`;
 
-			const bucket = mentions.get(targetRoute) ?? [];
-			if (bucket.some((entry) => entry.routePath === page.routePath)) continue;
+			const bucket = mentions.get(entry.route) ?? [];
+			if (bucket.some((ref) => ref.routePath === page.routePath)) continue;
 			if (bucket.length >= MAX_MENTIONS_PER_PAGE) continue;
 			bucket.push({
 				routePath: page.routePath,
@@ -158,11 +212,33 @@ export function buildMentionsIndex(sources: MentionSource[]): Map<string, Mentio
 				title: page.title ?? page.baseName,
 				snippet,
 			});
-			mentions.set(targetRoute, bucket);
+			mentions.set(entry.route, bucket);
 		}
 	}
 
 	return mentions;
+}
+
+/**
+ * Whether `name` occurs at `tokens[position]`: same tokens, same spacing
+ * between them, and — where the name begins or ends with punctuation — not
+ * glued to a word outside it (`C++` is not mentioned by `C++x`).
+ */
+function matchesAt(tokens: Token[], position: number, name: Token[]): boolean {
+	for (let offset = 0; offset < name.length; offset += 1) {
+		const token = tokens[position + offset];
+		const expected = name[offset];
+		if (!token || !expected || token.value !== expected.value) return false;
+		if (offset > 0 && token.spaced !== expected.spaced) return false;
+	}
+	const first = name[0];
+	const last = name[name.length - 1];
+	const before = tokens[position - 1];
+	const after = tokens[position + name.length];
+	const head = tokens[position];
+	if (first && !first.word && before?.word && head && !head.spaced) return false;
+	if (last && !last.word && after?.word && !after.spaced) return false;
+	return true;
 }
 
 /**

@@ -26,8 +26,10 @@
 import {
 	MERMAID_BLOCK_CLASS,
 	MERMAID_ERROR_CLASS,
+	MERMAID_INSTALL_HINT,
 	MERMAID_RENDERED_CLASS,
 	MERMAID_SECURITY_ATTRIBUTE,
+	MERMAID_UNAVAILABLE_ATTRIBUTE,
 	type MermaidSecurityLevel,
 } from "./classes.js";
 
@@ -71,10 +73,77 @@ function isDark(): boolean {
 	return typeof document !== "undefined" && document.documentElement.classList.contains("dark");
 }
 
+/**
+ * Raised when the page has diagrams but the site was built without `mermaid`.
+ *
+ * Mermaid is an optional peer dependency. When it is not installed, the
+ * plugins alias the specifier to an empty module (see `./install.ts`) so the
+ * site still builds; `import("mermaid")` then resolves to a namespace with no
+ * renderer in it.
+ */
+export class MermaidUnavailableError extends Error {
+	constructor(options?: ErrorOptions) {
+		super(MERMAID_INSTALL_HINT, options);
+		this.name = "MermaidUnavailableError";
+	}
+}
+
+function defaultImport(): Promise<unknown> {
+	return import("mermaid");
+}
+
+let importMermaid: () => Promise<unknown> = defaultImport;
+
+/**
+ * Replace how the renderer obtains the `mermaid` module namespace; `null`
+ * restores the real `import("mermaid")`. Internal: tests use it to reproduce a
+ * site built without the optional peer, which a module mock cannot do without
+ * also replacing mermaid for every other suite in the same run.
+ */
+export function setMermaidLoader(loader: (() => Promise<unknown>) | null): void {
+	importMermaid = loader ?? defaultImport;
+	mermaidPromise = null;
+	initializedTheme = null;
+	initializedSecurityLevel = null;
+	warnedUnavailable = false;
+}
+
+/** Pull the mermaid API out of a module namespace, or report it missing. */
+export function mermaidFromModule(module: unknown): Mermaid {
+	const api =
+		typeof module === "object" && module !== null && "default" in module ? module.default : null;
+	if (
+		typeof api !== "object" ||
+		api === null ||
+		!("render" in api) ||
+		typeof api.render !== "function" ||
+		!("initialize" in api) ||
+		typeof api.initialize !== "function"
+	) {
+		throw new MermaidUnavailableError();
+	}
+	// Shape checked above; the namespace's full type is mermaid's own.
+	const mermaid = api as Mermaid;
+	return mermaid;
+}
+
 async function loadMermaid(): Promise<Mermaid> {
-	mermaidPromise ??= import("mermaid").then((module) => module.default);
+	mermaidPromise ??= importMermaid().then(mermaidFromModule, (error: unknown) => {
+		// The code a bundler's missing-module stub and Node both throw with.
+		const code = typeof error === "object" && error !== null && "code" in error ? error.code : null;
+		if (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") {
+			throw new MermaidUnavailableError({ cause: error });
+		}
+		// A chunk that failed to download (offline, a deploy swapped the
+		// assets) is not a missing package: forget the attempt so the next
+		// scan retries instead of caching the failure for the whole visit.
+		mermaidPromise = null;
+		throw error;
+	});
 	return mermaidPromise;
 }
+
+let warnedUnavailable = false;
 
 /**
  * Choose the `securityLevel` every diagram renders with.
@@ -135,8 +204,19 @@ async function renderBlock(block: HTMLElement): Promise<void> {
 		block.classList.add(MERMAID_RENDERED_CLASS);
 		block.classList.remove(MERMAID_ERROR_CLASS);
 	} catch (error) {
-		console.warn("[rspress-plugin-obsidian] Mermaid diagram failed to render", error);
 		block.classList.add(MERMAID_ERROR_CLASS);
+		if (error instanceof MermaidUnavailableError) {
+			// The source stays readable in the block; the title says why it is
+			// not a diagram. One console line per page load, not one per block.
+			block.setAttribute(MERMAID_UNAVAILABLE_ATTRIBUTE, "");
+			block.title = MERMAID_INSTALL_HINT;
+			if (!warnedUnavailable) {
+				warnedUnavailable = true;
+				console.warn(`[rspress-plugin-obsidian] ${MERMAID_INSTALL_HINT}`);
+			}
+			return;
+		}
+		console.warn("[rspress-plugin-obsidian] Mermaid diagram failed to render", error);
 	}
 }
 

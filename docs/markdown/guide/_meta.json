@@ -7,6 +7,11 @@
   "backlinks",
   "tags-and-daily-notes",
   "media-embeds",
+  "tasks",
+  "kanban",
+  "excalidraw",
+  "bases",
+  "templater",
   "advanced",
   "api"
 ]

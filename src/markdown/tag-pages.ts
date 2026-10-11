@@ -1,48 +1,63 @@
-import { encodeTagPathSegment } from "../shared/paths.js";
+import { encodeTagPathSegment, tagRoutePath } from "../shared/paths.js";
+import { normalizeUnicode } from "../shared/slug.js";
 import type { ContentIndex, ContentPage } from "./types.js";
 import { routeHref } from "./utils.js";
 
 export { encodeTagPathSegment };
 
 interface TagEntry {
-	displayName: string;
+	/** Every spelling seen, with how many pages used it, in first-seen order. */
+	spellings: Map<string, number>;
 	pages: ContentPage[];
 }
 
 /**
- * Collect unique tags from all pages, preserving the original casing of the
- * first occurrence. Deduplication is case-insensitive.
+ * Collect unique tags from all pages of every index. Obsidian treats tags
+ * case-insensitively, so `#Project` and `#project` are one tag; the key is the
+ * lowercased NFC form {@link tagRoutePath} publishes it under.
  *
  * Nested tags (e.g. "parent/child") also generate entries for every ancestor
  * segment ("parent"), mirroring Obsidian's tag hierarchy behaviour.
  */
-function collectTags(index: ContentIndex): Map<string, TagEntry> {
+function collectTags(indexes: ContentIndex[]): Map<string, TagEntry> {
 	const tagMap = new Map<string, TagEntry>();
 
-	const addTag = (tag: string, page: ContentPage) => {
-		const key = tag.toLowerCase();
-		const existing = tagMap.get(key);
-		if (existing) {
-			if (!existing.pages.includes(page)) {
-				existing.pages.push(page);
-			}
-		} else {
-			tagMap.set(key, { displayName: tag, pages: [page] });
-		}
-	};
-
-	for (const page of index.pages) {
-		for (const tag of page.tags) {
-			addTag(tag, page);
-			// Also generate parent segments for nested tags.
-			const parts = tag.split("/");
-			for (let depth = 1; depth < parts.length; depth++) {
-				addTag(parts.slice(0, depth).join("/"), page);
+	for (const index of indexes) {
+		for (const page of index.pages) {
+			// One count per page per spelling, so a page repeating `#Tag` ten
+			// times does not outvote ten pages writing `#tag`.
+			const seen = new Set<string>();
+			for (const tag of page.tags) {
+				const parts = tag.split("/");
+				// The tag itself first, then its ancestors.
+				for (let depth = parts.length; depth >= 1; depth--) {
+					const spelling = parts.slice(0, depth).join("/");
+					if (seen.has(spelling)) continue;
+					seen.add(spelling);
+					const key = normalizeUnicode(spelling).toLowerCase();
+					const entry: TagEntry = tagMap.get(key) ?? { spellings: new Map(), pages: [] };
+					tagMap.set(key, entry);
+					entry.spellings.set(spelling, (entry.spellings.get(spelling) ?? 0) + 1);
+					if (!entry.pages.includes(page)) entry.pages.push(page);
+				}
 			}
 		}
 	}
 
 	return tagMap;
+}
+
+/** The spelling most pages use; the first one seen on a tie. */
+function displayNameOf(entry: TagEntry): string {
+	let best = "";
+	let bestCount = 0;
+	for (const [spelling, count] of entry.spellings) {
+		if (count > bestCount) {
+			best = spelling;
+			bestCount = count;
+		}
+	}
+	return best;
 }
 
 function escapeYamlDoubleQuoted(value: string): string {
@@ -97,7 +112,8 @@ function generateTagPageContent(displayName: string, pages: ContentPage[]): stri
 		`title: "#${escapeYamlDoubleQuoted(displayName)}"`,
 		"---",
 		"",
-		`# #${escapedHeading}`,
+		// `\#`: the page's own title is not a link to itself.
+		`# \\#${escapedHeading}`,
 		"",
 		listItems,
 		"",
@@ -110,16 +126,21 @@ export interface AdditionalPage {
 }
 
 /**
- * Generate one AdditionalPage per unique tag found across all indexed pages.
- * Each page is served at /tags/{displayName} and lists all pages with that tag.
+ * Generate one AdditionalPage per tag across every index given — pass the docs
+ * index and the vault index together, or the two would each add the same
+ * `/tags/<tag>` route and Rspress refuses a duplicate route. Each page is
+ * served at {@link tagRoutePath} and lists every page carrying the tag (or a
+ * nested child of it), under the spelling most pages use.
  */
-export function generateTagPages(index: ContentIndex): AdditionalPage[] {
-	const tagMap = collectTags(index);
-
-	return [...tagMap.entries()]
-		.filter(([, { displayName }]) => encodeTagPathSegment(displayName).length > 0)
-		.map(([, { displayName, pages }]) => ({
-			routePath: `/tags/${encodeTagPathSegment(displayName)}`,
-			content: generateTagPageContent(displayName, pages),
-		}));
+export function generateTagPages(...indexes: ContentIndex[]): AdditionalPage[] {
+	return [...collectTags(indexes).values()].flatMap((entry) => {
+		const displayName = displayNameOf(entry);
+		if (encodeTagPathSegment(displayName).length === 0) return [];
+		return [
+			{
+				routePath: tagRoutePath(displayName),
+				content: generateTagPageContent(displayName, entry.pages),
+			},
+		];
+	});
 }

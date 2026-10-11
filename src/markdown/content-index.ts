@@ -1,14 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
-import GithubSlugger from "github-slugger";
 import { getContentLineFlags } from "../shared/content-flags.js";
 import { PAGE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { ATTACHMENT_EXTS, extensionOf } from "../shared/media-exts.js";
+import {
+	type DocsRouteLocales,
+	deriveDocsRoutePath,
+	deriveRoutePath,
+	normalizeFsPath,
+	normalizeRoutePath as normalizePathKey,
+	normalizeRoutePrefix,
+} from "../shared/route-path.js";
 import { normalizeLookupValue, normalizeUnicode, stripMarkdownFormatting } from "../shared/slug.js";
+import { collectBacklinks } from "./backlinks.js";
+import { blankCommentRanges, COMMENT_DELIMITER, findCommentRanges } from "./comments.js";
 import { extractDataviewMetadata } from "./dataview.js";
+import { scanPageHeadings } from "./heading-text.js";
 import { rememberMentionSources, stripMentionText } from "./mentions.js";
-import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
+import { backOfNoteEnd } from "./obsidian-plugins/excalidraw/drawing-file.js";
+import { extractPageLinksFrom } from "./page-links.js";
 import type {
 	BacklinkRef,
 	BlockEntry,
@@ -17,21 +28,14 @@ import type {
 	ContentPage,
 	HeadingEntry,
 } from "./types.js";
+import { normalizeFilePathKey } from "./utils.js";
 
 export type { ContentIndex } from "./types.js";
 
-import {
-	deriveRoutePath,
-	normalizeFsPath,
-	normalizeRoutePath as normalizePathKey,
-	normalizeRoutePrefix,
-} from "../shared/route-path.js";
-import { backlinkLabel, normalizeFilePathKey, resolveRelativePathKey } from "./utils.js";
-
 /** Longest stripped body retained per page for mention matching. */
 const MAX_MENTION_TEXT = 20_000;
-const INLINE_TAG_PATTERN =
-	/(?<![/\p{L}\p{N}_-])#([\p{L}\p{M}\p{N}\p{Extended_Pictographic}_/-]+)/gu;
+/** Characters of section text kept as a heading's hover preview. */
+const MAX_PREVIEW_LENGTH = 200;
 
 /** Maximum number of content indexes to cache simultaneously. Beyond this
  *  the least-recently-used entry is evicted. Rspress dev-server uses a single
@@ -69,13 +73,67 @@ interface MarkdownFileEntry {
 const contentIndexCache = new Map<string, CacheEntry>();
 /** Options controlling route and asset URLs for an indexed root. */
 export interface ContentIndexOptions {
+	/**
+	 * Route prefix pages publish under (a vault's `vaultRoutePrefix`). Without
+	 * one, the root is the Rspress docs root and routes follow Rspress's own
+	 * rules, including `locales`.
+	 */
 	routePrefix?: string;
+	/**
+	 * The site's `lang`/`locales`/`multiVersion`, for a docs root: Rspress drops
+	 * the default language and version segment from a route (`en/guide.md` is
+	 * served at `/guide` when `lang: "en"`). Ignored when `routePrefix` is set.
+	 */
+	locales?: DocsRouteLocales;
 	/**
 	 * Keep a stripped copy of each page's body so `getMentions` can find pages
 	 * that name another page without linking to it. Off by default: it is the only
 	 * thing here that retains page text.
 	 */
 	unlinkedMentions?: boolean;
+	/**
+	 * Extract Dataview fields, tasks and list items. Default `true`; the plugin
+	 * turns it off with `enableDataview`, which saves roughly a third of the
+	 * indexing time.
+	 */
+	dataview?: boolean;
+	/** Resolution options the backlinks are computed with (as for links). */
+	enableCaseInsensitiveLookup?: boolean;
+	enableFuzzyMatching?: boolean;
+	/**
+	 * Root-relative folders whose files are neither indexed nor published
+	 * (Templater's templates folder), on top of the hidden folders that never
+	 * are. `/`-separated, matched case-sensitively from the root.
+	 */
+	excludeFolders?: string[];
+}
+
+interface NormalizedIndexOptions {
+	routePrefix: string;
+	locales?: DocsRouteLocales;
+	unlinkedMentions: boolean;
+	dataview: boolean;
+	enableCaseInsensitiveLookup: boolean;
+	enableFuzzyMatching: boolean;
+	excludeFolders: string[];
+}
+
+function normalizeIndexOptions(options: ContentIndexOptions): NormalizedIndexOptions {
+	return {
+		routePrefix: normalizeRoutePrefix(options.routePrefix),
+		locales: options.locales,
+		unlinkedMentions: options.unlinkedMentions ?? false,
+		dataview: options.dataview ?? true,
+		enableCaseInsensitiveLookup: options.enableCaseInsensitiveLookup ?? true,
+		enableFuzzyMatching: options.enableFuzzyMatching ?? false,
+		excludeFolders: [
+			...new Set(
+				(options.excludeFolders ?? [])
+					.map((folder) => normalizeFsPath(folder).replace(/^\/+|\/+$/g, ""))
+					.filter(Boolean),
+			),
+		].sort(),
+	};
 }
 
 /**
@@ -86,11 +144,6 @@ export interface ContentIndexOptions {
  * under `<root>/public/` is served at `/<path-after-public/>` — not at
  * `/public/<path>`, which no route serves. Getting this wrong is invisible until
  * a page embeds the file: the `src` looks reasonable and 404s in the browser.
- * It is not hypothetical, either. The vault plugin copies vault attachments into
- * `public/<vaultRoutePrefix>/` during the build, so on the next build the docs
- * index finds those copies and a `![[media/gradient.png]]` in a docs page
- * resolved to `/public/vault/media/gradient.png` rather than the
- * `/vault/media/gradient.png` the file was actually published at.
  */
 function assetUrlPath(relativePath: string, routePrefix: string): string {
 	const segments = [...routePrefix.split("/"), ...relativePath.split("/")].filter(
@@ -107,15 +160,9 @@ export async function buildContentIndex(
 	options: ContentIndexOptions = {},
 ): Promise<ContentIndex> {
 	const absoluteRoot = path.resolve(rootDir);
-	const routePrefix = normalizeRoutePrefix(options.routePrefix);
-	const files = await scanVaultFiles(absoluteRoot);
-	return buildContentIndexFromFiles(
-		absoluteRoot,
-		files,
-		undefined,
-		routePrefix,
-		options.unlinkedMentions ?? false,
-	);
+	const normalized = normalizeIndexOptions(options);
+	const files = await scanVaultFiles(absoluteRoot, normalized.excludeFolders);
+	return buildContentIndexFromFiles(absoluteRoot, files, normalized);
 }
 
 /**
@@ -127,11 +174,12 @@ export async function getCachedContentIndex(
 	options: ContentIndexOptions = {},
 ): Promise<ContentIndex> {
 	const absoluteRoot = path.resolve(rootDir);
-	const routePrefix = normalizeRoutePrefix(options.routePrefix);
-	// The flag is part of the key: an index built without mention text cannot
-	// answer a request that needs it.
-	const cacheKey = `${absoluteRoot}|${routePrefix}|mentions:${options.unlinkedMentions === true}`;
-	const files = await scanVaultFiles(absoluteRoot);
+	const normalized = normalizeIndexOptions(options);
+	// Every option is part of the key: an index built without mention text,
+	// Dataview metadata or the site's locales cannot answer a request that
+	// needs them.
+	const cacheKey = `${absoluteRoot}|${JSON.stringify(normalized)}`;
+	const files = await scanVaultFiles(absoluteRoot, normalized.excludeFolders);
 	const signature = files
 		.map((file) => `${file.relativePath}:${file.mtimeMs}:${file.size}`)
 		.join("|");
@@ -143,15 +191,19 @@ export async function getCachedContentIndex(
 		return cached.index;
 	}
 
-	const priorFiles = cached?.files ?? new Map<string, ParsedFileEntry>();
+	// Entries carry over only for files still in the root: reusing the previous
+	// map would keep every deleted or renamed note's page (and mention text)
+	// alive for the rest of a dev session, and hand a stale parse to a note
+	// recreated later with the same mtime and size.
+	const parsedFiles = new Map<string, ParsedFileEntry>();
 	const index = await buildContentIndexFromFiles(
 		absoluteRoot,
 		files,
-		priorFiles,
-		routePrefix,
-		options.unlinkedMentions ?? false,
+		normalized,
+		cached?.files,
+		parsedFiles,
 	);
-	contentIndexCache.set(cacheKey, { signature, index, files: priorFiles });
+	contentIndexCache.set(cacheKey, { signature, index, files: parsedFiles });
 
 	// Evict least-recently-used entry (first in insertion order) when over cap.
 	if (contentIndexCache.size > MAX_CACHED_INDEXES) {
@@ -164,18 +216,23 @@ export async function getCachedContentIndex(
 	return index;
 }
 
+/**
+ * `priorFiles` holds the previous build's parse of each file, reused while its
+ * mtime and size are unchanged; `parsedFiles` receives this build's, and is what
+ * the next build reuses.
+ */
 async function buildContentIndexFromFiles(
 	rootDir: string,
 	files: MarkdownFileEntry[],
-	priorFiles?: Map<string, ParsedFileEntry>,
-	routePrefix = "",
-	collectMentions = false,
+	options: NormalizedIndexOptions,
+	priorFiles?: ReadonlyMap<string, ParsedFileEntry>,
+	parsedFiles?: Map<string, ParsedFileEntry>,
 ): Promise<ContentIndex> {
 	const markdownFiles = files.filter((file) =>
 		PAGE_MARKDOWN_EXTENSIONS.has(path.extname(file.relativePath).toLowerCase()),
 	);
 	const settled = await Promise.allSettled(
-		markdownFiles.map((file) => buildContentPage(file, priorFiles, routePrefix, collectMentions)),
+		markdownFiles.map((file) => buildContentPage(file, options, priorFiles, parsedFiles)),
 	);
 	const pages: ContentPage[] = [];
 	for (const result of settled) {
@@ -196,7 +253,7 @@ async function buildContentIndexFromFiles(
 			relativePath: file.relativePath,
 			pathKey: normalizeUnicode(normalizePathKey(file.relativePath)),
 			baseName: normalizeUnicode(path.basename(file.relativePath)),
-			urlPath: assetUrlPath(file.relativePath, routePrefix),
+			urlPath: assetUrlPath(file.relativePath, options.routePrefix),
 		}));
 	const byAbsolutePath = new Map<string, ContentPage>();
 	const byPathKey = new Map<string, ContentPage>();
@@ -237,15 +294,16 @@ async function buildContentIndexFromFiles(
 			pushNamedPage(byAlias, alias, page);
 		}
 
+		const tagKeys = new Set<string>();
 		for (const tag of page.tags) {
-			pushNamedPage(byTag, tag, page);
 			// For nested tags like "parent/child/leaf", also aggregate into
 			// each ancestor segment so byTag["parent"] includes the page too.
 			const parts = tag.split("/");
-			for (let depth = 1; depth < parts.length; depth++) {
-				pushNamedPage(byTag, parts.slice(0, depth).join("/"), page);
+			for (let depth = 1; depth <= parts.length; depth++) {
+				tagKeys.add(parts.slice(0, depth).join("/"));
 			}
 		}
+		for (const tag of tagKeys) pushNamedPage(byTag, tag, page);
 	}
 	for (const asset of assets) {
 		byAssetPath.set(asset.pathKey, asset);
@@ -254,26 +312,6 @@ async function buildContentIndexFromFiles(
 		existing.push(asset);
 		byAssetBaseName.set(asset.baseName, existing);
 		pushNamedAsset(byAssetBaseNameCI, asset.baseName.toLowerCase(), asset);
-	}
-
-	const backlinks = new Map<string, BacklinkRef[]>();
-	for (const page of pages) {
-		for (const normalizedTarget of page.wikilinkTargets) {
-			const resolved = resolveBacklinkTarget(
-				byFilePathKey,
-				byFilePathKeyCI,
-				byBaseName,
-				byBaseNameCI,
-				byTitle,
-				byAlias,
-				normalizedTarget,
-				page,
-			);
-			for (const candidate of resolved) {
-				if (candidate.absolutePath === page.absolutePath) continue;
-				addBacklinkEntry(backlinks, candidate.routePath, page);
-			}
-		}
 	}
 
 	const index: ContentIndex = {
@@ -294,118 +332,35 @@ async function buildContentIndexFromFiles(
 		byBaseNameCI,
 		byAssetPathCI,
 		byAssetBaseNameCI,
-		backlinks,
+		backlinks: new Map<string, BacklinkRef[]>(),
 	};
+	// Backlinks are the outlinks resolved with the resolver every link uses, so
+	// a link and its backlink cannot disagree about where a target lives.
+	collectBacklinks(index, index, options, index.backlinks);
 
-	if (collectMentions) {
+	if (options.unlinkedMentions) {
 		rememberMentionSources(
 			index,
 			pages.map((page) => ({
 				page,
-				text: priorFiles?.get(page.absolutePath)?.mentionText ?? "",
+				text: parsedFiles?.get(page.absolutePath)?.mentionText ?? "",
 			})),
 		);
 	}
 
 	return index;
 }
-function resolveBacklinkTarget(
-	byFilePathKey: Map<string, ContentPage>,
-	byFilePathKeyCI: Map<string, ContentPage[]>,
-	byBaseName: Map<string, ContentPage[]>,
-	byBaseNameCI: Map<string, ContentPage[]>,
-	byTitle: Map<string, ContentPage[]>,
-	byAlias: Map<string, ContentPage[]>,
-	normalizedTarget: string,
-	sourcePage: ContentPage,
-): ContentPage[] {
-	const seen = new Set<string>();
-	const results: ContentPage[] = [];
 
-	const addPage = (page: ContentPage) => {
-		if (!seen.has(page.absolutePath)) {
-			seen.add(page.absolutePath);
-			results.push(page);
-		}
-	};
-
-	const relativePathKey = resolveRelativePathKey(sourcePage.relativePath, normalizedTarget);
-	if (relativePathKey !== undefined) {
-		const relativePages = byFilePathKeyCI.get(relativePathKey.toLowerCase());
-		if (relativePages) {
-			for (const page of relativePages) {
-				addPage(page);
-			}
-		}
-		return results;
-	}
-
-	const exactPage = byFilePathKey.get(normalizedTarget);
-	if (exactPage) {
-		addPage(exactPage);
-		return results;
-	}
-
-	const exactCaseInsensitivePage = byFilePathKeyCI.get(normalizedTarget.toLowerCase());
-	if (exactCaseInsensitivePage) {
-		for (const page of exactCaseInsensitivePage) {
-			addPage(page);
-		}
-		return results;
-	}
-
-	const baseName = path.basename(normalizedTarget) || normalizedTarget;
-	const baseNameCandidates = byBaseName.get(baseName);
-	if (baseNameCandidates) {
-		for (const page of baseNameCandidates) {
-			addPage(page);
-		}
-	}
-
-	if (results.length === 0) {
-		const ciBaseCandidates = byBaseNameCI.get(baseName);
-		if (ciBaseCandidates) {
-			for (const page of ciBaseCandidates) {
-				addPage(page);
-			}
-		}
-	}
-
-	// Frontmatter title and alias lookups: targets are already lowercased and
-	// slash-normalized during extraction, but title/alias keys are additionally
-	// whitespace-normalized by normalizeLookupValue. Apply the same fold before
-	// consulting those maps so `[[My Alias]]` records a backlink.
-	if (results.length === 0) {
-		const folded = normalizeUnicode(normalizeLookupValue(normalizedTarget));
-		for (const page of byTitle.get(folded) ?? []) {
-			addPage(page);
-		}
-		for (const page of byAlias.get(folded) ?? []) {
-			addPage(page);
-		}
-	}
-
-	return results;
-}
-
-function addBacklinkEntry(
-	backlinks: Map<string, BacklinkRef[]>,
-	targetRoutePath: string,
-	sourcePage: ContentPage,
-): void {
-	const existing = backlinks.get(targetRoutePath) ?? [];
-	const already = existing.some((e) => e.routePath === sourcePage.routePath);
-	if (!already) {
-		existing.push({
-			routePath: sourcePage.routePath,
-			relativePath: sourcePage.relativePath,
-			title: backlinkLabel(sourcePage),
-		});
-		backlinks.set(targetRoutePath, existing);
-	}
-}
-
-async function scanVaultFiles(rootDir: string): Promise<MarkdownFileEntry[]> {
+/**
+ * Every file of a root that can be published: hidden files and directories
+ * (`.env`, `.obsidian/`, `.trash/`), `node_modules`, `_`-prefixed paths and the
+ * `excludeFolders` are skipped, as are symlinks (neither a file nor a directory
+ * to `readdir`).
+ */
+async function scanVaultFiles(
+	rootDir: string,
+	excludeFolders: readonly string[] = [],
+): Promise<MarkdownFileEntry[]> {
 	const results: MarkdownFileEntry[] = [];
 	const queue: string[] = [rootDir];
 
@@ -423,13 +378,14 @@ async function scanVaultFiles(rootDir: string): Promise<MarkdownFileEntry[]> {
 		const fileStats: Promise<MarkdownFileEntry | undefined>[] = [];
 
 		for (const entry of entries) {
+			if (entry.name.startsWith(".")) continue;
 			const absolutePath = path.join(currentDir, entry.name);
 
 			if (entry.isDirectory()) {
-				if (entry.name === ".git" || entry.name === "node_modules" || entry.name.startsWith(".")) {
-					continue;
+				const relativeDir = normalizeFsPath(path.relative(rootDir, absolutePath));
+				if (entry.name !== "node_modules" && !excludeFolders.includes(relativeDir)) {
+					subdirs.push(absolutePath);
 				}
-				subdirs.push(absolutePath);
 				continue;
 			}
 
@@ -474,37 +430,49 @@ function isRoutableRelativePath(relativePath: string): boolean {
 
 async function buildContentPage(
 	file: MarkdownFileEntry,
-	priorFiles?: Map<string, ParsedFileEntry>,
-	routePrefix = "",
-	collectMentions = false,
+	options: NormalizedIndexOptions,
+	priorFiles?: ReadonlyMap<string, ParsedFileEntry>,
+	parsedFiles?: Map<string, ParsedFileEntry>,
 ): Promise<ContentPage> {
 	const cached = priorFiles?.get(file.absolutePath);
 	if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
+		parsedFiles?.set(file.absolutePath, cached);
 		return cached.page;
 	}
 	const markdown = await fs.promises.readFile(file.absolutePath, "utf-8");
-	const routePath = deriveRoutePath(file.relativePath, routePrefix);
+	const routePath = options.routePrefix
+		? deriveRoutePath(file.relativePath, options.routePrefix)
+		: deriveDocsRoutePath(file.relativePath, options.locales);
 	const pathKey = normalizeUnicode(normalizePathKey(file.relativePath));
 	const filePathKey = normalizeFilePathKey(file.relativePath);
 	const baseName = path.basename(filePathKey);
 	const metadata = extractFrontmatterMetadata(markdown, file.relativePath);
-	const { title, aliases, tags, cssclasses, excerpt, publish } = metadata;
-	const dataview = extractDataviewMetadata(markdown, metadata.frontmatter, file.relativePath);
+	const { title, aliases, cssclasses, excerpt, publish } = metadata;
+	const dataview = options.dataview
+		? extractDataviewMetadata(markdown, metadata.frontmatter, file.relativePath)
+		: { fields: {}, tasks: [], lists: [] };
 
-	const lines = markdown.split(/\r?\n/);
+	// Comments are blanked (not removed) once, up front: a heading, block id,
+	// link, tag or preview inside `%%…%%` is not on the published page.
+	const visible = markdown.includes(COMMENT_DELIMITER)
+		? blankCommentRanges(markdown, findCommentRanges(markdown))
+		: markdown;
+	const lines = visible.split(/\r?\n/);
 	const isContent = getContentLineFlags(lines);
-	const allTags = [...new Set([...tags, ...extractInlineTags(lines, isContent)])];
-	const headings = extractHeadings(lines, isContent);
-
-	// Pre-extract referenced page targets while we have the raw content in
-	// memory. Restricted to content lines so references inside code fences,
-	// inline code, comments, and frontmatter do not create backlinks.
-	const wikilinkTargets = extractWikilinkTargets(lines, isContent);
+	const links = extractPageLinksFrom(lines, isContent, metadata.frontmatter);
+	// An Excalidraw note's `# Excalidraw Data` / `## Text Elements` headings are
+	// the plugin's storage, not the note's outline: they would title the note
+	// "Excalidraw Data" in backlinks and the graph. Links and `^element` ids in
+	// that data stay indexed — the plugin links drawings through them.
+	const headingLines = metadata.frontmatter["excalidraw-plugin"]
+		? markdown.slice(0, backOfNoteEnd(markdown)).split(/\r?\n/).length - 1
+		: lines.length;
+	const headings = extractHeadings(lines.slice(0, headingLines), isContent.slice(0, headingLines));
 
 	const headingBySlug = new Map<string, HeadingEntry>();
 	const headingByText = new Map<string, HeadingEntry>();
 	for (const h of headings) {
-		headingBySlug.set(h.slug, h);
+		if (!headingBySlug.has(h.slug)) headingBySlug.set(h.slug, h);
 		if (h.explicitId) {
 			headingBySlug.set(h.explicitId, h);
 			headingBySlug.set(normalizeLookupValue(h.explicitId), h);
@@ -514,7 +482,6 @@ async function buildContentPage(
 			headingByText.set(normalizedText, h);
 		}
 	}
-	const blocks = extractBlocks(lines, isContent);
 	const page: ContentPage = {
 		absolutePath: file.absolutePath,
 		title,
@@ -523,7 +490,7 @@ async function buildContentPage(
 		pathKey,
 		filePathKey,
 		baseName,
-		tags: allTags,
+		tags: links.tags,
 		aliases,
 		cssclasses,
 		excerpt,
@@ -532,10 +499,11 @@ async function buildContentPage(
 		fileMtimeMs: file.mtimeMs,
 		fileSizeBytes: file.size,
 		headings,
-		wikilinkTargets,
+		wikilinkTargets: wikilinkTargetsOf(links.outlinks),
+		outlinks: links.outlinks,
 		headingBySlug,
 		headingByText,
-		blocks,
+		blocks: extractBlocks(lines, isContent),
 		dataviewFields: dataview.fields,
 		dataviewTasks: dataview.tasks,
 		dataviewLists: dataview.lists,
@@ -546,13 +514,13 @@ async function buildContentPage(
 		size: file.size,
 		page,
 	};
-	if (collectMentions) {
+	if (options.unlinkedMentions) {
 		// ponytail: 20k chars of stripped body per page while the feature is on —
 		// enough for a mention at the end of a long note; the ceiling is here so a
 		// vault of 10k notes cannot pin hundreds of MB.
 		entry.mentionText = stripMentionText(markdown).slice(0, MAX_MENTION_TEXT);
 	}
-	priorFiles?.set(file.absolutePath, entry);
+	parsedFiles?.set(file.absolutePath, entry);
 
 	return page;
 }
@@ -560,70 +528,50 @@ async function buildContentPage(
 export { getContentLineFlags } from "../shared/content-flags.js";
 export { deriveRoutePath, normalizeRoutePath as normalizePathKey } from "../shared/route-path.js";
 
-function extractHeadings(lines: string[], isContent: boolean[]): HeadingEntry[] {
-	const slugger = new GithubSlugger();
-	const headings: HeadingEntry[] = [];
-	const headingLineIndexes: number[] = [];
-
-	for (let index = 0; index < lines.length; index += 1) {
-		if (!isContent[index]) {
-			continue;
-		}
-
-		const line = lines[index] ?? "";
-
-		const atxMatch = /^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(line);
-		if (atxMatch) {
-			pushHeading(headings, slugger, atxMatch[2] ?? "");
-			headingLineIndexes.push(index);
-			continue;
-		}
-
-		const nextLine = lines[index + 1] ?? "";
-		if (!/^\s{0,3}(=+|-+)\s*$/.test(nextLine)) {
-			continue;
-		}
-
-		const rawHeading = line.trim();
-		if (rawHeading.length === 0) {
-			continue;
-		}
-
-		pushHeading(headings, slugger, rawHeading);
-		headingLineIndexes.push(index);
-		index += 1; // skip the setext underline on the next iteration
+/**
+ * The page-link targets Dataview's `file.outlinks` and the legacy backlinks
+ * builder read: lowercased paths of the page links, attachments left out
+ * (`[[image.png]]` names a file, not a page), each once.
+ */
+function wikilinkTargetsOf(outlinks: ContentPage["outlinks"]): string[] {
+	const targets = new Set<string>();
+	for (const link of outlinks ?? []) {
+		if (ATTACHMENT_EXTS.has(extensionOf(link.target))) continue;
+		targets.add(normalizeUnicode(link.target.replace(/\\/g, "/")).toLowerCase());
 	}
+	return [...targets];
+}
 
-	// Second pass: extract preview text after each heading.
-	// Collects content lines until the next heading at the same or higher level,
-	// strips markdown formatting, and truncates to MAX_PREVIEW_LENGTH chars.
-	// Extracted buildingContentPage allows showing tooltip previews on hover.
-	const MAX_PREVIEW_LENGTH = 200;
-	for (let h = 0; h < headings.length; h++) {
-		const idx = headingLineIndexes[h];
-		if (idx === undefined) continue;
-		const startLine = idx + 1;
-		const endLine =
-			h + 1 < headings.length ? (headingLineIndexes[h + 1] ?? lines.length) : lines.length;
+/**
+ * The page's headings with the ids the published page gives them, and a short
+ * plain-text preview of each section for hover tooltips. `lines` already has
+ * its comments blanked, so neither a commented heading nor commented text in a
+ * section reaches the index.
+ */
+function extractHeadings(lines: string[], isContent: boolean[]): HeadingEntry[] {
+	const scanned = scanPageHeadings(lines, isContent);
+	return scanned.map((heading, position) => {
+		const end = scanned[position + 1]?.line ?? lines.length;
 		const previewLines: string[] = [];
 		let charCount = 0;
-
-		for (let i = startLine; i < endLine && charCount < MAX_PREVIEW_LENGTH; i++) {
+		for (let i = heading.line + 1; i < end && charCount < MAX_PREVIEW_LENGTH; i++) {
 			if (!isContent[i]) continue;
 			const text = stripMarkdownFormatting(lines[i] ?? "").trim();
-			if (!text) continue;
+			if (!text || /^(=+|-+)$/.test(text)) continue;
 			const remaining = MAX_PREVIEW_LENGTH - charCount;
 			previewLines.push(text.length <= remaining ? text : text.slice(0, remaining));
 			charCount += text.length;
 		}
-
-		if (previewLines.length > 0) {
-			const entry = headings[h];
-			if (entry) entry.preview = previewLines.join(" ");
-		}
-	}
-
-	return headings;
+		const entry: HeadingEntry = {
+			rawText: heading.text,
+			slug: heading.id,
+			depth: heading.depth,
+			sourceText: heading.source,
+		};
+		if (heading.explicitId) entry.explicitId = heading.explicitId;
+		if (previewLines.length > 0) entry.preview = previewLines.join(" ");
+		return entry;
+	});
 }
 
 function extractBlocks(lines: string[], isContent: boolean[]): BlockEntry[] {
@@ -653,117 +601,6 @@ function extractBlocks(lines: string[], isContent: boolean[]): BlockEntry[] {
 	return blocks;
 }
 
-/**
- * Extract unique normalized wikilink targets from a page's content lines.
- *
- * Only lines flagged as content by {@link getContentLineFlags} are scanned, and
- * inline code spans and `%% ... %%` comments are stripped first, so wikilinks
- * that never render as links (code blocks, inline code, comments, frontmatter)
- * do not create backlinks. The targets are lowercased, backslash-normalized,
- * and stripped of alias (`|...`) and anchor (`#...`) fragments — matching
- * exactly what the backlinks resolver needs, so it can skip regex scanning
- * entirely.
- */
-function extractWikilinkTargets(lines: string[], isContent: boolean[]): string[] {
-	const seen = new Set<string>();
-	const targets: string[] = [];
-
-	const content = lines
-		.filter((_, index) => isContent[index])
-		.join("\n")
-		.replace(/(`+)[^`\n]*?\1/g, " ")
-		.replace(/%%[\s\S]*?%%/g, " ");
-
-	// One commit point for every target, whatever syntax produced it, so the
-	// three filters below cannot drift between the loops: drop an attachment,
-	// drop a repeat, keep the normalized path.
-	//
-	// `[[image.png]]` names a file, not a page. It can never resolve to one, so
-	// keeping it bought nothing for backlinks — but it did reach Dataview, where
-	// `file.outlinks` rendered it as a link to a route that does not exist.
-	const addTarget = (path: string) => {
-		if (!path || ATTACHMENT_EXTS.has(extensionOf(path))) return;
-		const normalized = normalizeUnicode(path.replace(/\\/g, "/")).toLowerCase();
-		if (seen.has(normalized)) return;
-		seen.add(normalized);
-		targets.push(normalized);
-	};
-
-	for (const match of findWikilinkMatches(content)) {
-		const parsed = parseWikiLink(match.inner, match.fullMatch);
-		if (parsed.target) addTarget(parsed.target);
-	}
-
-	// One normalizer for every Markdown-shaped destination, so an inline link
-	// and a reference definition cannot drift on what counts as internal.
-	const addMarkdownTarget = (raw: string) => {
-		let target = raw.trim();
-		if (target.startsWith("<") && target.endsWith(">")) {
-			target = target.slice(1, -1);
-		}
-		if (
-			!target ||
-			/^[a-z][a-z0-9+.-]*:/i.test(target) ||
-			target.startsWith("//") ||
-			target.startsWith("#")
-		) {
-			return;
-		}
-		// Cut at whichever comes first, `#` or `?`, so `Note.md?from=docs`
-		// resolves like the graph extractor already resolves it
-		// (`cleanLinkTarget`, link-extractor.ts). Splitting at `#` alone left the
-		// query in the path, the `.md` test below failed, and the link was
-		// silently absent from the backlinks.
-		const end = [target.indexOf("#"), target.indexOf("?")]
-			.filter((index) => index >= 0)
-			.reduce((min, index) => (index < min ? index : min), target.length);
-		const pathPart = target.slice(0, end);
-		if (!/\.(md|mdx)$/i.test(pathPart)) {
-			return;
-		}
-
-		let normalized = pathPart.replace(/\.(md|mdx)$/i, "");
-		try {
-			normalized = decodeURIComponent(normalized);
-		} catch {
-			// Keep the raw path when a malformed escape appears in a link.
-		}
-		addTarget(normalized);
-	};
-
-	const markdownLinkPattern = /!?\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)(?:\s+["'][^)]*)?\)/g;
-	for (const match of content.matchAll(markdownLinkPattern)) {
-		addMarkdownTarget(match[1] ?? "");
-	}
-
-	// Reference-style definitions (`[ref]: Note.md`) are links the graph
-	// extractor already counts and the resolver already rewrites, so leaving
-	// them out here made the two subsystems disagree about the same vault.
-	// A `^`-prefixed label is a footnote and a `~`-prefixed one a citation;
-	// neither addresses a page, so both are skipped.
-	const definitionPattern = /^\s{0,3}\[([^\]^~][^\]]*)\]:[ \t]*(<[^>]+>|[^\s]+)/gm;
-	for (const match of content.matchAll(definitionPattern)) {
-		addMarkdownTarget(match[2] ?? "");
-	}
-
-	return targets;
-}
-function extractInlineTags(lines: string[], isContent: boolean[]): string[] {
-	const tags = new Set<string>();
-
-	for (let index = 0; index < lines.length; index += 1) {
-		if (!isContent[index]) continue;
-		for (const match of (lines[index] ?? "").matchAll(INLINE_TAG_PATTERN)) {
-			const tag = (match[1] ?? "").replace(/\/+$/, "");
-			if (tag && !/^[\p{N}/-]+$/u.test(tag)) {
-				tags.add(tag);
-			}
-		}
-	}
-
-	return [...tags];
-}
-
 function pushBlock(blocks: BlockEntry[], seen: Set<string>, id: string): void {
 	const normalizedId = id.trim();
 	if (!normalizedId || seen.has(normalizedId)) {
@@ -772,26 +609,6 @@ function pushBlock(blocks: BlockEntry[], seen: Set<string>, id: string): void {
 
 	seen.add(normalizedId);
 	blocks.push({ id: normalizedId });
-}
-
-function pushHeading(headings: HeadingEntry[], slugger: GithubSlugger, rawHeading: string): void {
-	const trimmedHeading = rawHeading.trim();
-	const explicitIdMatch = trimmedHeading.match(/\s*\{#([A-Za-z0-9_:.-]+)\}\s*$/);
-	const explicitId = explicitIdMatch?.[1];
-	const headingText = explicitIdMatch
-		? trimmedHeading.slice(0, trimmedHeading.length - explicitIdMatch[0].length).trim()
-		: trimmedHeading;
-	const normalizedText = stripMarkdownFormatting(headingText);
-
-	if (normalizedText.length === 0) {
-		return;
-	}
-
-	headings.push({
-		rawText: normalizedText,
-		slug: slugger.slug(normalizedText),
-		explicitId,
-	});
 }
 
 function normalizeStringField(value: unknown): string | undefined {
@@ -816,20 +633,16 @@ function normalizeBooleanField(value: unknown): boolean {
 	return true;
 }
 
+/**
+ * A list-valued property: a YAML list, or the legacy single string Obsidian
+ * still reads as a comma-separated list (`aliases: First, Second`).
+ */
 function normalizeStringArray(value: unknown): string[] {
-	if (!value) return [];
-	if (typeof value === "string") {
-		const trimmed = value.trim();
-		if (!trimmed) return [];
-		return [trimmed];
-	}
-	if (Array.isArray(value)) {
-		return value
-			.filter((v): v is string => typeof v === "string")
-			.map((s) => s.trim())
-			.filter((s) => s.length > 0);
-	}
-	return [];
+	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+	return raw
+		.filter((v): v is string => typeof v === "string")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
 }
 
 function extractFrontmatterMetadata(
@@ -838,7 +651,6 @@ function extractFrontmatterMetadata(
 ): {
 	title?: string;
 	aliases: string[];
-	tags: string[];
 	cssclasses: string[];
 	excerpt?: string;
 	publish: boolean;
@@ -847,20 +659,19 @@ function extractFrontmatterMetadata(
 	try {
 		const { data } = parseFrontmatter(markdown);
 
-		const title = normalizeStringField(data.title);
-		const excerpt = normalizeStringField(data.excerpt);
-		const aliases = normalizeStringArray(data.aliases ?? data.alias);
-		const tags = normalizeStringArray(data.tags ?? data.tag);
-		const cssclasses = normalizeStringArray(data.cssclasses ?? data.cssclass);
-		const publish = normalizeBooleanField(data.publish);
-
 		return {
-			title,
-			excerpt,
-			aliases: [...new Set(aliases)],
-			tags: [...new Set(tags)],
-			cssclasses: [...new Set(cssclasses)],
-			publish,
+			title: normalizeStringField(data.title),
+			excerpt: normalizeStringField(data.excerpt),
+			aliases: [...new Set(normalizeStringArray(data.aliases ?? data.alias))],
+			// Class names cannot contain spaces, so a legacy string splits on both.
+			cssclasses: [
+				...new Set(
+					normalizeStringArray(data.cssclasses ?? data.cssclass).flatMap((entry) =>
+						entry.split(/\s+/),
+					),
+				),
+			],
+			publish: normalizeBooleanField(data.publish),
 			frontmatter: data,
 		};
 	} catch (error) {
@@ -871,7 +682,6 @@ function extractFrontmatterMetadata(
 		);
 		return {
 			aliases: [],
-			tags: [],
 			cssclasses: [],
 			publish: true,
 			frontmatter: {},

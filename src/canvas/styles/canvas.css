@@ -26,20 +26,18 @@
 	--canvas-toolbar-bg: rgba(255, 255, 255, 0.92);
 	--canvas-toolbar-btn-hover: #f1f5f9;
 
-	--canvas-color-1: #ef4444; /* red */
-	--canvas-color-2: #f97316; /* orange */
-	--canvas-color-3: #eab308; /* yellow */
-	--canvas-color-4: #22c55e; /* green */
-	--canvas-color-5: #06b6d4; /* cyan */
-	--canvas-color-6: #a855f7; /* purple */
+	/* Obsidian's own palette for the six JSON Canvas presets (--color-red …
+	   --color-purple in its default theme), so a board looks the same here. */
+	--canvas-color-1: #e93147; /* red */
+	--canvas-color-2: #ec7500; /* orange */
+	--canvas-color-3: #e0ac00; /* yellow */
+	--canvas-color-4: #08b94e; /* green */
+	--canvas-color-5: #00bfbc; /* cyan */
+	--canvas-color-6: #7852ee; /* purple */
 
-	/* Custom Tint Presets */
-	--canvas-bg-color-1-tint: rgba(239, 68, 68, 0.03);
-	--canvas-bg-color-2-tint: rgba(249, 115, 22, 0.03);
-	--canvas-bg-color-3-tint: rgba(234, 179, 8, 0.03);
-	--canvas-bg-color-4-tint: rgba(34, 197, 94, 0.03);
-	--canvas-bg-color-5-tint: rgba(6, 182, 212, 0.03);
-	--canvas-bg-color-6-tint: rgba(168, 85, 247, 0.03);
+	/* How strongly a coloured card (or group) is washed with its colour. */
+	--canvas-card-tint: 10%;
+	--canvas-group-tint: 7%;
 }
 
 /* Rspress Dark Mode Supports */
@@ -69,20 +67,15 @@ html.dark,
 	--canvas-toolbar-bg: rgba(30, 30, 30, 0.92);
 	--canvas-toolbar-btn-hover: #2d2d2d;
 
-	--canvas-color-1: #f87171;
-	--canvas-color-2: #fb923c;
-	--canvas-color-3: #facc15;
-	--canvas-color-4: #4ade80;
-	--canvas-color-5: #22d3ee;
-	--canvas-color-6: #c084fc;
+	--canvas-color-1: #fb464c;
+	--canvas-color-2: #e9973f;
+	--canvas-color-3: #e0de71;
+	--canvas-color-4: #44cf6e;
+	--canvas-color-5: #53dfdd;
+	--canvas-color-6: #a882ff;
 
-	/* Custom Tint Presets in Dark Mode */
-	--canvas-bg-color-1-tint: rgba(239, 68, 68, 0.05);
-	--canvas-bg-color-2-tint: rgba(249, 115, 22, 0.05);
-	--canvas-bg-color-3-tint: rgba(234, 179, 8, 0.05);
-	--canvas-bg-color-4-tint: rgba(34, 197, 94, 0.05);
-	--canvas-bg-color-5-tint: rgba(6, 182, 212, 0.05);
-	--canvas-bg-color-6-tint: rgba(168, 85, 247, 0.05);
+	--canvas-card-tint: 14%;
+	--canvas-group-tint: 9%;
 }
 
 .canvas-container {
@@ -105,6 +98,14 @@ html.dark,
 	cursor: grab;
 	outline: none;
 	transition: background-color 0.2s ease;
+	/* The board handles every touch itself: one finger pans, two pinch. Left
+	   to the browser, a drag scrolls the page and cancels the pan. */
+	touch-action: none;
+	overscroll-behavior: contain;
+}
+
+.canvas-viewport:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--canvas-accent);
 }
 
 .canvas-viewport:active {
@@ -133,14 +134,41 @@ html.dark,
 	will-change: transform;
 }
 
+/* Stacked between the groups and the cards by an inline z-index. */
 .canvas-edges {
 	position: absolute;
 	overflow: visible;
 	pointer-events: none;
-	z-index: 5;
+	width: 1px;
+	height: 1px;
 }
 
-.canvas-edge {
+.canvas-edge-label-box {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.canvas-edge-label {
+	max-width: 100%;
+	padding: 2px 8px;
+	border-radius: 4px;
+	background: var(--canvas-edge-label-bg);
+	color: var(--canvas-edge-label-text);
+	font-size: 13px;
+	line-height: 1.35;
+	text-align: center;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.canvas-edge-highlighted .canvas-edge-label {
+	color: var(--canvas-node-text);
+}
+
+.canvas-edge-path {
 	transition:
 		stroke-width 0.15s ease,
 		stroke-opacity 0.15s ease;
@@ -160,17 +188,20 @@ html.dark,
 }
 
 .canvas-node {
+	position: absolute;
+	inset: 0;
 	border-radius: 8px;
 	background-color: var(--canvas-node-bg);
-	overflow: hidden;
+	/* Visible so the label above a file, link or group card is not clipped;
+	   the content box clips instead. */
+	overflow: visible;
 	box-shadow: var(--canvas-shadow);
 	box-sizing: border-box;
 	transition:
 		box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
 		border-color 0.2s ease,
 		transform 0.15s ease;
-	border: 1.5px solid var(--canvas-node-border);
-	border-left-width: 5px;
+	border: 2px solid var(--canvas-node-border);
 	display: flex;
 	flex-direction: column;
 }
@@ -191,21 +222,8 @@ html.dark,
 		0 0 0 2px var(--canvas-accent);
 }
 
-.canvas-node-text {
-	border-left-color: var(--canvas-node-border-hover);
-}
-
-.canvas-node-file {
-	border-left-color: var(--canvas-accent);
-}
-
-.canvas-node-link {
-	border-left-color: var(--canvas-color-4);
-}
-
 .canvas-node-group {
-	border: 2px dashed var(--canvas-group-border);
-	border-left: 2px dashed var(--canvas-group-border);
+	border: 2px solid var(--canvas-group-border);
 	background-color: var(--canvas-group-bg);
 	border-radius: 12px;
 	box-shadow: none;
@@ -213,12 +231,77 @@ html.dark,
 
 .canvas-node-group:hover {
 	box-shadow: none;
-	border-color: var(--canvas-accent);
+}
+
+/* A coloured card (preset or picker colour): the colour on the border and a
+   translucent wash of it over the opaque card, as Obsidian draws it. */
+.canvas-node-colored {
+	border-color: var(--canvas-node-accent);
+	background:
+		linear-gradient(
+			color-mix(in srgb, var(--canvas-node-accent) var(--canvas-card-tint), transparent),
+			color-mix(in srgb, var(--canvas-node-accent) var(--canvas-card-tint), transparent)
+		),
+		var(--canvas-node-bg);
+}
+
+/* A coloured group is only the wash, so the board shows through. */
+.canvas-node-group.canvas-node-colored {
+	background: color-mix(in srgb, var(--canvas-node-accent) var(--canvas-group-tint), transparent);
+}
+
+/* Obsidian draws an image file node as the bare picture. */
+.canvas-node.canvas-file-image {
+	border-color: transparent;
+	background: none;
+	box-shadow: none;
+}
+
+.canvas-node-frame {
+	outline: none;
+	touch-action: none;
+}
+
+.canvas-node-frame:focus-visible > .canvas-node {
+	box-shadow:
+		var(--canvas-shadow-hover),
+		0 0 0 3px var(--canvas-accent);
+}
+
+.canvas-editor .canvas-node-frame {
+	cursor: default;
+}
+
+/* The name Obsidian shows above a file, link or group node. */
+.canvas-node-label {
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	max-width: 100%;
+	padding-bottom: 4px;
+	font-size: 13px;
+	line-height: 1.3;
+	color: var(--canvas-node-text-subtle);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.canvas-node-label a {
+	color: inherit;
+	text-decoration: none;
+}
+
+.canvas-node-label a:hover {
+	color: var(--canvas-accent);
+	text-decoration: underline;
 }
 
 .canvas-node-content {
 	width: 100%;
 	height: 100%;
+	overflow: hidden;
+	border-radius: inherit;
 	display: flex;
 	flex-direction: column;
 	box-sizing: border-box;
@@ -263,6 +346,12 @@ html.dark,
 }
 .canvas-markdown h2 {
 	font-size: 1.2em;
+}
+
+/* The doc theme opens a parent's first h2 with a divider and a 3rem band;
+ * inside a card it is a stray rule above the card's own title. */
+.canvas-markdown h2::before {
+	content: none;
 }
 .canvas-markdown h3 {
 	font-size: 1.1em;
@@ -352,50 +441,53 @@ html.dark,
 	margin: 1em 0;
 }
 
-/* File Node Styling */
-.canvas-node-file-header {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 8px 12px;
-	border-bottom: 1px solid var(--canvas-node-border);
-	background-color: rgba(0, 0, 0, 0.02);
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--canvas-node-text);
+img.canvas-file-image {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	border-radius: 6px;
 	user-select: none;
 }
 
-.canvas-node-file-header-title {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	flex: 1;
+.canvas-link-frame {
+	display: block;
+	width: 100%;
+	height: 100%;
+	border: 0;
+	background: #fff;
 }
 
-.canvas-node-file-header-link {
+.canvas-file-notice {
+	margin: 0;
+	padding: 6px 12px;
+	font-size: 12px;
+	color: var(--canvas-node-text-subtle);
+	border-bottom: 1px solid var(--canvas-node-border);
+}
+
+.canvas-file-open {
+	color: var(--canvas-accent);
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.canvas-markdown .canvas-unresolved-link {
+	color: var(--canvas-node-text-subtle);
+	text-decoration: underline dotted;
+}
+
+.canvas-embed {
+	margin: 1em 0;
+}
+
+.canvas-loading {
 	display: flex;
 	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	height: min(80vh, 700px);
 	color: var(--canvas-node-text-subtle);
-	transition: color 0.15s ease;
-}
-
-.canvas-node-file-header-link:hover {
-	color: var(--canvas-accent);
-}
-
-.canvas-node-file-body {
-	flex: 1;
-	overflow: auto;
-	position: relative;
-}
-
-.canvas-file-image {
-	max-width: 100%;
-	max-height: 100%;
-	object-fit: contain;
-	border-radius: 4px;
-	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 .canvas-file-media,
 .canvas-file-pdf {
@@ -437,14 +529,6 @@ html.dark,
 	background: var(--canvas-toolbar-bg);
 	border-bottom: 1px solid var(--canvas-node-border);
 	font-size: 12px;
-}
-
-.canvas-editor-node-wrapper {
-	pointer-events: auto;
-}
-
-.canvas-editor-node-wrapper > .canvas-node {
-	inset: 0;
 }
 
 .canvas-resize-handle {
@@ -547,27 +631,28 @@ html.dark,
 }
 
 /* Group Label Styling */
+/* Above the group's top-left corner, in the group's colour when it has one. */
 .canvas-group-label {
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--canvas-node-text);
-	background-color: var(--canvas-node-bg);
-	border: 1.5px solid var(--canvas-group-border);
-	padding: 3px 10px;
-	border-radius: 20px;
 	position: absolute;
-	top: -12px;
-	left: 16px;
-	user-select: none;
+	bottom: 100%;
+	left: 0;
+	max-width: 100%;
+	padding: 0 4px 6px;
+	font-size: 20px;
+	font-weight: 600;
 	line-height: 1.2;
-	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+	color: var(--canvas-group-label);
 	white-space: nowrap;
-	z-index: 10;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	user-select: none;
 }
 
-.canvas-group-label[style*="background-color"] {
-	color: #ffffff;
-	border-color: transparent;
+/* The accent alone is a light tint (cyan, yellow) that drops to 2:1 on the
+ * light canvas; mixing in the card text keeps the hue and clears 4.5:1 in both
+ * modes. */
+.canvas-node-colored > .canvas-group-label {
+	color: color-mix(in srgb, var(--canvas-node-accent) 45%, var(--canvas-node-text));
 }
 
 .canvas-error {
@@ -672,15 +757,6 @@ html.dark,
 }
 
 /* Heading resolution inline error fallback */
-.canvas-file-error-body {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	padding: 16px;
-	height: 100%;
-	box-sizing: border-box;
-}
-
 .canvas-file-error-text {
 	font-family:
 		ui-monospace,
@@ -702,31 +778,31 @@ html.dark,
 
 /* Custom Scrollbar Styling */
 .canvas-markdown::-webkit-scrollbar,
-.canvas-node-file-body::-webkit-scrollbar {
+.canvas-file-note::-webkit-scrollbar {
 	width: 6px;
 	height: 6px;
 }
 
 .canvas-markdown::-webkit-scrollbar-track,
-.canvas-node-file-body::-webkit-scrollbar-track {
+.canvas-file-note::-webkit-scrollbar-track {
 	background: transparent;
 	border-radius: 3px;
 }
 
 .canvas-markdown::-webkit-scrollbar-thumb,
-.canvas-node-file-body::-webkit-scrollbar-thumb {
+.canvas-file-note::-webkit-scrollbar-thumb {
 	background: var(--canvas-node-border-hover);
 	border-radius: 3px;
 }
 
 .canvas-markdown::-webkit-scrollbar-thumb:hover,
-.canvas-node-file-body::-webkit-scrollbar-thumb:hover {
+.canvas-file-note::-webkit-scrollbar-thumb:hover {
 	background: var(--canvas-node-text-subtle);
 }
 
 /* Firefox scrollbar */
 .canvas-markdown,
-.canvas-node-file-body {
+.canvas-file-note {
 	scrollbar-width: thin;
 	scrollbar-color: var(--canvas-node-border-hover) transparent;
 }
@@ -890,13 +966,37 @@ html.dark,
 
 /* Reduced motion: every transition here is decoration on a zoom/pan surface, so
    the hover, selection and active states still apply — just instantly. */
+/* A note card: the optional "section not found" line, then the scrolling body. */
+.canvas-file-note .canvas-markdown {
+	flex: 1;
+	min-height: 0;
+	height: auto;
+}
+
+/* Foldable callouts (`> [!faq]-`) are <details>; the summary is the title. */
+details.canvas-callout > summary.canvas-callout-title {
+	cursor: pointer;
+	list-style: none;
+}
+
+details.canvas-callout > summary.canvas-callout-title::-webkit-details-marker {
+	display: none;
+}
+
+details.canvas-callout > summary.canvas-callout-title::after {
+	content: " ▸";
+}
+
+details.canvas-callout[open] > summary.canvas-callout-title::after {
+	content: " ▾";
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.canvas-container,
 	.canvas-viewport,
 	.canvas-edge,
 	.canvas-node,
 	.canvas-markdown a,
-	.canvas-node-file-header-link,
 	.canvas-file-fallback,
 	.canvas-toolbar-btn {
 		transition: none;

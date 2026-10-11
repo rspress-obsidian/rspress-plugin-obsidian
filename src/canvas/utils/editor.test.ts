@@ -34,13 +34,28 @@ test("creates group node", () => {
 	if (node.type === "group") expect(node.label).toBe("Group");
 });
 
+function box(id: string, x: number, y: number): CanvasNode {
+	return { id, type: "text", x, y, width: 100, height: 60, text: "" };
+}
+
 test("creates edge with unique id and arrow toEnd", () => {
-	const edge = createEdge([], "a", "b");
+	const edge = createEdge([], box("a", 0, 0), box("b", 300, 0));
 	expect(edge.id).toBe("edge-1");
 	expect(edge.fromNode).toBe("a");
 	expect(edge.toNode).toBe("b");
 	expect(edge.toEnd).toBe("arrow");
 	expect(edge.fromEnd).toBe("none");
+});
+
+test("a drawn edge attaches on the sides the two nodes face", () => {
+	expect(createEdge([], box("a", 0, 0), box("b", 300, 0))).toMatchObject({
+		fromSide: "right",
+		toSide: "left",
+	});
+	expect(createEdge([], box("a", 0, 400), box("b", 20, 0))).toMatchObject({
+		fromSide: "top",
+		toSide: "bottom",
+	});
 });
 
 test("avoids id collisions", () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigateTo, usePathname } from "../../shared/usePathname.js";
+import { usePathname } from "../../shared/usePathname.js";
 import GraphIcon from "./components/GraphIcon.js";
 import ZoomButton from "./components/ZoomButton.js";
 import GraphView, { type GraphViewColors, type GraphViewHandle } from "./GraphView.js";
@@ -32,7 +32,6 @@ function ChevronIcon({ expanded, size = 14 }: { expanded: boolean; size?: number
 
 export default function GraphSidebar({ colors }: GraphSidebarProps) {
 	const pathname = usePathname();
-	const navigateTo = useNavigateTo();
 	const [isExpanded, setIsExpanded] = useState(true);
 	const [stats, setStats] = useState<{ nodes: number; links: number } | null>(null);
 	const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
@@ -63,8 +62,6 @@ export default function GraphSidebar({ colors }: GraphSidebarProps) {
 		const s = graphViewRef.current?.getStats();
 		if (s) setStats(s);
 	}, [pathname]);
-
-	const handleNodeClick = useCallback((routePath: string) => navigateTo(routePath), [navigateTo]);
 
 	const handleNodeHoverChange = useCallback((label: string | null, _x: number, _y: number) => {
 		setHoveredLabel(label);
@@ -182,7 +179,6 @@ export default function GraphSidebar({ colors }: GraphSidebarProps) {
 						ref={graphViewRef}
 						width={dimensions.width}
 						height={dimensions.height}
-						onNodeClick={handleNodeClick}
 						onNodeHoverChange={handleNodeHoverChange}
 						colors={colors}
 					/>

@@ -1,0 +1,198 @@
+/* Excalidraw: styles for the markup `src/markdown/obsidian-plugins/excalidraw/` emits.
+ * The class names are the Obsidian plugin's own (`excalidraw-svg`,
+ * `excalidraw-embedded-img`, `excalidraw-svg-<style>` from an embed's alias),
+ * so CSS snippets written for Obsidian keep applying. */
+
+/* A drawing's own page: the picture at its natural size, shrunk to fit. */
+.excalidraw-drawing {
+	margin: 1rem 0;
+}
+
+.excalidraw-drawing > svg,
+.excalidraw-drawing > img,
+.excalidraw-embed > svg,
+.excalidraw-embed > img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+}
+
+/* An embed is phrasing content: it sits in a paragraph, as in Obsidian. */
+.excalidraw-embed {
+	display: inline-block;
+	max-width: 100%;
+	vertical-align: top;
+}
+
+/* `theme: "auto"`: the drawing follows the site's switch the way Excalidraw
+ * exports a dark drawing — the whole picture inverted, photos inverted back. */
+html.dark svg.excalidraw-theme-auto {
+	filter: invert(93%) hue-rotate(180deg);
+}
+
+/* Photos and PDF pages are bitmaps in Excalidraw's export: turned back. */
+html.dark svg.excalidraw-theme-auto [data-bitmap] {
+	filter: invert(100%) hue-rotate(180deg) saturate(1.25);
+}
+
+/* An exported light/dark pair: the one matching the site's theme shows. */
+.excalidraw-exported-dark,
+html.dark .excalidraw-exported-light {
+	display: none;
+}
+
+html.dark .excalidraw-exported-dark {
+	display: block;
+}
+
+/* Elements that link somewhere look clickable, as in Excalidraw's view mode. */
+svg.excalidraw-svg a,
+svg.excalidraw-embedded-img a {
+	cursor: pointer;
+}
+
+svg .excalidraw-unresolved-link {
+	cursor: not-allowed;
+	opacity: 0.6;
+}
+
+/* A markdown note or a formula placed in a drawing. */
+.excalidraw-embedded-markdown {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	color: #1e1e1e;
+	font-size: 16px;
+	line-height: 1.4;
+}
+
+/* A Mermaid diagram or a PDF page placed in a drawing. The box is the
+ * drawing's own paper: light, as the drawing's dark filter turns it. */
+.excalidraw-embedded-mermaid,
+.excalidraw-embedded-pdf {
+	position: relative;
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	color: #1e1e1e;
+	font:
+		12px / 1.35 ui-sans-serif,
+		system-ui,
+		sans-serif;
+}
+
+.excalidraw-embed-label {
+	position: absolute;
+	top: 4px;
+	left: 4px;
+	padding: 1px 6px;
+	color: #495057;
+	background: #e9ecef;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+/* The diagram's source, until (or unless) the site's Mermaid renderer draws it. */
+.excalidraw-embedded-mermaid > div.obsidian-mermaid-block,
+.excalidraw-embedded-mermaid > div.excalidraw-mermaid-source {
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	padding: 24px 8px 8px;
+	overflow: hidden;
+	color: #343a40;
+	background: #f8f9fa;
+	border: 1px dashed #adb5bd;
+	border-radius: 4px;
+	font:
+		11px / 1.4 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		Consolas,
+		monospace;
+	white-space: pre;
+}
+
+.excalidraw-embedded-mermaid > div.obsidian-mermaid-rendered {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	background: none;
+	border: 0;
+}
+
+/* The diagram fills its element's box, as Excalidraw scales the image. */
+.excalidraw-embedded-mermaid > div.obsidian-mermaid-rendered > svg {
+	width: 100%;
+	height: 100%;
+	/* biome-ignore lint/complexity/noImportantStyles: Mermaid sets max-width inline on its svg. */
+	max-width: none !important;
+}
+
+.excalidraw-embedded-mermaid:has(> .obsidian-mermaid-rendered) > .excalidraw-embed-label {
+	display: none;
+}
+
+/* A dark site renders Mermaid's dark theme; inside a drawing it is turned
+ * back to the light one, which the drawing's own theme then applies to. */
+html.dark .excalidraw-embedded-mermaid > div.obsidian-mermaid-rendered {
+	filter: invert(93%) hue-rotate(180deg);
+}
+
+.excalidraw-embedded-pdf > object {
+	display: block;
+	width: 100%;
+	height: 100%;
+	border: 0;
+}
+
+/* Shown when the browser cannot display the PDF in place; specific enough
+ * to win over Rspress's own link style. */
+.excalidraw-embedded-pdf a.excalidraw-pdf-link {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	padding: 24px 8px 8px;
+	color: #1e1e1e;
+	background: #f8f9fa;
+	border: 1px solid #ced4da;
+	border-radius: 4px;
+	text-align: center;
+	text-decoration: none;
+}
+
+.excalidraw-embedded-pdf .excalidraw-pdf-name {
+	font-weight: 600;
+	word-break: break-word;
+}
+
+.excalidraw-embedded-pdf .excalidraw-pdf-page {
+	color: #6c757d;
+}
+
+.excalidraw-error {
+	display: block;
+	margin: 1rem 0;
+	padding: 0.6rem 0.8rem;
+	color: var(--rp-c-danger-1, #b42318);
+	background: var(--rp-c-danger-soft, rgba(240, 68, 56, 0.08));
+	border: 1px solid color-mix(in srgb, var(--rp-c-danger-1, #b42318) 30%, transparent);
+	border-radius: 8px;
+	font-size: 0.9rem;
+}
+
+span.excalidraw-error {
+	display: inline-block;
+	margin: 0;
+}

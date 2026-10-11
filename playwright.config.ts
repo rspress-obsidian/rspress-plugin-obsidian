@@ -13,21 +13,13 @@ const BUILD_INPUTS = ["src", "docs", "theme", "Obsidian Vault", "rspress.config.
 const BUILD_ENTRY = path.join("doc_build", "index.html");
 
 /**
- * Directories under `docs` that the build itself writes: vault assets staged by
- * the wikilink plugin and the enriched canvas JSON. Their sources (`Obsidian
- * Vault`, `src`) are watched instead — watching the copies would race, because
- * rspress sometimes writes them after `doc_build/index.html` in the same run.
+ * Newest mtime under `dir`, recursively. Nothing under `docs` is generated: the
+ * plugins stage vault attachments and canvas JSON under
+ * `node_modules/.rspress-plugin-obsidian/`, so every file here is an input.
  */
-const GENERATED_INPUT_DIRS = [
-	path.join("docs", "public", "vault"),
-	path.join("docs", "public", "__canvases__"),
-];
-
-/** Newest mtime under `dir`, recursively. */
 const newestMtime = (dir: string): number =>
 	readdirSync(dir, { withFileTypes: true }).reduce((newest, entry) => {
 		const child = path.join(dir, entry.name);
-		if (entry.isDirectory() && GENERATED_INPUT_DIRS.includes(child)) return newest;
 		const mtime = entry.isDirectory() ? newestMtime(child) : statSync(child).mtimeMs;
 		return Math.max(newest, mtime);
 	}, 0);

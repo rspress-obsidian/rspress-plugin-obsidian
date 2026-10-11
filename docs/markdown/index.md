@@ -34,5 +34,8 @@ features:
   - title: Static Obsidian Markdown
     details: 'Comments (%%), highlights (==text==), footnotes [^1], selected frontmatter, and publish: false drafts.'
     icon: ✨
+  - title: Community plugins
+    details: 'Tasks queries, Kanban boards, Excalidraw drawings, Bases views and Templater templates, rendered at build time from your vault and its plugin settings.'
+    icon: 🧩
 ---
 

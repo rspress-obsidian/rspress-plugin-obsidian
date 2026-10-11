@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderMathHtml } from "./math.ts";
+import { mathEngineStylesheet, prepareMathEngine, renderMathHtml } from "./math.ts";
 
 describe("renderMathHtml", () => {
 	test("renders inline and display math to KaTeX markup", () => {
@@ -34,5 +34,30 @@ describe("renderMathHtml", () => {
 		// The documented failure contract: callers branch on null to show their own
 		// state, so anything KaTeX throws on must come back as null.
 		expect(renderMathHtml(undefined as unknown as string, false)).toBeNull();
+	});
+});
+
+describe("MathJax engine", () => {
+	test("neutralises javascript: links and unsafe styles, as KaTeX's trust: false does", async () => {
+		await prepareMathEngine("mathjax");
+		const link = renderMathHtml("\\href{javascript:alert(1)}{x}", false, "mathjax") ?? "";
+		const style =
+			renderMathHtml("\\style{background:url(javascript:alert(1))}{z}", false, "mathjax") ?? "";
+		expect(link).not.toContain("javascript:");
+		expect(style).not.toContain("javascript:");
+		expect(renderMathHtml("\\href{https://ok.dev}{x}", false, "mathjax")).toContain(
+			"https://ok.dev",
+		);
+	});
+
+	test("the stylesheet covers glyphs first used after an earlier page read it", async () => {
+		await prepareMathEngine("mathjax");
+		renderMathHtml("a", false, "mathjax");
+		const before = mathEngineStylesheet("mathjax");
+		renderMathHtml("\\beta", false, "mathjax");
+		const after = mathEngineStylesheet("mathjax");
+		// U+1D6FD is MathJax's italic beta.
+		expect(before).not.toContain("mjx-c1D6FD");
+		expect(after).toContain("mjx-c1D6FD");
 	});
 });

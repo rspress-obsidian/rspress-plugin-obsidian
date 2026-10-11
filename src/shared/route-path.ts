@@ -70,6 +70,47 @@ export function deriveRoutePath(relativePath: string, routePrefix = ""): string 
 }
 
 /**
+ * The parts of an Rspress site config that shape a docs page's route: the
+ * default language and the locale list, the default version and the version
+ * list (`lang`, `locales[].lang`, `multiVersion`).
+ */
+export interface DocsRouteLocales {
+	lang?: string;
+	langs?: readonly string[];
+	version?: string;
+	versions?: readonly string[];
+}
+
+/**
+ * The route Rspress publishes a docs-root file at — a port of its
+ * `normalizeRoutePath` (route/normalizeRoutePath.js), which is not public API.
+ * A leading version and then language segment are recognised; the default
+ * version and default language are dropped (`en/guide.md` → `/guide` when
+ * `lang: "en"`), others kept (`zh/guide.md` → `/zh/guide`). Unlike Rspress
+ * the result carries no trailing slash for an `index` page; `routeHref` adds
+ * it when emitting a link.
+ */
+export function deriveDocsRoutePath(relativePath: string, locales: DocsRouteLocales = {}): string {
+	let route = normalizeFsPath(relativePath).replace(/\.(md|mdx)$/i, "");
+	if (route.endsWith("/")) route = `${route}index`;
+	const parts = route.split("/").filter(Boolean);
+	let version = "";
+	let lang = "";
+	if (locales.version && parts[0] !== undefined && locales.versions?.includes(parts[0])) {
+		version = parts.shift() ?? "";
+	}
+	if (locales.lang && parts[0] !== undefined && locales.langs?.includes(parts[0])) {
+		lang = parts.shift() ?? "";
+	}
+	let pure = parts.join("/").replace(/\/index$/, "");
+	if (pure === "index") pure = "";
+	const prefix = [version === locales.version ? "" : version, lang === locales.lang ? "" : lang]
+		.filter(Boolean)
+		.join("/");
+	return `/${[prefix, pure].filter(Boolean).join("/")}`;
+}
+
+/**
  * Normalize a route prefix to a leading slash and no trailing slash, returning
  * `fallback` when unset or empty. `fallback` is `""` for a vault root and
  * `"/vault"` where the option has that documented default.

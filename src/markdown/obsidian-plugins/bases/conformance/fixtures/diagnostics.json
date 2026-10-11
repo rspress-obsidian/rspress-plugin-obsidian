@@ -1,0 +1,86 @@
+{
+	"generatedAt": "2026-06-11T12:48:49.825Z",
+	"obsidian": {
+		"version": null,
+		"build": "3918dcecdc0934db"
+	},
+	"cases": [
+		{
+			"name": "unknown bare string member",
+			"expression": "\"asdf\".asdfasdf",
+			"expected": {
+				"error": "Cannot find \"asdfasdf\" on type String"
+			}
+		},
+		{
+			"name": "unknown string method",
+			"expression": "\"asdf\".asdfasdf()",
+			"expected": {
+				"error": "Cannot find function \"asdfasdf\" on type String"
+			}
+		},
+		{
+			"name": "known bare string field",
+			"expression": "\"asdf\".length",
+			"expected": 4
+		},
+		{
+			"name": "known string method",
+			"expression": "\"asdf\".lower()",
+			"expected": "asdf"
+		},
+		{
+			"name": "unknown bare date member",
+			"expression": "now().asdfasdf",
+			"expected": {
+				"error": "Cannot find \"asdfasdf\" on type Date"
+			}
+		},
+		{
+			"name": "known bare date field",
+			"expression": "now().year",
+			"expected": 2026
+		},
+		{
+			"name": "unknown bare number member",
+			"expression": "(1).asdfasdf",
+			"expected": {
+				"error": "Cannot find \"asdfasdf\" on type Number"
+			}
+		},
+		{
+			"name": "known number method",
+			"expression": "(1.2).round()",
+			"expected": 1
+		},
+		{
+			"name": "unknown bare file member",
+			"expression": "file.asdfasdf",
+			"expected": {
+				"error": "Cannot find \"asdfasdf\" on type File"
+			}
+		},
+		{
+			"name": "known bare file field",
+			"expression": "file.name",
+			"expected": "row"
+		},
+		{
+			"name": "unknown global function",
+			"expression": "doesNotExist()",
+			"expected": {
+				"error": "Cannot find function \"doesNotExist\""
+			}
+		},
+		{
+			"name": "invalid incomplete comparison",
+			"expression": "status ==",
+			"expected": null
+		},
+		{
+			"name": "missing note property",
+			"expression": "missing",
+			"expected": null
+		}
+	]
+}

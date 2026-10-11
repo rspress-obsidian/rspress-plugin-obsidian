@@ -4,62 +4,49 @@ import path from "node:path";
 
 // `bun install --frozen-lockfile` hard-fails on a lockfile the pinned bun
 // cannot parse, and that failure only ever surfaces in CI — the release job
-// died at the install step while every test job was green. Commit 2c20e56
-// re-pinned all five versions in ci.yml and missed release.yml, so the two
-// files drifted again on the very next run.
+// once died at the install step while every test job was green, because one
+// workflow still hard-coded a bun the others had moved past.
 //
-// This is deliberately a floor check, not an equality check: `1.4.x`, `1.4`
-// and `1.4.2` all read the lockfile correctly, and pinning one exact patch
-// everywhere would make this test churn on every routine dependency bump.
-// What must never come back is a pin below the floor.
-const workflowDir = path.resolve(import.meta.dir, "..", ".github", "workflows");
+// Every workflow now reads the version from `packageManager` in package.json,
+// so there is one pin to keep right. These tests keep it that way: no
+// setup-bun step may fall back to its own default or hard-code a bun too old
+// for the lockfile, and `packageManager` itself must be new enough.
+const root = path.resolve(import.meta.dir, "..");
+const workflowDir = path.join(root, ".github", "workflows");
 const workflows = readdirSync(workflowDir).filter((f) => f.endsWith(".yml"));
 
-// The lowest bun that can parse bun.lock (lockfileVersion 2). Verified by
-// running `bun@1.3.14 install --frozen-lockfile` against it: it exits with
-// `UnknownLockfileVersion`. Keep in step with `engines.bun` in package.json.
+// The lowest bun that can parse bun.lock (lockfileVersion 2):
+// `bun@1.3.14 install --frozen-lockfile` exits with `UnknownLockfileVersion`.
 const MIN_BUN = "1.4.0";
 
-/** Every bun version a workflow asks setup-bun for, as `[file, version]`. */
-function allPins(): [string, string][] {
+/** Each `oven-sh/setup-bun` step, as `[file, step source]`. */
+function setupBunSteps(): [string, string][] {
 	return workflows.flatMap((file) => {
 		const source = readFileSync(path.join(workflowDir, file), "utf8");
-		// Matches `bun-version: 1.4.x`, `bun-version: '1.4.x'` and the matrix
-		// array form `bun-version: ['1.4.x']`. The bare `bun-version` key inside
-		// a matrix block is picked up here too, which is what lets a
-		// `bun-version: ${{ matrix.bun-version }}` reference resolve to the
-		// literal it stands for.
-		return [...source.matchAll(/bun-version:\s*'?[[]?\s*([^'"\]\n]+)/g)]
-			.map((m): [string, string] => [file, (m[1] ?? "").trim()])
-			.filter(([, version]) => !version.includes("${{"));
+		return [...source.matchAll(/uses:\s*oven-sh\/setup-bun@[\s\S]*?(?=\n\s*- |\n\S|$)/g)].map(
+			(m): [string, string] => [file, m[0]],
+		);
 	});
 }
 
-test("every workflow pins a bun that can read this lockfile", () => {
-	expect(workflows.length).toBeGreaterThan(0);
+test("every setup-bun step takes its bun from package.json or pins one that reads the lockfile", () => {
+	const steps = setupBunSteps();
+	expect(steps.length).toBeGreaterThan(0);
 
-	const pins = allPins();
-	expect(pins.length).toBeGreaterThan(0);
-
-	for (const [file, requested] of pins) {
-		expect(requested, `${file} pins bun ${requested}`).toSatisfy(
-			(v: string) => v === "1.4" || v >= MIN_BUN,
-		);
+	for (const [file, step] of steps) {
+		const fromFile = /bun-version-file:\s*'?"?package\.json/.test(step);
+		const pin = /bun-version:\s*'?"?([^'"\n]+)/.exec(step)?.[1]?.trim();
+		const pinOk =
+			pin !== undefined && Bun.semver.satisfies(pin.replace(/\.x$/, ".0"), `>=${MIN_BUN}`);
+		expect(fromFile || pinOk, `${file}: setup-bun step\n${step}`).toBe(true);
 	}
 });
 
-test("package.json declares a bun that can read its own lockfile", () => {
-	const pkg = JSON.parse(
-		readFileSync(path.resolve(workflowDir, "..", "..", "package.json"), "utf8"),
-	) as { packageManager?: string; engines?: { bun?: string } };
+test("packageManager declares a bun that can read the lockfile", () => {
+	const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
+		packageManager?: string;
+	};
 	const declared = pkg.packageManager?.replace(/^bun@/, "");
-
-	// `packageManager` is an exact pin, so it has no wildcard to hide behind:
-	// it is the one value that can silently contradict `engines.bun`.
-	expect(declared).toSatisfy((v?: string) => v !== undefined && v >= MIN_BUN);
-
-	// The two must agree. `engines.bun` is the floor consumers install against,
-	// and `packageManager` is what corepack-style tooling resolves locally.
-	const floor = pkg.engines?.bun?.replace(/^[>=\s]*/, "");
-	expect(declared).toStartWith(floor?.split(".").slice(0, 2).join(".") ?? "");
+	expect(declared).toBeDefined();
+	expect(Bun.semver.satisfies(declared ?? "", `>=${MIN_BUN}`)).toBe(true);
 });

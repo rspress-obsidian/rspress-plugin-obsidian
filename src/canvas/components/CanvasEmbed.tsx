@@ -1,60 +1,28 @@
-import { useEffect, useState } from "react";
-import type { CanvasData } from "../types.js";
 import { CanvasRenderer } from "./CanvasRenderer.js";
+import { resolveCanvasJsonUrl, useCanvasBoard } from "./useCanvasBoard.js";
 
-interface CanvasEmbedProps {
+export interface CanvasEmbedProps {
+	/** Vault path of the board, e.g. `Projects/Board.canvas`. */
 	src: string;
 	fileRoutePrefix?: string;
+	/** Show link nodes as live website previews. @default true */
 	linkPreview?: boolean;
 	iframeSandbox?: string;
+	/**
+	 * Site base to fetch the board under. Defaults to the Rspress `base` the
+	 * canvas plugin was built with; set it only for a board published by a
+	 * different site.
+	 */
 	basePath?: string;
-}
-
-function normalizeBasePath(value: string | undefined): string {
-	if (!value || value === "/" || value === "." || value === "./") return "";
-	return `/${value.replace(/^\/+|\/+$/g, "")}`;
-}
-
-function detectRuntimeBasePath(): string {
-	if (typeof document !== "undefined") {
-		const scripts = Array.from(document.scripts)
-			.map((script) => script.src)
-			.filter(Boolean);
-		for (const scriptUrl of scripts) {
-			try {
-				const pathname = new URL(scriptUrl, document.baseURI).pathname;
-				const marker = pathname.search(/\/(?:static|assets)\//);
-				if (marker > 0) return pathname.slice(0, marker);
-				if (marker === 0) return "";
-			} catch {
-				// Ignore malformed script URLs and continue with the other runtime hints.
-			}
-		}
-
-		const baseHref = document.querySelector("base")?.getAttribute("href");
-		if (baseHref) {
-			try {
-				return normalizeBasePath(new URL(baseHref, document.baseURI).pathname);
-			} catch {
-				// Fall through to the root path when the document base is malformed.
-			}
-		}
-	}
-	return "";
-}
-
-function resolveCanvasJsonUrl(src: string, basePath?: string): string {
-	const jsonPath = src
-		.trim()
-		.replace(/^\/+/, "")
-		.replace(/\.canvas$/i, "")
-		.replace(/\.json$/i, "");
-	const base = normalizeBasePath(basePath ?? detectRuntimeBasePath());
-	return `${base}/__canvases__/${jsonPath}.json`;
 }
 
 export { resolveCanvasJsonUrl };
 
+/**
+ * A published board inside a page. Unlike the full-page viewer, a bare scroll
+ * wheel scrolls the page: the board zooms with Ctrl/⌘+wheel, a trackpad pinch,
+ * or once the reader has clicked into it.
+ */
 export default function CanvasEmbed({
 	src,
 	fileRoutePrefix,
@@ -62,56 +30,20 @@ export default function CanvasEmbed({
 	iframeSandbox,
 	basePath,
 }: CanvasEmbedProps) {
-	const [data, setData] = useState<CanvasData | null>(null);
-	const [status, setStatus] = useState<"loading" | "error" | "loaded">("loading");
-	// Resolved during render so the fetch and the renderer's remount key share one
-	// value: switching `src` (or the base path) has to remount the renderer, which
-	// seeds its editor state from `data` once.
-	const url = resolveCanvasJsonUrl(src, basePath);
+	const board = useCanvasBoard(src, basePath);
 
-	useEffect(() => {
-		let cancelled = false;
-
-		const loadCanvas = async () => {
-			setStatus("loading");
-
-			try {
-				const res = await fetch(url);
-				if (!res.ok) {
-					throw new Error(`Canvas not found: ${src} (${res.status})`);
-				}
-				const json: CanvasData = await res.json();
-				if (!cancelled) {
-					setData(json);
-					setStatus("loaded");
-				}
-			} catch (err) {
-				if (!cancelled) {
-					setStatus("error");
-					console.error("[CanvasEmbed] Failed to load canvas:", err);
-				}
-			}
-		};
-
-		loadCanvas();
-
-		return () => {
-			cancelled = true;
-		};
-	}, [url, src]);
-
-	if (status === "loading") {
+	if (board.status === "loading") {
 		return (
-			<div className="canvas-embed-loading">
+			<div className="canvas-embed-loading" role="status">
 				<div className="canvas-embed-spinner" />
 				<span>Loading canvas…</span>
 			</div>
 		);
 	}
 
-	if (status === "error") {
+	if (board.status === "error") {
 		return (
-			<div className="canvas-embed-error">
+			<div className="canvas-embed-error" role="alert">
 				<svg
 					width="20"
 					height="20"
@@ -121,8 +53,7 @@ export default function CanvasEmbed({
 					strokeWidth="2"
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					role="img"
-					aria-label="Error"
+					aria-hidden="true"
 				>
 					<circle cx="12" cy="12" r="10" />
 					<line x1="12" y1="8" x2="12" y2="12" />
@@ -135,17 +66,19 @@ export default function CanvasEmbed({
 		);
 	}
 
-	if (!data) return null;
-
 	return (
-		<CanvasRenderer
-			// Same reason as CanvasViewer: the renderer seeds state from `data` once,
-			// so a different canvas has to remount it or the old one stays on screen.
-			key={url}
-			data={data}
-			fileRoutePrefix={fileRoutePrefix}
-			linkPreview={linkPreview}
-			iframeSandbox={iframeSandbox}
-		/>
+		<div className="canvas-embed">
+			<CanvasRenderer
+				// The renderer seeds its editor state from `data` once, so a different
+				// board has to remount it or the old one stays on screen.
+				key={board.url}
+				data={board.data}
+				boardId={src}
+				fileRoutePrefix={fileRoutePrefix}
+				linkPreview={linkPreview}
+				iframeSandbox={iframeSandbox}
+				wheelZoom={false}
+			/>
+		</div>
 	);
 }

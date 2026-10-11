@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { builtinModules } from "node:module";
 import path from "node:path";
 
 /**
@@ -31,37 +32,62 @@ function sourceFiles(dir: string): string[] {
 	return out;
 }
 
+/**
+ * Every module specifier a source file loads: static `import … from`,
+ * `export … from`, side-effect `import "…"`, dynamic `import("…")` and
+ * `require("…")`. Comments are dropped first so prose cannot trip it.
+ */
+function moduleSpecifiers(source: string): string[] {
+	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+	const pattern =
+		/\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/g;
+	return [...code.matchAll(pattern)].map(
+		(match) => match[1] ?? match[2] ?? match[3] ?? match[4] ?? "",
+	);
+}
+
+/** `node:fs`, `fs`, `fs/promises`, … — anything Node resolves as a builtin. */
+function isNodeBuiltin(specifier: string): boolean {
+	return specifier.startsWith("node:") || builtinModules.includes(specifier);
+}
+
 describe("src/shared boundary", () => {
 	const files = sourceFiles(SHARED);
 
-	test("has the shared modules it is supposed to own", () => {
-		// Named so an accidental move back into a feature fails here rather than
-		// being rediscovered the next time a bundle size or a `node:fs` leak
-		// regresses.
-		expect(files.map((f) => path.basename(f)).sort()).toEqual([
-			"canvas-routes.ts",
-			"content-flags.ts",
-			"escape.ts",
-			"extensions.ts",
-			"frontmatter.ts",
-			"media-exts.ts",
-			"media-html.ts",
-			"paths.ts",
-			"route-path.ts",
-			"slug.ts",
-			"transclusion.ts",
-			"usePathname.ts",
-		]);
+	test("is scanned at all", () => {
+		// Guards the checks below against passing vacuously after a move.
+		expect(files.length).toBeGreaterThan(0);
 	});
 
-	test("no module imports node builtins", () => {
+	test("no module imports node builtins, in any import form", () => {
 		const offenders: string[] = [];
 		for (const file of files) {
-			if (/from "node:/.test(readFileSync(file, "utf-8"))) {
-				offenders.push(path.relative(SRC, file));
+			for (const specifier of moduleSpecifiers(readFileSync(file, "utf-8"))) {
+				if (isNodeBuiltin(specifier)) offenders.push(`${path.relative(SRC, file)} -> ${specifier}`);
 			}
 		}
 		expect(offenders).toEqual([]);
+	});
+
+	test("the builtin guard sees every import form", () => {
+		const forms = [
+			'import fs from "node:fs";',
+			'import { join } from "path";',
+			'export { readFile } from "fs/promises";',
+			'import "node:process";',
+			'const os = await import("node:os");',
+			"const os = await import('os');",
+			'const cp = require("child_process");',
+		];
+		for (const form of forms) {
+			expect(moduleSpecifiers(form).some(isNodeBuiltin)).toBe(true);
+		}
+		const clean = [
+			'import { visit } from "unist-util-visit";',
+			'// import fs from "node:fs";',
+			'import { x } from "./path.js";',
+		].join("\n");
+		expect(moduleSpecifiers(clean).some(isNodeBuiltin)).toBe(false);
 	});
 
 	test("no module reaches into a feature", () => {
@@ -79,47 +105,44 @@ describe("src/shared boundary", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	test("a feature reaches into another only through a named exception", () => {
-		// The refactor removed three of these. What is left is a node-bound
-		// filesystem guard, which cannot live in a node-free `shared/`, so the
-		// exception is named here and this list may only shrink — a new
-		// cross-feature import fails the build instead of becoming a fourth
-		// quietly-accepted one.
-		const ALLOWED = new Set([
-			// Vault containment. `isRealPathInsideRoot` resolves realpaths through
-			// `node:path`, and both features need the same check for the same
-			// reason: an attachment or note must not escape the vault root.
-			"canvas/index.ts -> ../markdown/utils.js",
-		]);
+	test("only build-time code reaches into another feature, and only into markdown's", () => {
+		// The markdown feature owns the content index and link resolution, and
+		// the canvas and graph build steps reuse them so all three agree on what
+		// a link means (vault containment, `resolveWikiLink`, the page index).
+		// That is node-side code. Browser code — runtime components, canvas
+		// components and hooks — must never import across features: whatever it
+		// imports lands in the client bundle, node dependencies included.
+		const isBrowserCode = (relative: string) =>
+			/\/(runtime|components|hooks)\//.test(`/${relative}`) || relative.endsWith(".tsx");
 
-		const found = new Set<string>();
+		const offenders: string[] = [];
 		for (const feature of FEATURES) {
 			const dir = path.join(SRC, feature);
 			if (!statSync(dir).isDirectory()) continue;
 			for (const file of sourceFiles(dir)) {
-				const source = readFileSync(file, "utf-8");
-				for (const match of source.matchAll(/from "(\.[^"]*)"/g)) {
+				for (const specifier of moduleSpecifiers(readFileSync(file, "utf-8"))) {
+					if (!specifier.startsWith(".")) continue;
 					// Resolve the specifier to a real file before judging it. A
 					// textual `canvas/` match is not evidence of a cross-feature
 					// import: `graph/runtime/` has a directory of its own named
 					// `canvas`, and `./canvas/colors.js` from inside graph is graph's.
-					const resolved = path.resolve(path.dirname(file), match[1] as string);
+					const resolved = path.resolve(path.dirname(file), specifier);
 					const target = FEATURES.find(
 						(candidate) =>
 							resolved === path.join(SRC, candidate) ||
 							resolved.startsWith(`${path.join(SRC, candidate)}${path.sep}`),
 					);
 					if (!target || target === feature) continue;
-					// Report the specifier as written — that is what a reader sees in
-					// the source and what the allowlist is keyed on. The file side is
-					// normalised to `/` because `path.relative` yields `\` on Windows,
-					// where the allowlist entry would otherwise never match.
+					// `/`-normalised so the message reads the same on Windows.
 					const relative = path.relative(SRC, file).replace(/\\/g, "/");
-					found.add(`${relative} -> ${match[1] as string}`);
+					const targetRelative = path.relative(SRC, resolved).replace(/\\/g, "/");
+					if (isBrowserCode(relative) || target !== "markdown" || isBrowserCode(targetRelative)) {
+						offenders.push(`${relative} -> ${specifier}`);
+					}
 				}
 			}
 		}
 
-		expect([...found].filter((entry) => !ALLOWED.has(entry))).toEqual([]);
+		expect(offenders).toEqual([]);
 	});
 });

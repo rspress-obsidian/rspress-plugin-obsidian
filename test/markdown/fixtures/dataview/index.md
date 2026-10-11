@@ -8,7 +8,7 @@ SORT priority DESC
 LIMIT 2
 ```
 
-Open count: = length(file.tasks)
+Open count: `= length(this.file.tasks)`
 
 ```dataview
 TASK

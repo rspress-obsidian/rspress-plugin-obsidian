@@ -5,6 +5,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { graphDataModule } from "./graph-fixture";
 
 const { mock } = require("bun:test");
 
@@ -13,10 +14,7 @@ const { mock } = require("bun:test");
 // resolve GraphPanel's import graph so the real module can be captured before
 // the stub below replaces it. Test files that render either module re-mock
 // them with their own fixtures anyway.
-mock.module("virtual-graph-data", () => ({
-	graphData: { nodes: [], links: [] },
-	default: { nodes: [], links: [] },
-}));
+mock.module("virtual-graph-data", () => graphDataModule([], []));
 // Snapshot the exports: registering the stub below patches the live namespace
 // in place, so the namespace object itself cannot serve as the restore value.
 const realGraphPanel = { ...(await import("../GraphPanel")) };
@@ -28,11 +26,13 @@ const realGraphPanel = { ...(await import("../GraphPanel")) };
 // loads after this one would see the stub instead of the real panel.
 let mountCount = 0;
 let lastDefaultOpen: boolean | undefined;
+let lastReaderRequested: boolean | undefined;
 
 mock.module("../GraphPanel", () => ({
-	default: (props: { defaultOpen?: boolean }) => {
+	default: (props: { defaultOpen?: boolean; readerRequested?: boolean }) => {
 		mountCount += 1;
 		lastDefaultOpen = props.defaultOpen;
+		lastReaderRequested = props.readerRequested;
 		return <div data-testid="graph-panel" />;
 	},
 }));
@@ -59,6 +59,7 @@ describe("LazyGraphPanel loading", () => {
 		cleanup();
 		mountCount = 0;
 		lastDefaultOpen = undefined;
+		lastReaderRequested = undefined;
 	});
 
 	afterAll(() => {
@@ -84,6 +85,8 @@ describe("LazyGraphPanel loading", () => {
 
 		expect(mountCount).toBe(1);
 		expect(lastDefaultOpen).toBe(true);
+		// The FAB the reader pressed is gone, so the panel must take focus.
+		expect(lastReaderRequested).toBe(true);
 	});
 
 	test("loads the panel immediately when defaultOpen is set", async () => {
@@ -93,6 +96,8 @@ describe("LazyGraphPanel loading", () => {
 
 		expect(mountCount).toBe(1);
 		expect(lastDefaultOpen).toBe(true);
+		// Nobody asked for it, so it must not move focus.
+		expect(lastReaderRequested).toBe(false);
 	});
 
 	test("loads the panel on the g shortcut", async () => {

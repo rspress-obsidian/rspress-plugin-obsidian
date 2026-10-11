@@ -1,57 +1,84 @@
-/* ─── Hover Preview ────────────────────────────────────────────────────── */
+/* ─── Page preview ─────────────────────────────────────────────────────── */
 
+/* Obsidian's `.popover.hover-popover`. The component sets geometry and
+   behaviour inline (position, z-index, box, the surface colour, `overflow`,
+   `overscroll-behavior` and the anchor slicing); this sheet is cosmetic. */
 .obsidian-hover-preview {
-	background: var(--rp-c-bg, #fff);
-	border: 1px solid var(--rp-c-divider, #e5e7eb);
+	box-sizing: border-box;
+	scrollbar-width: thin;
+	color: var(--rp-c-text-1);
+	background: var(--rp-c-bg);
+	border: 1px solid var(--rp-c-divider);
 	border-radius: 8px;
-	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-	overflow: hidden;
-	animation: hp-fade-in 0.15s ease-out;
+	box-shadow:
+		0 1px 3px rgb(0 0 0 / 0.08),
+		0 10px 30px rgb(0 0 0 / 0.18);
+	animation: obsidian-hover-preview-in 0.12s ease-out;
 }
 
-@keyframes hp-fade-in {
+/* A light shadow vanishes on a dark page. */
+html.dark .obsidian-hover-preview {
+	box-shadow:
+		0 2px 6px rgb(0 0 0 / 0.4),
+		0 12px 32px rgb(0 0 0 / 0.6);
+}
+
+.obsidian-hover-preview[data-side="above"] {
+	--obsidian-hover-preview-shift: 4px;
+}
+
+@keyframes obsidian-hover-preview-in {
 	from {
 		opacity: 0;
-		transform: translateY(4px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
+		transform: translateY(var(--obsidian-hover-preview-shift, -4px));
 	}
 }
 
-.obsidian-hover-preview__header {
-	padding: 0.5rem 0.75rem;
-	border-bottom: 1px solid var(--rp-c-divider, #e5e7eb);
-	background: var(--rp-c-bg-soft, #f9fafb);
+/* Rspress sizes article type in rem, so only `zoom` scales type, spacing,
+   KaTeX and SVG together. */
+.obsidian-hover-preview__body {
+	padding: 12px 20px 16px;
+	zoom: 0.875;
 }
 
-.obsidian-hover-preview__title {
-	margin: 0;
-	font-size: 0.8rem;
-	font-weight: 600;
-	color: var(--rp-c-text-1, #111827);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+/* (0,2,1) heading rules below beat Rspress's `:where()`-wrapped (0,1,0)
+   article rules; these (0,3,0) ones beat both. */
+.obsidian-hover-preview .obsidian-hover-preview__body > :first-child,
+.obsidian-hover-preview .obsidian-hover-preview__body > :nth-child(1 of [data-preview-keep]) {
+	margin-top: 0;
 }
 
-.obsidian-hover-preview__content {
-	padding: 0.75rem;
-	overflow-y: auto;
-	max-height: calc(240px - 40px);
+.obsidian-hover-preview .obsidian-hover-preview__body h1 {
+	margin: 0 0 0.75rem;
+	font-size: 1.6rem;
 }
 
-/* ─── Dark mode ────────────────────────────────────────────────────────── */
-
-html.dark .obsidian-hover-preview {
-	background: var(--rp-c-bg, #1a1a1a);
-	border-color: var(--rp-c-divider, #374151);
+.obsidian-hover-preview .obsidian-hover-preview__body h2 {
+	margin: 1.25rem 0 0.5rem;
+	font-size: 1.35rem;
 }
 
-html.dark .obsidian-hover-preview__header {
-	border-bottom-color: var(--rp-c-divider, #262626);
-	background: var(--rp-c-bg-soft, #1f1f1f);
+.obsidian-hover-preview .obsidian-hover-preview__body h3 {
+	margin: 1rem 0 0.5rem;
+	font-size: 1.15rem;
+}
+
+.obsidian-hover-preview .obsidian-hover-preview__body :is(h4, h5, h6) {
+	margin: 0.75rem 0 0.25rem;
+	font-size: 1rem;
+}
+
+/* Rspress draws a divider above the article's first h2. */
+.obsidian-hover-preview .obsidian-hover-preview__body h2:first-of-type::before {
+	display: none;
+}
+
+.obsidian-hover-preview :is(.rp-header-anchor, .obsidian-backlinks) {
+	display: none;
+}
+
+.obsidian-hover-preview :is(img, video, iframe, svg) {
+	max-width: 100%;
 }
 
 /* ─── Reduced motion ───────────────────────────────────────────────────── */

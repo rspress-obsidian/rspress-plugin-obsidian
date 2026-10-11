@@ -1,113 +1,116 @@
+import type { CSSProperties } from "react";
 import { memo, useMemo } from "react";
-import type { CanvasNode } from "../types.js";
-import { resolveBgColor, resolveColor } from "../utils/color.js";
+import { extractNoteSection } from "../../shared/transclusion.js";
+import type { CanvasFileData, CanvasLinks, CanvasNode } from "../types.js";
+import { withSiteBase } from "../utils/base.js";
+import { resolveColor } from "../utils/color.js";
 import { anchorHref, renderMarkdown, sanitizeUrl } from "../utils/markdown.js";
 import { isMarkdownFile, resolveFileRoute } from "../utils/resolver.js";
 
-interface CanvasNodeProps {
+export interface CanvasNodeProps {
 	node: CanvasNode;
 	assets?: Record<string, string>;
 	notes?: Record<string, string>;
-	zIndex?: number;
+	links?: CanvasLinks;
+	/** Prefix for ids the card's HTML carries (footnotes), unique per board instance. */
+	idPrefix?: string;
 	isHovered?: boolean;
 	isSelected?: boolean;
 	fileRoutePrefix?: string;
 	linkPreview?: boolean;
 	iframeSandbox?: string;
-	onHover?: (nodeId: string | null) => void;
-	onClick?: (nodeId: string) => void;
 }
 
-function nodeBorderColor(color: string | undefined): string {
-	return resolveColor(color, "var(--canvas-node-border)");
+const DEFAULT_SANDBOX = "allow-scripts allow-same-origin allow-popups";
+
+/** The last path segment, which is what Obsidian titles a file card with. */
+function baseName(file: string): string {
+	return file.split("/").pop() ?? file;
 }
 
-function mediaKind(
-	mediaType: string | undefined,
-	file: string,
-	flags: {
-		isImage?: boolean;
-		isVideo?: boolean;
-		isAudio?: boolean;
-		isPdf?: boolean;
-	} = {},
-): "image" | "audio" | "video" | "pdf" | "file" {
-	if (flags.isImage) return "image";
-	if (flags.isAudio) return "audio";
-	if (flags.isVideo) return "video";
-	if (flags.isPdf) return "pdf";
-	if (mediaType?.startsWith("image/")) return "image";
-	if (mediaType?.startsWith("audio/")) return "audio";
-	if (mediaType?.startsWith("video/")) return "video";
-	if (mediaType === "application/pdf") return "pdf";
-	const extension = file.toLowerCase().split(".").pop();
-	if (["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension || ""))
-		return "image";
-	if (["flac", "m4a", "mp3", "ogg", "wav"].includes(extension || "")) return "audio";
-	if (["mov", "mp4", "ogv", "webm"].includes(extension || "")) return "video";
-	if (extension === "pdf") return "pdf";
-	return "file";
+function stripExtension(name: string): string {
+	return name.replace(/\.[^./]+$/, "");
 }
 
+/** A URL from the board's asset map, prefixed with the site base and vetted. */
+function assetUrl(assets: Record<string, string> | undefined, key: string | undefined) {
+	const url = key ? assets?.[key] : undefined;
+	return url ? sanitizeUrl(withSiteBase(url)) : null;
+}
+
+/**
+ * A coloured card or group carries its colour as `--canvas-node-accent`; the
+ * stylesheet derives the border, the translucent tint and the group label
+ * from it, for presets and picker colours alike.
+ */
+export function nodeColorStyle(node: CanvasNode): CSSProperties {
+	const color = resolveColor(node.color, "");
+	return color ? { ["--canvas-node-accent" as string]: color } : {};
+}
+
+/**
+ * The text a card is announced by: a file or site name, a group label, or a
+ * text card's first heading (or first line), stripped of markdown punctuation.
+ */
+export function cardLabel(node: CanvasNode): string {
+	switch (node.type) {
+		case "text": {
+			const lines = node.text.split(/\r?\n/).map((line) => line.trim());
+			const heading = lines.find((line) => /^#{1,6}\s/.test(line));
+			const first = heading ?? lines.find(Boolean) ?? "";
+			const plain = first
+				.replace(/^#{1,6}\s+/, "")
+				.replace(
+					/!?\[\[([^\]|]+)\|?([^\]]*)\]\]/g,
+					(_m, target: string, alias: string) => alias || target,
+				)
+				.replace(/[*_`=~>]/g, "")
+				.trim();
+			return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain || "Text card";
+		}
+		case "file":
+			return baseName(node.file);
+		case "link":
+			return node.url;
+		default:
+			return node.label || "Group";
+	}
+}
+
+/**
+ * One card's content. Selection, dragging and keyboard handling belong to the
+ * renderer's wrapper; this component only draws.
+ */
 export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 	node,
 	assets,
 	notes,
-	zIndex = 0,
+	links,
+	idPrefix,
 	isHovered,
 	isSelected,
 	fileRoutePrefix,
-	linkPreview,
-	iframeSandbox = "allow-scripts allow-same-origin allow-popups",
-	onHover,
-	onClick,
+	linkPreview = true,
+	iframeSandbox = DEFAULT_SANDBOX,
 }: CanvasNodeProps) {
-	const borderColor = nodeBorderColor(node.color);
+	const className = [
+		"canvas-node",
+		`canvas-node-${node.type}`,
+		node.type === "file" ? `canvas-file-${node.resolvedFile?.kind ?? "unresolved"}` : "",
+		isHovered ? "canvas-node-hovered" : "",
+		isSelected ? "canvas-node-selected" : "",
+		resolveColor(node.color, "") ? "canvas-node-colored" : "",
+	]
+		.filter(Boolean)
+		.join(" ");
 	return (
-		<div
-			style={{
-				position: "absolute",
-				// Groups are containers and stay in the band the renderer ranked them
-				// into — a selected group must not rise above the cards it holds.
-				// Their hover/selected feedback is the border and shadow below.
-				zIndex:
-					zIndex + (node.type === "group" ? 0 : (isHovered ? 100 : 0) + (isSelected ? 120 : 0)),
-				borderLeftColor: node.type === "group" ? undefined : borderColor,
-				borderColor: node.color && node.type !== "group" ? borderColor : undefined,
-				backgroundColor: resolveBgColor(node.color, node.type === "group" ? "group" : "other"),
-				overflow: node.type === "group" ? "visible" : "hidden",
-			}}
-			className={`canvas-node canvas-node-${node.type} ${isHovered ? "canvas-node-hovered" : ""} ${
-				isSelected ? "canvas-node-selected" : ""
-			}`}
-			role="button"
-			tabIndex={0}
-			aria-label={
-				node.type === "text"
-					? "Text node"
-					: node.type === "file"
-						? `File: ${node.file}`
-						: node.type === "link"
-							? `Link: ${node.url}`
-							: node.label || "Group"
-			}
-			onMouseEnter={() => onHover?.(node.id)}
-			onMouseLeave={() => onHover?.(null)}
-			onKeyDown={(event) => {
-				if (event.key === "Enter" || event.key === " ") {
-					event.preventDefault();
-					onClick?.(node.id);
-				}
-			}}
-			onClick={(event) => {
-				event.stopPropagation();
-				onClick?.(node.id);
-			}}
-		>
+		<div className={className} style={nodeColorStyle(node)}>
 			<NodeContent
 				node={node}
 				assets={assets}
 				notes={notes}
+				links={links}
+				idPrefix={idPrefix}
 				fileRoutePrefix={fileRoutePrefix}
 				linkPreview={linkPreview}
 				iframeSandbox={iframeSandbox}
@@ -116,210 +119,333 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 	);
 });
 
+/** Markdown for a text card or a note card, with the scope its links resolve in. */
+function markdownSourceOf(
+	node: CanvasNode,
+	notes: Record<string, string> | undefined,
+): { text: string; scope: string } | null {
+	if (node.type === "text") return { text: node.text, scope: "" };
+	if (node.type !== "file" || node.resolvedFile?.kind !== "note" || !node.resolvedFile.key) {
+		return null;
+	}
+	const note = notes?.[node.resolvedFile.key];
+	if (note === undefined) return null;
+	// The shared slicer the Markdown plugin transcludes with: nested headings,
+	// fenced blocks and multi-line block ids behave the same on a page and a card.
+	const text = node.resolvedFile.missingSubpath
+		? note
+		: (extractNoteSection(note, node.subpath) ?? note);
+	return { text, scope: node.resolvedFile.key };
+}
+
 function NodeContent({
 	node,
 	assets,
 	notes,
+	links,
+	idPrefix,
 	fileRoutePrefix,
 	linkPreview,
 	iframeSandbox,
-}: {
-	node: CanvasNode;
-	assets?: Record<string, string>;
-	notes?: Record<string, string>;
-	fileRoutePrefix?: string;
-	linkPreview?: boolean;
-	iframeSandbox: string;
-}) {
-	const borderColor = nodeBorderColor(node.color);
-	// One memo for both card kinds. A drag patches only the dragged node, so this
-	// still holds while other cards move; previously the file-card path called
-	// renderMarkdown inline and re-parsed on every render of any kind.
-	const markdownSource =
-		node.type === "text" ? node.text : node.type === "file" ? (node.fileContent ?? "") : "";
-	const renderedMarkdown = useMemo(
+}: Required<Pick<CanvasNodeProps, "node" | "linkPreview" | "iframeSandbox">> &
+	Pick<CanvasNodeProps, "assets" | "notes" | "links" | "idPrefix" | "fileRoutePrefix">) {
+	const source = markdownSourceOf(node, notes);
+	const sourceText = source?.text;
+	const scope = source?.scope;
+	// A drag patches only the dragged node and keeps every map's identity, so
+	// this holds for every card that is not being edited.
+	const html = useMemo(
 		() =>
-			markdownSource ? renderMarkdown(markdownSource, { assets, notes, fileRoutePrefix }) : "",
-		[markdownSource, assets, notes, fileRoutePrefix],
+			sourceText
+				? renderMarkdown(sourceText, {
+						assets,
+						notes,
+						links,
+						scope,
+						fileRoutePrefix,
+						idPrefix: idPrefix ? `${idPrefix}${node.id}-` : `${node.id}-`,
+					})
+				: "",
+		[sourceText, scope, assets, notes, links, fileRoutePrefix, idPrefix, node.id],
 	);
+	// React 19 re-applies `dangerouslySetInnerHTML` whenever the prop object is
+	// new, without comparing the strings. A fresh `{ __html }` on every render
+	// rebuilt the card's DOM on each hover and selection — restarting media,
+	// dropping text selection, and detaching the node a fast click pressed on, so
+	// the click never fired. One object per distinct html keeps the DOM.
+	const markup = useMemo(() => ({ __html: html }), [html]);
 
 	switch (node.type) {
 		case "text":
 			return (
 				<div className="canvas-node-content canvas-text">
-					{/* biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown sanitizes HTML and URLs before insertion */}
-					<div className="canvas-markdown" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+					{/* biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown escapes text and vets every URL */}
+					<div className="canvas-markdown" dangerouslySetInnerHTML={markup} />
 				</div>
 			);
-		case "file": {
-			const route = resolveFileRoute(node.file, fileRoutePrefix);
-			const fileName = node.file.replace(/\.\w+$/, "");
-			const titleText = node.subpath ? `${fileName} > ${node.subpath.substring(1)}` : fileName;
-			const assetUrl = node.assetUrl || node.imageUrl;
-			const safeAssetUrl = assetUrl ? sanitizeUrl(assetUrl) : null;
-			const kind = mediaKind(node.mediaType, node.file, node);
-
-			if (safeAssetUrl && kind !== "file") {
-				return (
-					<div className="canvas-node-content">
-						<div
-							className="canvas-node-file-header"
-							style={{
-								backgroundColor: node.color ? borderColor : undefined,
-								color: node.color ? "#ffffff" : undefined,
-							}}
-						>
-							<span className="canvas-node-file-header-title">{node.file}</span>
-						</div>
-						<div className="canvas-node-file-body">
-							{kind === "image" && (
-								<img className="canvas-file-image" src={safeAssetUrl} alt={node.file} />
-							)}
-							{kind === "audio" && (
-								<audio className="canvas-file-media" controls src={safeAssetUrl} />
-							)}
-							{kind === "video" && (
-								<video className="canvas-file-media" controls src={safeAssetUrl} />
-							)}
-							{kind === "pdf" && (
-								<iframe
-									className="canvas-file-pdf"
-									src={safeAssetUrl}
-									title={node.file}
-									sandbox={iframeSandbox}
-								/>
-							)}
-						</div>
-					</div>
-				);
-			}
-
-			if (node.isError) {
-				return (
-					<div className="canvas-node-content">
-						<div className="canvas-node-file-header">
-							<span className="canvas-node-file-header-title">{titleText}</span>
-						</div>
-						<div className="canvas-node-file-body canvas-file-error-body">
-							<div className="canvas-file-error-text">{node.fileContent}</div>
-						</div>
-					</div>
-				);
-			}
-
-			if (node.fileContent !== undefined) {
-				// Built here so the element below stays on the single line its
-				// sanitization ignore-comment covers.
-				const markdownHtml = { __html: renderedMarkdown };
-				return (
-					<div className="canvas-node-content">
-						<div
-							className="canvas-node-file-header"
-							style={{
-								backgroundColor: node.color ? borderColor : undefined,
-								color: node.color ? "#ffffff" : undefined,
-							}}
-						>
-							<span className="canvas-node-file-header-title">{titleText}</span>
-							<a
-								href={anchorHref(route, node.subpath)}
-								className="canvas-node-file-header-link"
-								title="Open note page"
-								aria-label="Open note page"
-								onClick={(event) => event.stopPropagation()}
-							>
-								<span>↗</span>
-							</a>
-						</div>
-						<div className="canvas-node-file-body">
-							{/* biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown sanitizes HTML and URLs before insertion */}
-							<div className="canvas-markdown" dangerouslySetInnerHTML={markdownHtml} />
-						</div>
-					</div>
-				);
-			}
-
-			if (!isMarkdownFile(node.file)) {
-				return (
-					<div className="canvas-node-content canvas-file-fallback">
-						<div className="canvas-file-name">{fileName}</div>
-						{node.subpath && <div className="canvas-file-subpath">{node.subpath}</div>}
-					</div>
-				);
-			}
-
+		case "file":
 			return (
-				<a
-					href={anchorHref(route, node.subpath)}
-					className="canvas-node-content canvas-file-fallback"
-					onClick={(event) => event.stopPropagation()}
-				>
-					<div className="canvas-file-name">{fileName}</div>
-					{node.subpath && <div className="canvas-file-subpath">{node.subpath}</div>}
-				</a>
+				<FileContent
+					node={node}
+					markup={markup}
+					assets={assets}
+					fileRoutePrefix={fileRoutePrefix}
+				/>
 			);
-		}
-		case "link": {
-			const safeUrl = sanitizeUrl(node.url);
-			if (linkPreview && safeUrl?.startsWith("http")) {
-				const titleText = node.url.replace(/^https?:\/\//, "");
-				return (
-					<div className="canvas-node-content">
-						<div className="canvas-node-file-header">
-							<span className="canvas-node-file-header-title">{titleText}</span>
-						</div>
-						<div className="canvas-node-file-body">
-							<iframe
-								src={safeUrl}
-								style={{ width: "100%", height: "100%", border: "none" }}
-								title={node.url}
-								sandbox={iframeSandbox}
-							/>
-						</div>
-					</div>
-				);
-			}
-			return (
-				<div className="canvas-node-content canvas-link">
-					{safeUrl ? (
-						<a
-							href={safeUrl}
-							target="_blank"
-							rel="noopener noreferrer"
-							onClick={(event) => event.stopPropagation()}
-						>
-							{node.url}
-						</a>
-					) : (
-						<span>{node.url}</span>
-					)}
-				</div>
-			);
-		}
-		case "group": {
-			const safeBackgroundUrl = node.backgroundUrl ? sanitizeUrl(node.backgroundUrl) : null;
-			return (
-				<div
-					className="canvas-node-content canvas-group"
-					style={{
-						backgroundImage: safeBackgroundUrl ? `url("${safeBackgroundUrl}")` : undefined,
-						backgroundSize:
-							node.backgroundStyle === "cover"
-								? "cover"
-								: node.backgroundStyle === "ratio"
-									? "contain"
-									: node.backgroundStyle === "repeat"
-										? "auto"
-										: "cover",
-						backgroundRepeat: node.backgroundStyle === "repeat" ? "repeat" : "no-repeat",
-						backgroundPosition: "center",
-					}}
-				>
-					{node.label && <div className="canvas-group-label">{node.label}</div>}
-				</div>
-			);
-		}
+		case "link":
+			return <LinkContent url={node.url} linkPreview={linkPreview} iframeSandbox={iframeSandbox} />;
+		case "group":
+			return <GroupContent node={node} assets={assets} />;
 		default:
+			// A node type from a newer spec: the frame and its label still render.
 			return null;
 	}
+}
+
+/** The name above a card, the way Obsidian labels file, link and group nodes. */
+function CardLabel({ children, href }: { children: string; href?: string | null }) {
+	return (
+		<div className="canvas-node-label">
+			{href ? (
+				<a href={href} className="canvas-node-label-link" title={`Open ${children}`}>
+					{children}
+				</a>
+			) : (
+				<span>{children}</span>
+			)}
+		</div>
+	);
+}
+
+function FileContent({
+	node,
+	markup,
+	assets,
+	fileRoutePrefix,
+}: {
+	node: CanvasFileData;
+	markup: { __html: string };
+	assets?: Record<string, string>;
+	fileRoutePrefix?: string;
+}) {
+	const name = baseName(node.file);
+	const resolved = node.resolvedFile;
+	const subpathLabel = node.subpath ? ` › ${node.subpath.replace(/^#/, "")}` : "";
+
+	if (!resolved) {
+		// A board rendered without the build step (a library caller): link a note
+		// to its route the old way, show anything else by name.
+		const route = sanitizeUrl(
+			withSiteBase(anchorHref(resolveFileRoute(node.file, fileRoutePrefix), node.subpath)),
+		);
+		return (
+			<>
+				<CardLabel href={isMarkdownFile(node.file) ? route : null}>{name}</CardLabel>
+				<div className="canvas-node-content canvas-file-fallback">
+					<div className="canvas-file-name">{stripExtension(name)}</div>
+					{node.subpath && <div className="canvas-file-subpath">{node.subpath}</div>}
+				</div>
+			</>
+		);
+	}
+
+	const href = resolved.href ? sanitizeUrl(withSiteBase(resolved.href)) : null;
+	const url = assetUrl(assets, resolved.key);
+
+	switch (resolved.kind) {
+		case "note":
+			return (
+				<>
+					<CardLabel href={href}>{`${stripExtension(name)}${subpathLabel}`}</CardLabel>
+					<div className="canvas-node-content canvas-file-note">
+						{resolved.missingSubpath && (
+							<p className="canvas-file-notice" role="note">
+								“{node.subpath?.replace(/^#/, "")}” is not in this note; showing the whole note.
+							</p>
+						)}
+						{/* biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown escapes text and vets every URL */}
+						<div className="canvas-markdown" dangerouslySetInnerHTML={markup} />
+					</div>
+				</>
+			);
+		case "image":
+			// Obsidian draws an image node as the bare picture, named above it.
+			return (
+				<>
+					<CardLabel>{name}</CardLabel>
+					{url ? (
+						<img
+							className="canvas-file-image"
+							src={url}
+							alt={stripExtension(name)}
+							draggable={false}
+						/>
+					) : (
+						<UnavailableFile name={name} />
+					)}
+				</>
+			);
+		case "audio":
+		case "video":
+			return (
+				<>
+					<CardLabel>{name}</CardLabel>
+					<div className="canvas-node-content canvas-file-media-card">
+						{url ? (
+							resolved.kind === "audio" ? (
+								<audio className="canvas-file-media" controls preload="metadata" src={url} />
+							) : (
+								<video className="canvas-file-media" controls preload="metadata" src={url} />
+							)
+						) : (
+							<UnavailableFile name={name} />
+						)}
+					</div>
+				</>
+			);
+		case "pdf": {
+			const page = node.subpath?.match(/^#page=(\d+)$/i)?.[1];
+			const src = url ? `${url}${page ? `#page=${page}` : ""}` : null;
+			return (
+				<>
+					<CardLabel href={url}>{name}</CardLabel>
+					<div className="canvas-node-content canvas-file-pdf-card">
+						{src ? (
+							// Deliberately not sandboxed: Chromium's PDF viewer refuses to run
+							// inside a sandboxed frame and shows a broken-document icon. The
+							// file is served from the site's own origin.
+							<iframe className="canvas-file-pdf" src={src} title={name} loading="lazy" />
+						) : (
+							<UnavailableFile name={name} />
+						)}
+					</div>
+				</>
+			);
+		}
+		case "canvas":
+			return (
+				<>
+					<CardLabel href={href}>{name}</CardLabel>
+					<div className="canvas-node-content canvas-file-fallback">
+						<div className="canvas-file-name">{stripExtension(name)}</div>
+						{href && (
+							<a className="canvas-file-open" href={href}>
+								Open canvas
+							</a>
+						)}
+					</div>
+				</>
+			);
+		case "file":
+			return (
+				<>
+					<CardLabel>{name}</CardLabel>
+					<div className="canvas-node-content canvas-file-fallback">
+						<div className="canvas-file-name">{name}</div>
+						{url ? (
+							<a className="canvas-file-open" href={url} download={name}>
+								Download
+							</a>
+						) : (
+							<UnavailableFile name={name} />
+						)}
+					</div>
+				</>
+			);
+		default:
+			return (
+				<>
+					<CardLabel>{name}</CardLabel>
+					<div className="canvas-node-content canvas-file-fallback canvas-file-unavailable">
+						<UnavailableFile name={name} />
+					</div>
+				</>
+			);
+	}
+}
+
+/**
+ * A file that is missing, outside the vault, or not published. The three read
+ * the same on purpose: a private note's existence is not announced.
+ */
+function UnavailableFile({ name }: { name: string }) {
+	return (
+		<div className="canvas-file-error-text" role="note">
+			“{name}” is not available.
+		</div>
+	);
+}
+
+function LinkContent({
+	url,
+	linkPreview,
+	iframeSandbox,
+}: {
+	url: string;
+	linkPreview: boolean;
+	iframeSandbox: string;
+}) {
+	const safeUrl = sanitizeUrl(url);
+	const external = safeUrl !== null && /^https?:/i.test(safeUrl);
+	const label = url.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+	if (linkPreview && external && safeUrl) {
+		return (
+			<>
+				<CardLabel href={safeUrl}>{label}</CardLabel>
+				<div className="canvas-node-content canvas-link-preview">
+					<iframe
+						className="canvas-link-frame"
+						src={safeUrl}
+						title={label}
+						sandbox={iframeSandbox}
+						loading="lazy"
+						referrerPolicy="no-referrer"
+					/>
+				</div>
+			</>
+		);
+	}
+	return (
+		<div className="canvas-node-content canvas-link">
+			{safeUrl ? (
+				<a href={safeUrl} target={external ? "_blank" : undefined} rel="noopener noreferrer">
+					{url}
+				</a>
+			) : (
+				<span>{url}</span>
+			)}
+		</div>
+	);
+}
+
+function GroupContent({
+	node,
+	assets,
+}: {
+	node: Extract<CanvasNode, { type: "group" }>;
+	assets?: Record<string, string>;
+}) {
+	const remote =
+		node.background && /^https?:/i.test(node.background) ? sanitizeUrl(node.background) : null;
+	const background = assetUrl(assets, node.resolvedBackground) ?? remote;
+	const style: CSSProperties = background
+		? {
+				// JSON.stringify quotes and escapes the URL for CSS.
+				backgroundImage: `url(${JSON.stringify(background)})`,
+				backgroundSize:
+					node.backgroundStyle === "ratio"
+						? "contain"
+						: node.backgroundStyle === "repeat"
+							? "auto"
+							: "cover",
+				backgroundRepeat: node.backgroundStyle === "repeat" ? "repeat" : "no-repeat",
+				backgroundPosition: "center",
+			}
+		: {};
+	return (
+		<>
+			{node.label && <div className="canvas-group-label">{node.label}</div>}
+			<div className="canvas-node-content canvas-group" style={style} />
+		</>
+	);
 }

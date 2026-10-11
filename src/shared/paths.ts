@@ -27,3 +27,35 @@ export function encodeTagPathSegment(tag: string): string {
 	}
 	return encoded;
 }
+
+/**
+ * The one route a tag is published at. Obsidian treats `#Project` and
+ * `#project` as one tag, so the route is the lowercased, NFC-normalised tag:
+ * the inline tag link, the generated tag page and the graph's tag node all
+ * call this, and agree byte for byte however the tag was spelt. `tag` carries
+ * no leading `#`.
+ */
+export function tagRoutePath(tag: string): string {
+	return `/tags/${encodeTagPathSegment(normalizeUnicode(tag).toLowerCase())}`;
+}
+
+/**
+ * Obsidian's inline `#tag`: letters, marks, numbers, emoji, `_`, `-` and `/`
+ * for nesting, not preceded by a word character or `/` (so `foo#bar` and URL
+ * fragments are not tags). Global and sticky-free: callers iterate with
+ * `matchAll` and must still apply {@link tagNameFromMatch}. Shared by the
+ * markdown index, the markdown renderer, canvas cards and the graph so every
+ * surface agrees on what is a tag.
+ */
+export const INLINE_TAG_PATTERN =
+	/(?<![/\p{L}\p{N}_-])#([\p{L}\p{M}\p{N}\p{Extended_Pictographic}_/-]+)/gu;
+
+/**
+ * The tag a {@link INLINE_TAG_PATTERN} match names, or `undefined` when
+ * Obsidian would not treat it as one: trailing `/` is dropped, and a tag made
+ * only of digits, `/` and `-` (`#1984`, `#2024-01`) is not a tag.
+ */
+export function tagNameFromMatch(captured: string): string | undefined {
+	const tag = captured.replace(/\/+$/, "");
+	return tag && !/^[\p{N}/-]+$/u.test(tag) ? tag : undefined;
+}

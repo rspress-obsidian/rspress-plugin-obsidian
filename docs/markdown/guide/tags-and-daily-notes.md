@@ -39,7 +39,7 @@ tags:
 
 ### Tag Pages
 
-When `enableTagPages` is on, the plugin auto-generates `/tags/{name}` pages that list all pages with that tag.
+When `enableTagPages` is on, the plugin auto-generates `/tags/{name}` pages that list all pages with that tag — one page per tag across the docs root and the vault. Tags are case-insensitive, so `#Project` and `#project` share `/tags/project`.
 
 | Feature | Option | Description |
 |---------|--------|-------------|
@@ -59,7 +59,7 @@ markdown({
   enableDailyNotes: true,
   dailyNotes: {
     folder: "daily",           // Folder for daily notes
-    dateFormat: "YYYY-MM-DD",  // File naming format
+    dateFormat: "YYYY-MM-DD",  // File naming format (Moment.js tokens)
     navigation: true,          // Show prev/next navigation
     template: "templates/Daily",// Fill empty daily notes from this note
     calendar: "/daily",        // Generate a calendar page at this route
@@ -77,23 +77,23 @@ docs/
     2024-01-03.md
 ```
 
-### Date Expansion
+### Date Formats
 
-Template tokens expand in content:
+`dateFormat` uses the Moment.js tokens Obsidian's daily notes use, and a file
+is a daily note only when its name matches the format exactly and names a real
+date (`2024-02-30` is not one). Dates are local calendar dates, so a note named
+`2024-01-01` is January 1 whatever the build machine's time zone.
 
 | Token | Output |
 |-------|--------|
-| `YYYY` | 2024 |
-| `YY` | 24 |
-| `MMMM` | January |
-| `MMM` | Jan |
-| `MM` | 01 |
-| `DD` | 01 |
-| `dddd` | Monday |
-| `ddd` | Mon |
-
-Two more tokens expand in note content: `{{title}}` (the note's title, its
-date-formatted filename for a daily note) and `{{time}}`.
+| `YYYY` / `YY` | 2024 / 24 |
+| `MMMM` / `MMM` / `MM` / `M` | January / Jan / 01 / 1 |
+| `DD` / `D` / `Do` | 05 / 5 / 5th |
+| `dddd` / `ddd` / `dd` | Friday / Fri / Fr |
+| `ww` / `w`, `gggg` | locale week (weeks start Sunday) and its year |
+| `WW` / `W`, `GGGG`, `E` | ISO week, its year, ISO weekday |
+| `HH`, `hh`, `mm`, `ss`, `A` | hours, 12-hour hours, minutes, seconds, AM/PM |
+| `[text]` | `text`, literally — `YYYY-MM-DD [Week] ww` |
 
 ### Template Notes
 
@@ -102,13 +102,25 @@ note — the way Obsidian's daily-notes core fills a new note from its template.
 A note you have already started writing is never touched, because a static build
 has no cursor to insert at.
 
+The template's tokens expand as Obsidian expands them when it creates the note.
+They belong to the template: `{{date}}` written in an ordinary note stays as
+written.
+
+| Token | Output |
+|-------|--------|
+| `{{date}}`, `{{title}}` | The note's file name (its date in `dateFormat`) |
+| `{{time}}` | The build's time, `HH:mm` |
+| `{{date:FORMAT}}`, `{{time:FORMAT}}` | The note's date at the build's time of day, in FORMAT |
+| `{{date+1d}}`, `{{date-1w:dddd}}` | Moved by Moment units: `y`, `Q` (quarters), `M` (months), `w`, `d`, `h`, `m` (minutes), `s`; as in Obsidian, `q` and `D` move nothing |
+| `{{yesterday}}`, `{{tomorrow}}` | The neighbouring dates in `dateFormat` |
+
 ```markdown
 ---
 tags: [journal]
 ---
 # {{title}}
 
-Planned for {{date:dddd}}.
+Planned for {{date:dddd}}, created at {{time}}.
 
 - [ ] First task
 ```
@@ -130,22 +142,41 @@ When `navigation: true`, each daily note shows previous/next links based on date
 
 ## Dataview
 
-Dataview provides static query evaluation at build time.
+With `enableDataview`, Dataview queries are evaluated at build time and follow
+the Dataview plugin's own rules, so a vault's queries render on the site the
+way they do in Obsidian.
 
 ### Inline Fields
 
 ```markdown
 status:: open
-priority:: high
-assignee:: Alice
+owner:: [[Alice]]
+tags-seen:: 1, 2, 3
+spent:: 2 hours
+
+Rated [rating:: 9] and (hidden:: secret) inline.
 ```
+
+A field holding a `[[link]]` is a link (also in frontmatter: `up: "[[Home]]"`),
+`1, 2, 3` is a list, `2 hours` a duration and `2024-01-15` a date. In the page,
+`[rating:: 9]` shows its key and value, `(hidden:: secret)` only the value.
+A line is read as `key:: value` as a whole only when it holds no bracketed field.
 
 ### List Items as Fields
 
 ```markdown
+- author:: Alice
 - [x] Completed task
-- [ ] Pending task due:: 2024-01-15
+- [ ] Pending task [due:: 2024-01-15]
+- [ ] Ship it 📅 2024-01-20 ⏳ 2024-01-18
+    - [/] A subtask in progress
 ```
+
+Fields on plain list items (`author`) are page fields. Fields on a task —
+bracketed, or the 📅 due, ⏳ scheduled, 🛫 start, ✅ completion and ➕ created
+shorthands — belong to that task, so `TASK WHERE due` finds it. Any
+one-character checkbox status is a task; only `x` counts as completed.
+Indented items are subtasks of the item above.
 
 ### Query Blocks
 
@@ -157,80 +188,113 @@ SORT file.name ASC
 ```
 ````
 
+A query is one stream of words: `LIST FROM #tutorial SORT file.name` on one
+line is the same query, a condition may continue on the next line, and `//`
+starts a comment.
+
 | Query type | Renders |
 |------------|---------|
-| `TABLE [fields]` | A table; add `WITHOUT ID` to drop the leading file column |
-| `LIST [expr]` | A list, one item per row |
-| `TASK` | Checklist items, optionally grouped |
-| `CALENDAR` | A month grid per month in the results |
+| `TABLE [fields]` | A table; the first column is the file (or the group key); `WITHOUT ID` drops it |
+| `LIST [expr]` | A list of files; with an expression, `file: value` (`WITHOUT ID`: just the value) |
+| `TASK` | Checklist items with their subtasks, optionally grouped |
+| `CALENDAR <date field>` | A month grid per month, e.g. `CALENDAR file.day` |
 
 | Clause | What it does |
 |--------|--------------|
-| `FROM` | `"folder"`, `"folder/File.md"`, `#tag`, `[[note]]`, `inlinks([[note]])`, `outlinks([[note]])`, combined with `AND` / `OR` / `-` / parentheses |
-| `WHERE` | Filters rows; repeat the clause to AND several conditions |
-| `SORT` | One or more sort keys, each `expr ASC|DESC` |
-| `GROUP BY` | One or more keys — `GROUP BY status, owner` produces one row per pair |
-| `THEN` | An aggregate evaluated per group, appended under it |
-| `FLATTEN` | Expands an array field into one row per item |
-| `LIMIT` | Row count, literal or an expression such as `LIMIT len(rows)` |
+| `FROM` | `#tag` (with sub-tags), `"folder"`, `"folder/File"`, `[[note]]` (pages linking to it; `[[]]` is this page), `outgoing([[note]])`, combined with `and` / `or` / `-` / parentheses |
+| `WHERE` | Keeps the rows whose condition is true |
+| `SORT` | One or more keys, each `expr ASC|DESC` |
+| `GROUP BY` | One row per value of an expression, with `key` and `rows`; `AS name` names the column |
+| `FLATTEN` | One row per element of a list (`FLATTEN file.tasks AS task`) |
+| `LIMIT` | At most this many rows |
 
-### Grouping with Totals
+After the `FROM`, the commands run in the order written and may repeat — a
+`WHERE` after `GROUP BY` filters the groups.
+
+### Grouping
 
 ````markdown
 ```dataview
-TABLE WITHOUT ID sum(rows.priority) AS total
+TABLE sum(rows.priority) AS total
 FROM "notes"
 GROUP BY status
-THEN sum(rows.priority)
 ```
 ````
 
+The first column is the group key, headed `status`; `rows` holds the grouped
+pages, so `rows.file.link` lists them. `LIST rows.file.link GROUP BY status`
+shows each key with its pages.
+
 ### Calendars
 
-`CALENDAR` files each row under `file.day` — a daily note's date — and falls
-back to the day the note was created, so an ordinary note still lands somewhere
-sensible. One month grid is drawn per month, newest first.
+`CALENDAR` files each page under the date its field names. Pages whose field is
+empty are left out.
 
 ````markdown
 ```dataview
-CALENDAR
+CALENDAR file.day
 FROM "daily"
 ```
 ````
 
 ### Expressions and Functions
 
-Inline fields are referenced by name. Beyond `file.*` (path, name, folder, ext,
-size, link, tags, etags, outlinks, inlinks, tasks, lists, ctime, mtime, cday,
-mday and `day` for daily notes), indexing and functions are available:
+Fields are referenced by name, and `this` is the page the query is on. Beyond
+fields, every page has `file.*`: `path`, `name`, `folder`, `ext`, `size`,
+`link`, `tags` (with parent tags), `etags`, `aliases`, `outlinks`, `inlinks`,
+`tasks`, `lists`, `frontmatter`, `ctime`, `mtime`, `cday`, `mday` and `day` (a
+daily note's date, a `date` field, or a date in the file name).
 
 ````markdown
 ```dataview
-TABLE WITHOUT ID priority, owner, scores[0]
+TABLE WITHOUT ID priority, owner, owner.status, scores[0]
 FROM "notes"
-WHERE dateformat(launched, "yyyy") = "2026"
+WHERE file.mtime >= date(today) - dur(1 week)
 SORT priority DESC
 LIMIT 10
 ```
 ````
 
-- Indexing: `rows[0]`, `scores[-1]` (from the end), `file["name"]`. An index
-  past the end reads as empty rather than failing the query.
-- Dates: `date`, `now`, `today`, `year`, `month`, `weekday` (1 = Monday),
-  `weeknumber`, `weekyear`, `hour`, `minute`, `second`, `striptime`,
-  `dateformat` / `formatdate` (Luxon tokens: `yyyy`, `MM`, `dd`, `LLLL`, …),
-  `dateplus` / `dateminus` with a duration such as `"2 weeks"` or `"1 month"`.
-- Strings: `contains`, `startswith`, `endswith`, `lower`, `upper`, `trim`,
-  `truncate`, `padleft`, `padright`, `titlecase`, `capitalize`, `reversestring`,
-  `split`, `join`, `replace`, `regexmatch`, `length`, `typeof`, `default`,
-  `choice`, `nonnull`, `defaultblank`.
-- Collections: `sum`, `average`, `min`, `max`, `firstvalueof`, `lastvalueof`,
-  `distinct`, `flatten`, `any`, `all`, `strictsort`.
-- Math: `round`, `floor`, `ceil`, and `+ - * /` in expressions.
+- Every function of Dataview is available: constructors (`date`, `dur`,
+  `link`, `list`, `object`, `number`, `string`, `elink`, `embed`), numbers
+  (`round`, `min`, `max`, `sum`, `product`, `average`, `minby`, `maxby`, …),
+  lists and strings (`contains`, `icontains`, `econtains`, `containsword`,
+  `filter`, `map`, `reduce`, `sort`, `reverse`, `unique`, `join`, `split`,
+  `replace`, `regexreplace`, `regextest`, `regexmatch`, `substring`,
+  `truncate`, …) and utilities (`default`, `choice`, `dateformat`,
+  `durationformat`, `currencyformat`, `striptime`, `meta`, …). Lambdas look
+  like `(x) => x * 2`.
+- Dates: `date(today)`, `date(tomorrow)`, `date(sow)`, `date(eom)` and the
+  other shorthands; `date(2024-01-15)`; properties such as `.year`, `.month`,
+  `.day`, `.hour`, `.weekday`. Dates and durations add and subtract:
+  `date(today) - dur(3 days)`.
+- Times are the build machine's local time (set `TZ` to choose the zone), and
+  render as Dataview does: `January 15, 2024`, or `9:30 AM - January 15, 2024`
+  when there is a time.
+- Comparisons are case-sensitive and type-aware, like Dataview's: `"2" = 2` is
+  false. A missing field is `null`, arithmetic on it gives `null`, and an
+  empty cell shows `-`.
 
-Anything outside this set fails the query and follows `onDataviewError`
-(`"error"` by default, `"warn"` to report and skip) — there is no silent
-partial result.
+Text the parser cannot place, a function Dataview does not have, or an
+unresolvable `FROM` fails the query and follows `onDataviewError` (`"error"` by
+default, `"warn"` to report and skip) — there is no silent partial result.
+
+### Inline Queries
+
+Write an inline query as inline code starting with `=`, as in Dataview:
+
+```markdown
+This note is `= this.file.name`, last changed `= this.file.mtime`.
+It has `$= dv.current().file.tasks.length` tasks.
+```
+
+`` `= expr` `` is a DQL expression and `` `$= expr` `` an inline DataviewJS
+expression. Plain prose like `x = name` is never evaluated.
+
+> **Changed:** earlier versions evaluated an equals sign followed by an
+> expression anywhere in prose (`Status = status`). Write such expressions as
+> inline code instead — `` `= this.status` `` — and prefix page fields with
+> `this.`, which is what Obsidian's Dataview expects.
 
 ### Task Queries
 
@@ -238,7 +302,8 @@ partial result.
 ```dataview
 TASK
 FROM "daily"
-WHERE completed = false
+WHERE !completed
+GROUP BY file.link
 ```
 ````
 
@@ -246,12 +311,19 @@ WHERE completed = false
 
 ````markdown
 ```dataviewjs
-const pages = dv.pages("#tutorial");
-dv.list(pages.map(p => p.file.link));
+for (const group of dv.pages("#project").groupBy(p => p.status)) {
+  dv.header(3, group.key)
+  dv.table(["Note", "Due"], group.rows.sort(p => p.due).map(p => [p.file.link, p.due]))
+}
 ```
-```
+````
 
-> **Note**: DataviewJS runs in a sandboxed interpreter. Host APIs (`process`, `fetch`, `eval`) are blocked.
+> **Note**: DataviewJS is interpreted, never run as JavaScript. It supports
+> declarations, `if`, `for … of`, arrow functions, template literals and the
+> `dv` API (`pages`, `current`, `page`, `table`, `list`, `taskList`,
+> `paragraph`, `header`, `span`, `el`, `execute`, `func`, …). Host APIs
+> (`process`, `fetch`, `eval`, `window`) are refused, and `dv.view` and
+> asynchronous queries are not available.
 
 ## Graph integration
 

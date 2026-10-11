@@ -51,7 +51,9 @@ export function sanitizeUrl(value: string): string | null {
 	if (!url) return null;
 	if (
 		url.startsWith("#") ||
-		(url.startsWith("/") && !url.startsWith("//")) ||
+		// Browsers read a backslash in the authority position as `/`, so `/\host`
+		// is protocol-relative (off-site), exactly like `//host`.
+		(url.startsWith("/") && url[1] !== "/" && url[1] !== "\\") ||
 		url.startsWith("./") ||
 		url.startsWith("../")
 	) {

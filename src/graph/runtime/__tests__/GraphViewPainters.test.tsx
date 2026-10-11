@@ -4,9 +4,11 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 if (!globalThis.document) GlobalRegistrator.register();
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
+import type { GraphNode } from "../../types";
 import type { GraphViewHandle } from "../GraphView";
+import { graphDataModule, graphNode } from "./graph-fixture";
 
 // The graph runtime reads the path from the document; this test renders a
 // panel anchored on /guide.
@@ -16,19 +18,20 @@ const { mock } = require("bun:test");
 
 // "/guide" is the current route; its neighbours are "/api" and "/", so all three
 // are rendered. Hovering "/api" leaves "/" outside the focused neighbourhood.
-const mockGraphData = {
-	nodes: [
-		{ id: "/guide", label: "Guide", routePath: "/guide" },
-		{ id: "/api", label: "API", routePath: "/api" },
-		{ id: "/", label: "Home", routePath: "/" },
-	],
-	links: [
-		{ source: "/guide", target: "/api" },
-		{ source: "/guide", target: "/" },
-	],
-};
-
-mock.module("virtual-graph-data", () => ({ graphData: mockGraphData, default: mockGraphData }));
+mock.module("virtual-graph-data", () =>
+	graphDataModule(
+		[
+			graphNode("/guide", "Guide"),
+			graphNode("/api", "API"),
+			graphNode("/", "Home"),
+			graphNode("/tags/x", "#x", "tag"),
+		],
+		[
+			{ source: "/guide", target: "/api" },
+			{ source: "/guide", target: "/" },
+		],
+	),
+);
 
 // Capture the props the plugin passes to react-force-graph-2d so we can invoke
 // the canvas painters directly — the same technique as
@@ -105,17 +108,22 @@ function settle(): Promise<void> {
 	return promise;
 }
 
-interface Node {
-	id: string;
-	label: string;
+interface Node extends GraphNode {
 	isCurrent: boolean;
+	degree: number;
+	tags: string[];
 	x: number;
 	y: number;
 }
 
-const current: Node = { id: "/guide", label: "Guide", isCurrent: true, x: 0, y: 0 };
-const neighbour: Node = { id: "/api", label: "API", isCurrent: false, x: 10, y: 0 };
-const other: Node = { id: "/", label: "Home", isCurrent: false, x: 0, y: 10 };
+/** A node as force-graph hands it to the painters: derived fields plus a position. */
+function painted(id: string, label: string, x: number, y: number, isCurrent = false): Node {
+	return { ...graphNode(id, label), isCurrent, degree: 0, tags: [], x, y };
+}
+
+const current = painted("/guide", "Guide", 0, 0, true);
+const neighbour = painted("/api", "API", 10, 0);
+const other = painted("/", "Home", 0, 10);
 
 type Painter = (node: Node, ctx: CanvasRenderingContext2D, globalScale: number) => void;
 type HoverHandler = (node: Node | null) => void;
@@ -123,7 +131,7 @@ type LinkPainter = (link: object) => string | number;
 
 async function mountGraph(
 	props: {
-		onNodeClick?: (routePath: string) => void;
+		onNodeClick?: (node: GraphNode) => void;
 		filters?: {
 			query?: string;
 			depth?: number;
@@ -131,6 +139,12 @@ async function mountGraph(
 			showOrphans?: boolean;
 		};
 		groups?: ReadonlyArray<{ query: string; color: string }>;
+		display?: {
+			arrows: boolean;
+			textFadeThreshold: number;
+			nodeSize: number;
+			linkThickness: number;
+		};
 	} = {},
 ) {
 	render(<GraphView width={400} height={300} {...props} />);
@@ -143,7 +157,7 @@ async function mountGraph(
 		nodeColor: capturedProps.nodeColor as (node: { id?: string; isCurrent?: boolean }) => string,
 		onNodeHover: capturedProps.onNodeHover as HoverHandler,
 		onLinkHover: capturedProps.onLinkHover as HoverHandler,
-		onNodeClick: capturedProps.onNodeClick as (node: { routePath?: string }) => void,
+		onNodeClick: capturedProps.onNodeClick as (node: GraphNode, event?: MouseEvent) => void,
 		linkColor: capturedProps.linkColor as LinkPainter,
 		linkWidth: capturedProps.linkWidth as LinkPainter,
 		nodes: (capturedProps.graphData as { nodes: Array<{ id: string }> }).nodes,
@@ -166,9 +180,9 @@ describe("GraphView canvas painters", () => {
 	test("draws a label only once the graph is zoomed past the threshold", async () => {
 		const { nodeCanvasObject } = await mountGraph();
 
-		// Below the threshold a plain node paints its dot and nothing else.
+		// Below the fade range a plain node paints its dot and nothing else.
 		const zoomedOut = emptyRecord();
-		nodeCanvasObject(other, createContext(zoomedOut), 1);
+		nodeCanvasObject(other, createContext(zoomedOut), 0.9);
 		expect(zoomedOut.arcs).toEqual([{ x: 0, y: 10, radius: 5 }]);
 		expect(zoomedOut.filledText).toEqual([]);
 		expect(zoomedOut.strokedText).toEqual([]);
@@ -178,6 +192,46 @@ describe("GraphView canvas painters", () => {
 		nodeCanvasObject(other, createContext(zoomedIn), 1.4);
 		expect(zoomedIn.strokedText).toEqual(["Home"]);
 		expect(zoomedIn.filledText).toEqual(["Home"]);
+	});
+
+	test("the text fade threshold shows labels from further out", async () => {
+		const { nodeCanvasObject } = await mountGraph({
+			display: { arrows: false, textFadeThreshold: 2, nodeSize: 1, linkThickness: 1 },
+		});
+		const record = emptyRecord();
+		nodeCanvasObject(other, createContext(record), 0.5);
+		expect(record.filledText).toEqual(["Home"]);
+	});
+
+	test("node size, link thickness and arrows follow the display settings", async () => {
+		await mountGraph({
+			display: { arrows: true, textFadeThreshold: 0, nodeSize: 2, linkThickness: 2 },
+		});
+		const props = capturedProps ?? {};
+		const record = emptyRecord();
+		(props.nodeCanvasObject as Painter)(other, createContext(record), 0.5);
+		expect(record.arcs[0]?.radius).toBe(10);
+		// A node's arrowheads stop at its edge: force-graph reads the radius from nodeVal.
+		expect((props.nodeVal as (node: Node) => number)(other)).toBe(100);
+		expect(props.linkDirectionalArrowLength).toBeGreaterThan(0);
+		const links = (props.graphData as { links: object[] }).links;
+		expect((props.linkWidth as LinkPainter)(links[0] as object)).toBe(1.6);
+	});
+
+	test("nodes grow with their link count, and the hit area grows with them", async () => {
+		const { nodeCanvasObject } = await mountGraph();
+		const hub = { ...other, degree: 7 };
+		const record = emptyRecord();
+		nodeCanvasObject(hub, createContext(record), 0.5);
+		expect(record.arcs[0]?.radius).toBe(5 * (1 + 0.25 * 3));
+
+		const hit = emptyRecord();
+		const pointerArea = capturedProps?.nodePointerAreaPaint as
+			| ((n: Node, c: string, ctx: CanvasRenderingContext2D) => void)
+			| undefined;
+		if (!pointerArea) throw new Error("GraphView never wired nodePointerAreaPaint");
+		pointerArea(hub, "#000001", createContext(hit));
+		expect(hit.arcs[0]?.radius).toBe(record.arcs[0]?.radius);
 	});
 
 	test("labels the current page even when zoomed out", async () => {
@@ -252,6 +306,122 @@ describe("GraphView canvas painters", () => {
 		expect(linkColor(hovered)).not.toBe(LIGHT.fallbackLinkDim);
 	});
 
+	test("applies the force settings to the renderer, and again when a slider moves", async () => {
+		const forces = { centerStrength: 0.3, repelStrength: 10, linkStrength: 1, linkDistance: 45 };
+		const { rerender } = render(<GraphView width={400} height={300} forces={forces} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const applied: Record<string, unknown> = {};
+		let reheats = 0;
+		const fake = {
+			d3Force: (name: string, force?: unknown) => {
+				if (force !== undefined) {
+					applied[name] = force;
+					return undefined;
+				}
+				return {
+					strength: (value: unknown) => {
+						applied[`${name}.strength`] = value;
+					},
+					distance: (value: unknown) => {
+						applied[`${name}.distance`] = value;
+					},
+				};
+			},
+			d3ReheatSimulation: () => {
+				reheats += 1;
+			},
+		};
+		const forceRef = capturedProps?.ref as { current: unknown } | undefined;
+		if (!forceRef) throw new Error("GraphView did not attach a ref to the force graph");
+		forceRef.current = fake;
+
+		rerender(
+			<GraphView
+				width={400}
+				height={300}
+				forces={{ ...forces, repelStrength: 4, linkDistance: 120, centerStrength: 0 }}
+			/>,
+		);
+
+		expect(applied["charge.strength"]).toBe(-60);
+		expect(applied["link.distance"]).toBe(120);
+		// Link force scales d3's default 1 / (smaller endpoint degree).
+		const strength = applied["link.strength"] as (link: object) => number;
+		const graphData = capturedProps?.graphData as { links: object[] } | undefined;
+		const links = graphData?.links ?? [];
+		expect(strength(links[0] as object)).toBe(1);
+		expect(applied.gravity).toBeNull();
+		expect(reheats).toBe(1);
+	});
+
+	test("a positive center force pulls every node toward the origin, harder the farther out", async () => {
+		const forces = { centerStrength: 0, repelStrength: 10, linkStrength: 1, linkDistance: 45 };
+		const { rerender } = render(<GraphView width={400} height={300} forces={forces} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+		let gravity: unknown;
+		const forceRef = capturedProps?.ref as { current: unknown } | undefined;
+		if (!forceRef) throw new Error("GraphView did not attach a ref to the force graph");
+		forceRef.current = {
+			d3Force: (name: string, force?: unknown) => {
+				if (name === "gravity") gravity = force;
+				return undefined;
+			},
+		};
+		rerender(<GraphView width={400} height={300} forces={{ ...forces, centerStrength: 0.5 }} />);
+
+		type Body = { x: number; y: number; vx?: number; vy?: number };
+		// The custom force d3 calls with alpha, as GraphView registers it.
+		const pull = gravity as ((alpha: number) => void) & { initialize: (nodes: Body[]) => void };
+		const near: Body = { x: 10, y: -10 };
+		const far: Body = { x: 100, y: 0, vx: 1, vy: 0 };
+		pull.initialize([near, far]);
+		pull(1);
+		expect(near.vx).toBeLessThan(0);
+		expect(near.vy).toBeGreaterThan(0);
+		expect(1 - (far.vx ?? 0)).toBeGreaterThan(-(near.vx ?? 0));
+		pull(0);
+		expect(far.vy).toBe(0);
+	});
+
+	test("only navigable nodes show the pointer cursor", async () => {
+		await mountGraph();
+		const showPointerCursor = capturedProps?.showPointerCursor as (node: unknown) => boolean;
+		expect(showPointerCursor(neighbour)).toBe(true);
+		expect(showPointerCursor(graphNode("?draft", "Draft", "unresolved"))).toBe(false);
+		expect(showPointerCursor(null)).toBe(false);
+	});
+
+	test("the page list opens a plain click in place and leaves modified clicks to the browser", async () => {
+		const clicks: string[] = [];
+		await mountGraph({ onNodeClick: (node) => clicks.push(node.id) });
+		const link = [...document.querySelectorAll("nav[aria-label='Pages in this graph'] a")].find(
+			(a) => a.textContent === "API",
+		) as HTMLAnchorElement;
+		// Record whether GraphView took the click, then stop happy-dom from
+		// following the href so later tests stay anchored on /guide.
+		const takenByGraph: boolean[] = [];
+		const stopNavigation = (event: Event) => {
+			takenByGraph.push(event.defaultPrevented);
+			event.preventDefault();
+		};
+		window.addEventListener("click", stopNavigation);
+		try {
+			fireEvent.click(link, { metaKey: true });
+			fireEvent.click(link, { button: 1 });
+			expect(clicks).toEqual([]);
+			fireEvent.click(link);
+		} finally {
+			window.removeEventListener("click", stopNavigation);
+		}
+		expect(takenByGraph).toEqual([false, false, true]);
+		expect(clicks).toEqual(["/api"]);
+	});
+
 	test("drives the force-graph handle from the imperative zoom API", async () => {
 		const ref = createRef<GraphViewHandle>();
 		render(<GraphView ref={ref} width={400} height={300} />);
@@ -293,16 +463,32 @@ describe("GraphView canvas painters", () => {
 		expect(ref.current?.getStats()).toMatchObject({ nodes: 3, links: 2 });
 	});
 
-	test("reports a node click with the node's route path", async () => {
+	test("reports a click on a navigable node, and ignores an unresolved one", async () => {
 		const clicks: string[] = [];
 		const { onNodeClick } = await mountGraph({
-			onNodeClick: (routePath) => clicks.push(routePath),
+			onNodeClick: (node) => clicks.push(node.id),
 		});
 
-		onNodeClick({ routePath: "/api" });
-		onNodeClick({});
+		onNodeClick(neighbour);
+		onNodeClick({ ...graphNode("?draft", "Draft", "unresolved") });
 
 		expect(clicks).toEqual(["/api"]);
+	});
+
+	test("Cmd/Ctrl-click opens the node in a new tab", async () => {
+		const opened: unknown[][] = [];
+		const original = window.open;
+		window.open = ((...args: unknown[]) => {
+			opened.push(args);
+			return null;
+		}) as typeof window.open;
+		try {
+			const { onNodeClick } = await mountGraph({ onNodeClick: () => {} });
+			onNodeClick(painted("/My Note", "My Note", 0, 0), { metaKey: true } as MouseEvent);
+		} finally {
+			window.open = original;
+		}
+		expect(opened).toEqual([["/My%20Note", "_blank", "noopener"]]);
 	});
 
 	test("repaints with the dark palette when the document theme changes", async () => {
