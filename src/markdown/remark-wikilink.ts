@@ -645,7 +645,10 @@ async function transformContent(tree: Root, ctx: RenderContext): Promise<void> {
 		// rendering itself is synchronous. A MathJax install that is missing or
 		// broken is reported through the build rather than silently falling back.
 		await prepareMathEngine(options.mathEngine);
-		formulas = processMath(tree, options.mathEngine);
+		// Only the page's own tree reaches the MDX compiler as a tree; an embed
+		// or fragment is serialized to an HTML string first, which has no
+		// representation for a JSX element.
+		formulas = processMath(tree, options.mathEngine, { jsx: ctx.mode === "page" });
 	}
 
 	if (ctx.mode !== "fragment") {

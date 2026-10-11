@@ -15,6 +15,7 @@ import remarkRehype from "remark-rehype";
 import { type PluggableList, unified } from "unified";
 import { visit } from "unist-util-visit";
 import { VFile } from "vfile";
+import { toHastMathHandlers } from "../../test/markdown/math-element";
 import { isPluginOwnedImageUrl } from "./media.ts";
 import { remarkWikilink } from "./remark-wikilink.ts";
 import type { NormalizedPluginOptions } from "./types.ts";
@@ -90,7 +91,7 @@ async function render(
 ): Promise<{ html: string; file: VFile }> {
 	const file = new VFile({ value, path: path.join(root, options.page ?? "index.md") });
 	const processor = processorFor(options)
-		.use(remarkRehype, { allowDangerousHtml: true })
+		.use(remarkRehype, { allowDangerousHtml: true, handlers: toHastMathHandlers })
 		.use(rehypeStringify, { allowDangerousHtml: true });
 	const result = await processor.process(file);
 	return { html: String(result), file: result };

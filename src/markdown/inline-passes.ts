@@ -5,7 +5,9 @@
  * syntax out of text that the tokenizer could have claimed (see `syntax.ts`),
  * so their order only matters where one creates nodes another must skip.
  */
+import type { Program } from "estree";
 import type { Heading, Html, ListItem, PhrasingContent, Root, Text } from "mdast";
+import type { MdxJsxFlowElement, MdxJsxTextElement } from "mdast-util-mdx-jsx";
 import type { Parent } from "unist";
 import { visit } from "unist-util-visit";
 import { type MathEngine, renderMathHtml } from "../math.js";
@@ -149,14 +151,95 @@ export function processTagLinks(tree: Root): void {
 	});
 }
 
+type MathKind = "block" | "inline-display" | "inline";
+
+/**
+ * The element a formula is wrapped in. Shared by the JSX and HTML forms so a
+ * formula on the page and one inside an embed carry the same markup.
+ */
+function mathWrapper(kind: MathKind): { tag: "div" | "span"; className: string } {
+	return {
+		tag: kind === "block" ? "div" : "span",
+		className: kind === "inline" ? "obsidian-math" : "obsidian-math-display",
+	};
+}
+
+/**
+ * A typeset formula as one JSX element whose content is the finished markup:
+ * `<span className="obsidian-math" dangerouslySetInnerHTML={{ __html: "…" }} />`.
+ *
+ * MDX reads an attribute expression from the node's `data.estree`, so the
+ * object is spelled out as an ESTree (the way Rspress builds its own import
+ * nodes). The markup is then an ordinary string literal in the compiled page,
+ * and the compiler never walks the formula's own elements.
+ */
+function mathElementNode(html: string, kind: MathKind): MdxJsxFlowElement | MdxJsxTextElement {
+	const { tag, className } = mathWrapper(kind);
+	const estree: Program = {
+		type: "Program",
+		sourceType: "module",
+		body: [
+			{
+				type: "ExpressionStatement",
+				expression: {
+					type: "ObjectExpression",
+					properties: [
+						{
+							type: "Property",
+							kind: "init",
+							method: false,
+							shorthand: false,
+							computed: false,
+							key: { type: "Identifier", name: "__html" },
+							value: { type: "Literal", value: html },
+						},
+					],
+				},
+			},
+		],
+	};
+	const attributes: MdxJsxFlowElement["attributes"] = [
+		{ type: "mdxJsxAttribute", name: "className", value: className },
+		{
+			type: "mdxJsxAttribute",
+			name: "dangerouslySetInnerHTML",
+			value: {
+				type: "mdxJsxAttributeValueExpression",
+				value: `{ __html: ${JSON.stringify(html)} }`,
+				data: { estree },
+			},
+		},
+	];
+	return kind === "block"
+		? { type: "mdxJsxFlowElement", name: tag, attributes, children: [] }
+		: { type: "mdxJsxTextElement", name: tag, attributes, children: [] };
+}
+
+/** The same formula as an `html` node, for a tree serialized to an HTML string. */
+function mathHtmlNode(html: string, kind: MathKind): Html {
+	const { tag, className } = mathWrapper(kind);
+	return { type: "html", value: `<${tag} class="${className}">${html}</${tag}>` };
+}
+
 /**
  * Render `math` / `inlineMath` nodes. Returns how many formulas were rendered,
  * so the caller knows whether the page needs the engine's stylesheet.
  *
  * KaTeX is called with `throwOnError: false`, so malformed input renders as
  * KaTeX's own inline error; input an engine rejects outright stays as written.
+ *
+ * @param options.jsx - Emit each formula as one JSX element holding the typeset
+ *   markup as a string, instead of an `html` node. An `html` node is parsed and
+ *   compiled element by element, which dominates the build time of a vault with
+ *   many formulas; the element keeps it to one. Only a tree handed straight to
+ *   the MDX compiler can take it — a tree that is serialized to an HTML string
+ *   first (an embed, a fragment) cannot.
  */
-export function processMath(tree: Root, engine: MathEngine): number {
+export function processMath(
+	tree: Root,
+	engine: MathEngine,
+	options: { jsx?: boolean } = {},
+): number {
 	let rendered = 0;
 	visit(tree, (node, index, parent) => {
 		if (node.type !== "math" && node.type !== "inlineMath") return;
@@ -164,14 +247,11 @@ export function processMath(tree: Root, engine: MathEngine): number {
 		const display = node.type === "math" || node.data?.obsidianDisplay === true;
 		const tex = node.value.trim();
 		const html = tex ? renderMathHtml(tex, display, engine) : null;
-		const replacement: Html | Text = html
-			? {
-					type: "html",
-					value:
-						node.type === "math"
-							? `<div class="obsidian-math-display">${html}</div>`
-							: `<span class="${display ? "obsidian-math-display" : "obsidian-math"}">${html}</span>`,
-				}
+		const kind: MathKind = node.type === "math" ? "block" : display ? "inline-display" : "inline";
+		const replacement: MdxJsxFlowElement | MdxJsxTextElement | Html | Text = html
+			? options.jsx
+				? mathElementNode(html, kind)
+				: mathHtmlNode(html, kind)
 			: {
 					type: "text",
 					value: node.type === "math" ? `$$\n${node.value}\n$$` : `$${node.value}$`,

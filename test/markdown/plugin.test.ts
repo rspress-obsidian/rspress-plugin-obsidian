@@ -19,6 +19,7 @@ import { remarkWikilink } from "../../src/markdown/remark-wikilink";
 import { resolveWikiLink } from "../../src/markdown/resolve-wikilink";
 import type { ContentIndex, NormalizedPluginOptions } from "../../src/markdown/types";
 import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../src/shared/media-exts.js";
+import { toHastMathHandlers, toMarkdownMathHandlers } from "./math-element";
 
 const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
 const assetsFixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/assets");
@@ -126,7 +127,7 @@ function makeProcessor(docsRoot: string, optionOverrides: Partial<NormalizedPlug
 			getDocsRoot: () => docsRoot,
 			options: { ...DEFAULT_OPTIONS, ...optionOverrides },
 		})
-		.use(remarkStringify);
+		.use(remarkStringify, { handlers: toMarkdownMathHandlers });
 }
 
 /**
@@ -139,7 +140,7 @@ function makeProcessorFor(tuple: [unknown, unknown]) {
 		.use(remarkParse)
 		.use(remarkGfm)
 		.use(tuple[0] as typeof remarkWikilink, tuple[1] as never)
-		.use(remarkStringify);
+		.use(remarkStringify, { handlers: toMarkdownMathHandlers });
 }
 
 /** Compile `value` as page `index.md` of `docsRoot` all the way to HTML. */
@@ -155,7 +156,7 @@ async function renderHtml(
 			getDocsRoot: () => docsRoot,
 			options: { ...DEFAULT_OPTIONS, ...optionOverrides },
 		})
-		.use(remarkRehype, { allowDangerousHtml: true })
+		.use(remarkRehype, { allowDangerousHtml: true, handlers: toHastMathHandlers })
 		.use(rehypeStringify, { allowDangerousHtml: true })
 		.process({ value, path: path.resolve(docsRoot, "index.md") });
 	return String(file);

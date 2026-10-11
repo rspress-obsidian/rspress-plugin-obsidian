@@ -7,6 +7,7 @@ import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 import { VFile } from "vfile";
+import { toMarkdownMathHandlers } from "../../test/markdown/math-element";
 import { setCanvasRoutes } from "../shared/canvas-routes.js";
 import { normalizeLookupValue } from "../shared/slug.js";
 import { remarkWikilink } from "./remark-wikilink.ts";
@@ -74,7 +75,7 @@ function makeProcessor(
 			...(getContentIndex ? { getContentIndex } : {}),
 			options: { ...DEFAULT_OPTIONS, ...optionOverrides },
 		})
-		.use(remarkStringify);
+		.use(remarkStringify, { handlers: toMarkdownMathHandlers });
 }
 
 /** Capture console warnings so a test can assert the message Rspress never reads. */
