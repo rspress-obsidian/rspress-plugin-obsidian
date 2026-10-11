@@ -284,24 +284,28 @@ jobs:
 
       # npm, not bun: this is the install a consumer runs, and npm installs
       # required peers but leaves optional ones (mermaid, mathjax-full) out.
+      #
+      # The fixture lists `react-force-graph-2d` so the graph panel draws; the
+      # `graph: absent` leg drops it before installing, as a consumer who skipped
+      # the optional peer would have it. Uninstalling it afterwards is not
+      # enough: npm 10 keeps it in the tree as the plugin's optional peer.
       - name: Install the tarball into the fixture site
+        env:
+          GRAPH: ${{ matrix.graph }}
         run: |
           cp -R test/consumer-site "$RUNNER_TEMP/site"
           cd "$RUNNER_TEMP/site"
+          if [ "$GRAPH" = absent ]; then npm pkg delete dependencies.react-force-graph-2d; fi
           npm install --no-audit --no-fund "$RUNNER_TEMP"/rspress-plugin-obsidian-*.tgz
+          if [ "$GRAPH" = absent ] && [ -e node_modules/react-force-graph-2d ]; then
+            echo "::error::react-force-graph-2d is installed in the leg that builds without it"
+            exit 1
+          fi
 
       - name: Add the optional mermaid peer
         if: matrix.mermaid == 'installed'
         working-directory: ${{ runner.temp }}/site
         run: npm install --no-audit --no-fund mermaid@^11.17.2
-
-      # The fixture lists `react-force-graph-2d` as a dependency so the graph
-      # panel draws; this leg removes it, as a consumer who skipped the optional
-      # peer would have it.
-      - name: Remove the optional graph renderer peer
-        if: matrix.graph == 'absent'
-        working-directory: ${{ runner.temp }}/site
-        run: npm uninstall --no-audit --no-fund react-force-graph-2d
 
       # Within the peer range the tarball declares, so npm resolves the newest
       # 2.x instead of the fixture's pinned floor.
