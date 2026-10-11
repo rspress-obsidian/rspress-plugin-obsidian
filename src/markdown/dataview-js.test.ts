@@ -204,6 +204,53 @@ describe("values and methods", () => {
 		);
 	});
 
+	test("list methods behave like Dataview's DataArray", () => {
+		expect(
+			text(
+				'[[3, 1, 2].limit(2).join(","), [3, 1, 2].limit(-1).length, [3, 1, 2].first(), [3, 1, 2].last(), [3, 1, 2].reverse().join(","), [3, 1, 2].array().join(",")].join("|")',
+			),
+		).toBe("3,1|0|3|2|2,1,3|3,1,2");
+		// join() without a separator uses Dataview's ", ", not JavaScript's ",".
+		expect(text("[1, 2].join()")).toBe("1, 2");
+		expect(
+			text(
+				'[[1, 2, 3].find(n => n > 1), [1, 2, 3].findIndex(n => n > 5), [1, 2, 3].includes(2), [1, 2, 3].indexOf(3)].join("|")',
+			),
+		).toBe("2|-1|true|2");
+		expect(
+			text(
+				'[[1, 2].some(n => n > 1), [1, 2].any(n => n > 2), [1, 2].every(n => n > 0), [1, 2].all(n => n > 1), [1, 2].none(n => n > 2)].join("|")',
+			),
+		).toBe("true|false|true|false|true");
+		// reverse() and array() copy: the original list keeps its order.
+		expect(text('(() => { const l = [1, 2]; l.reverse(); return l.join(",") })()')).toBe("1,2");
+		// Lists compare by value, as Dataview compares them, not by identity.
+		expect(text('[[1, 2].includes(2), [[1]].includes([1]), [[1]].indexOf([1])].join("|")')).toBe(
+			"true|true|0",
+		);
+	});
+
+	test("operators follow JavaScript, with lists and objects compared by value", () => {
+		expect(
+			text(
+				'[7 / 2, 7 % 4, 2 >= 2, 1 >= 2, 1 !== 2, null != undefined, [1, 2] === [1, 2], [1] !== [2]].join("|")',
+			),
+		).toBe("3.5|3|true|false|true|false|true|true");
+		expect(js('dv.paragraph("a" / 2)').error).toBe(
+			"DataviewJS: the / operator does not apply to a string and a number.",
+		);
+		expect(js("dv.paragraph([1] % 2)").error).toContain("the % operator does not apply");
+	});
+
+	test("a link exposes path, display, subpath, embed and type, and nothing else", () => {
+		expect(
+			text(
+				'(() => { const l = dv.current().file.link; return [l.path, l.subpath, l.embed, l.type, l.missing].join("|") })()',
+			),
+		).toBe("Home.md|undefined|false|file|undefined");
+		expect(text('dv.current().file.link["toString"]')).toBe("-");
+	});
+
 	test("String, Number and Boolean convert like the JavaScript functions", () => {
 		expect(text('[String(12), Number("3.5") + 1, Boolean(""), Boolean("x")].join("|")')).toBe(
 			"12|4.5|false|true",
