@@ -18,9 +18,10 @@ bun add rspress-plugin-obsidian
 
 Requires **Node.js ≥ 22.14.0** and **Rspress `^2.0.21`**.
 
-`graphview()` renders through `react-force-graph-2d`, which is an optional peer
-and so is *not* installed for you — without it the build fails at bundle time,
-before any runtime fallback can run:
+`graphview()` draws the graph with `react-force-graph-2d`, an optional peer that
+is *not* installed for you. Without it the site still builds and the build says
+which package to install, but the panel lists the pages instead of drawing the
+graph:
 
 ```bash
 bun add react-force-graph-2d
@@ -134,6 +135,28 @@ features read the vault's own plugin settings
 the build — that is the diagnostic working, not a bug. `onAmbiguousLink`
 defaults to `"warn"`. `onPluginError` (default `"error"`) fails the build for a
 plugin block that will not render, which is also shown in place.
+
+## Coming from `rspress-plugin-graph-view`
+
+`graphview()` replaces the standalone `rspress-plugin-graph-view` package, which
+this one supersedes. `defaultOpen`, `profileBuild`, `colors` and the
+`RSPRESS_GRAPH_VIEW_PROFILE=1` variable work as before (`colors` accepts every
+key the old package documented, plus a few more).
+
+```diff
+-import { pluginGraphview } from "rspress-plugin-graph-view";
++import { graphview } from "rspress-plugin-obsidian";
+
+-  plugins: [pluginGraphview()],
++  plugins: [graphview()],
+```
+
+- A custom theme's sidebar graph imports
+  `rspress-plugin-obsidian/graph/runtime/GraphSidebar` instead of
+  `rspress-plugin-graph-view/runtime/GraphSidebar`.
+- The panel stylesheet is not injected unless you set `enableDefaultStyles: true`;
+  otherwise import `rspress-plugin-obsidian/graph/styles.css`.
+- Keep `react-force-graph-2d` installed, then remove `rspress-plugin-graph-view`.
 
 ## Documentation
 
