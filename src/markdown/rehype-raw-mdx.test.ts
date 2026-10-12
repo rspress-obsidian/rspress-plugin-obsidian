@@ -127,6 +127,18 @@ describe("rehypeRawForMdx", () => {
 		expect(output).toContain('src="/repo/clip.mp4"');
 		expect(output).toContain('src="/repo/clip.webm"');
 	});
+
+	test("an unresolved wikilink compiles to a marked label, never a link", async () => {
+		// Rspress hands every `<a>` to its Link component, which would make the
+		// marker navigable; a `<span>` reaches the reader as a plain label.
+		for (const format of ["md", "mdx"] as const) {
+			const output = await compileMdx("See [[not-a-real-page|Missing page]].\n", "/", format);
+			expect(output).toMatch(
+				/<_components\.span className="obsidian-unresolved"[^>]*data-wikilink="\[\[not-a-real-page\|Missing page\]\]"[^>]*>\{"Missing page"\}<\/_components\.span>/,
+			);
+			expect(output).not.toContain("_components.a");
+		}
+	});
 });
 
 describe("math as one element", () => {

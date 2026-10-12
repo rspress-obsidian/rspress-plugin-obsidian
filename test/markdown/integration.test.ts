@@ -132,14 +132,6 @@ describe.skipIf(!hasBuildOutput)("rspress build integration", () => {
 		expect(html).toContain("data-code=");
 	});
 
-	test("marks unresolved wikilinks instead of printing the raw syntax", () => {
-		const html = page("markdown/guide/examples.html");
-
-		expect(html).toContain('class="obsidian-unresolved"');
-		expect(html).toContain(">Missing page<");
-		expect(html).not.toContain(">[[not-a-real-page");
-	});
-
 	test("drops comments that span paragraphs and lists", () => {
 		const html = page("markdown/guide/examples.html");
 
