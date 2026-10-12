@@ -427,7 +427,7 @@ Size parameter: `![[image.png|300x200]]` → `width="300" height="200"`. Width-o
 
 PDF embeds take their two knobs from the subpath: `![[doc.pdf#page=3]]` opens the frame at that page, `![[doc.pdf#height=400]]` sizes the frame (default 600), and `![[doc.pdf#page=3&height=400]]` does both. Only the page reaches the URL — the height is an attribute of the embed, not something the file is asked for.
 
-Audio, video and PDFs embed from a markdown image too — `![](tone.mp3)`, `![320](clip.mp4)`, `![](doc.pdf#page=3)` — which is how Obsidian writes embeds with "Use [[Wikilinks]]" off. They resolve like any attachment and render exactly as their wikilink forms; the import Rspress made for the file is dropped, so nothing is bundled as an image.
+Audio, video and PDFs embed from a markdown image too — `![](tone.mp3)`, `![320](clip.mp4)`, `![](doc.pdf#page=3)` — which is how Obsidian writes embeds with `Use [[Wikilinks]]` off. They resolve like any attachment and render exactly as their wikilink forms; the import Rspress made for the file is dropped, so nothing is bundled as an image.
 
 A markdown image of a YouTube video (`watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`, with a `t=` start time) or of a post on X (`x.com` or `twitter.com` `/…/status/<id>`) becomes a frame of the site's own embed page, as in Obsidian. The id is validated and the frame URL built from it; the frame is sandboxed to what the players need. `![560x315](…)` sizes it; otherwise a video is 16:9 at full width (`.obsidian-web-embed-youtube`) and a post a 550 × 700 px card (`.obsidian-web-embed-tweet`), which a long post scrolls inside.
 

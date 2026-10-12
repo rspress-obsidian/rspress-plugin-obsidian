@@ -86,7 +86,7 @@ frame:
 
 ## Markdown Syntax
 
-With **Use [[Wikilinks]]** off, Obsidian writes every embed as a markdown image.
+With **`Use [[Wikilinks]]`** off, Obsidian writes every embed as a markdown image.
 Each format embeds the same way in that form — a player, not an image:
 
 ![](/vault/media/tone.mp3)
