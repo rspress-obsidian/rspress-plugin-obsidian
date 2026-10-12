@@ -295,6 +295,47 @@ test("carries a PDF page and height into the frame, like the markdown pipeline",
 	expect(paged).toContain('href="/assets/doc.pdf#page=3" target="_blank"');
 });
 
+test("reads a PDF page and height joined by &, in either order", () => {
+	for (const subpath of ["page=3&height=350", "height=350&page=3"]) {
+		const html = renderMarkdown(`![[assets/doc.pdf#${subpath}]]`);
+		expect(html).toContain('<iframe class="obsidian-pdf-frame" src="/assets/doc.pdf#page=3"');
+		expect(html).toContain('height="350px"');
+		expect(html).not.toContain("height=350");
+	}
+});
+
+test("embeds audio, video and PDFs written as markdown images, as their wikilink forms do", () => {
+	const html = renderMarkdown(
+		"![](assets/tone.mp3) ![320](assets/clip.mp4) ![](assets/doc.pdf#page=2&height=300)",
+		{
+			assets: {
+				"assets/tone.mp3": "/vault/assets/tone.mp3",
+				"assets/clip.mp4": "/vault/assets/clip.mp4",
+				"assets/doc.pdf": "/vault/assets/doc.pdf",
+			},
+		},
+	);
+	expect(html).toContain('<audio controls src="/vault/assets/tone.mp3"');
+	expect(html).toContain('<video controls src="/vault/assets/clip.mp4"');
+	expect(html).toContain('style="width:320px;"');
+	expect(html).toContain('<iframe class="obsidian-pdf-frame" src="/vault/assets/doc.pdf#page=2"');
+	expect(html).toContain('height="300px"');
+	expect(html).not.toContain("<img");
+});
+
+test("frames a YouTube video or a post on X from a markdown image", () => {
+	expect(renderMarkdown("![](https://youtu.be/NnTvZWp5Q7o)")).toContain(
+		'src="https://www.youtube.com/embed/NnTvZWp5Q7o"',
+	);
+	expect(renderMarkdown("![](https://x.com/obsdmd/status/1580548874246443010)")).toContain(
+		'src="https://platform.twitter.com/embed/Tweet.html?dnt=true&amp;width=550px&amp;id=1580548874246443010"',
+	);
+	// Any other external image stays an image.
+	expect(renderMarkdown("![](https://example.com/a.png)")).toContain(
+		'<img src="https://example.com/a.png"',
+	);
+});
+
 test("renders embed size syntax", () => {
 	const html = renderMarkdown("![[Assets/clip.png|300]]", {
 		assets: { "assets/clip.png": "data:image/png;base64,AAAA" },

@@ -33,7 +33,6 @@ export default defineConfig({
 			enableExcalidraw: true,
 			enableBases: true,
 			enableTemplater: true,
-			onBrokenLink: "warn",
 		}),
 		canvas({
 			vaultRoot,
@@ -43,9 +42,8 @@ export default defineConfig({
 		graphview({
 			defaultOpen: true,
 			enableHoverPreviews: true,
-			// The examples page documents an unresolved link on purpose, and the
-			// markdown plugin already reports every unresolved wikilink through
-			// `onBrokenLink` above. Without this the same link is reported twice.
+			// The markdown plugin already reports every unresolved wikilink
+			// through `onBrokenLink`; without this the same link is reported twice.
 			onUnresolvedLink: "ignore",
 		}),
 	]),

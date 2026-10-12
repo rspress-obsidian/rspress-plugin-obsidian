@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -1533,6 +1533,38 @@ describe("vault route prefix", () => {
 		expect(output).not.toContain('href="/notes/Sibling"');
 		expect(output).not.toContain("](/notes/Sibling)");
 	});
+
+	test("gives a missing attachment the URL it will be published at, under the prefix", async () => {
+		const plugin = markdownPlugin({
+			vaultRoot: vaultRoutePrefixFixtureRoot,
+			vaultRoutePrefix: "/vault",
+			enableMediaEmbeds: true,
+			onBrokenLink: "warn",
+		});
+		const [remarkPlugin, pluginOptions] = (plugin.markdown?.remarkPlugins?.[0] ?? []) as [
+			typeof remarkWikilink,
+			Parameters<typeof remarkWikilink>[0],
+		];
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const file = await unified()
+				.use(remarkParse)
+				.use(remarkPlugin, pluginOptions)
+				.use(remarkStringify)
+				.process({
+					value: "![[media/missing.png]] ![](media/missing.mp3)",
+					path: path.resolve(vaultRoutePrefixFixtureRoot, "Home.md"),
+				});
+
+			// Once the file lands it is served here, so the embed starts working
+			// without an edit; without the prefix it would 404 forever.
+			const output = String(file);
+			expect(output).toContain('<img src="/vault/media/missing.png"');
+			expect(output).toContain('<audio controls src="/vault/media/missing.mp3">');
+		} finally {
+			warn.mockRestore();
+		}
+	});
 });
 
 describe("tag linking", () => {
@@ -2700,6 +2732,105 @@ describe("media embeds", () => {
 		);
 		expect(output).not.toContain("#height=");
 	});
+
+	test("reads a PDF page and height joined by &, in either order", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: "![[Document.pdf#page=3&height=400]]\n\n![[Document.pdf#height=250&page=2]]",
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/Document.pdf#page=3" title="Document.pdf" width="100%" height="400px"',
+		);
+		expect(output).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/Document.pdf#page=2" title="Document.pdf" width="100%" height="250px"',
+		);
+		expect(output).not.toContain("height=4");
+		expect(output).not.toContain("height=2");
+	});
+
+	test("embeds audio, video and PDFs written as markdown images", async () => {
+		// With "Use [[Wikilinks]]" off, Obsidian writes every embed this way.
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: "![](tone.3gp) ![320](clip.ogv) ![](Document.pdf#page=2&height=300)",
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain('<audio controls src="/tone.3gp"></audio>');
+		expect(output).toContain('<video controls src="/clip.ogv" width="320"></video>');
+		expect(output).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/Document.pdf#page=2" title="Document.pdf" width="100%" height="300px"',
+		);
+		expect(output).not.toContain("![");
+	});
+
+	test("frames YouTube videos and posts on X written as markdown images", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: [
+				"![](https://www.youtube.com/watch?v=NnTvZWp5Q7o)",
+				"![A talk](https://youtu.be/NnTvZWp5Q7o?t=1m5s)",
+				"![560x315](https://www.youtube.com/shorts/NnTvZWp5Q7o)",
+				"![](https://twitter.com/obsdmd/status/1580548874246443010)",
+				"![](https://x.com/obsdmd/status/1580548874246443010)",
+			].join("\n\n"),
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain(
+			'<iframe class="obsidian-web-embed obsidian-web-embed-youtube" src="https://www.youtube.com/embed/NnTvZWp5Q7o" title="YouTube video"',
+		);
+		expect(output).toContain(
+			'src="https://www.youtube.com/embed/NnTvZWp5Q7o?start=65" title="A talk"',
+		);
+		expect(output).toContain(
+			'src="https://www.youtube.com/embed/NnTvZWp5Q7o" title="YouTube video" width="560" height="315"',
+		);
+		expect(
+			output.match(
+				/src="https:\/\/platform\.twitter\.com\/embed\/Tweet\.html\?dnt=true&amp;width=550px&amp;id=1580548874246443010"/g,
+			),
+		).toHaveLength(2);
+	});
+
+	test("leaves other external images, and urls that only look like a video, as images", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: [
+				"![](https://example.com/photo.jpg)",
+				"![](https://www.youtube.com/@obsidianmd)",
+				"![](https://www.youtube.com/watch?v=%22%3E%3Cscript%3E)",
+				"![](https://x.com/obsdmd)",
+			].join("\n\n"),
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).not.toContain("<iframe");
+		expect(output).toContain("![](https://example.com/photo.jpg)");
+		expect(output).toContain("![](https://x.com/obsdmd)");
+	});
+
+	test("links markdown-syntax media to the file when media embeds are off", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: false });
+		const file = await processor.process({
+			value: "![](tone.3gp) ![](Document.pdf#page=2&height=300) ![](https://youtu.be/NnTvZWp5Q7o)",
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain("[tone](/tone.3gp)");
+		// The link opens the file at its page; the frame height has no meaning there.
+		expect(output).toContain("[Document](/Document.pdf#page=2)");
+		expect(output).toContain("<https://youtu.be/NnTvZWp5Q7o>");
+		expect(output).not.toContain("<audio");
+		expect(output).not.toContain("<iframe");
+	});
 	test("preserves order and sibling nodes for multiple inline media embeds", async () => {
 		const processor = makeProcessor(assetsFixtureRoot, {
 			enableMediaEmbeds: true,
@@ -3624,6 +3755,7 @@ describe("external vault publishing", () => {
 				index: docs,
 				enableCaseInsensitiveLookup: true,
 				siteBase: "/",
+				embedMedia: true,
 			});
 			expect(media).toMatchObject({ url: "/vault/media/pic.png", found: true });
 		} finally {

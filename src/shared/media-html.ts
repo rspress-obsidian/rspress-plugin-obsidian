@@ -84,3 +84,99 @@ export function pdfEmbedHtml({ src, target, page, height, style }: PdfEmbedOptio
 		"</figure>",
 	].join("");
 }
+
+/**
+ * The two knobs of a PDF embed's subpath. Obsidian documents `#page=3`,
+ * `#height=400`, and both joined by `&` (`#page=3&height=400`), in any order.
+ * Anything else in the subpath is not a knob and is ignored.
+ */
+export function parsePdfSubpath(subpath: string): { page?: string; height?: string } {
+	const knobs: { page?: string; height?: string } = {};
+	for (const part of subpath.split("&")) {
+		const match = /^(page|height)=(\d+)$/i.exec(part.trim());
+		if (match?.[1] && match[2]) knobs[match[1].toLowerCase() as "page" | "height"] = match[2];
+	}
+	return knobs;
+}
+
+const YOUTUBE_ID = /^[\w-]{11}$/;
+const TWEET_ID = /^\d{1,20}$/;
+
+/** A YouTube `t`/`start` value — `90`, `90s`, `1h2m3s` — in seconds. */
+function youtubeStart(value: string | null): number | undefined {
+	const match = value ? /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/.exec(value) : null;
+	if (!match || !value) return undefined;
+	const seconds = Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+	return seconds > 0 ? seconds : undefined;
+}
+
+/** The frame URL for a YouTube video or a tweet `url` names, if it names one. */
+function webEmbedSource(url: string): { kind: "youtube" | "tweet"; src: string } | undefined {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return undefined;
+	}
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
+	const host = parsed.hostname.toLowerCase().replace(/^(?:www|m|mobile|music)\./, "");
+	const segments = parsed.pathname.split("/").filter(Boolean);
+
+	if (host === "youtu.be" || host === "youtube.com" || host === "youtube-nocookie.com") {
+		const id =
+			host === "youtu.be"
+				? segments[0]
+				: parsed.pathname === "/watch"
+					? parsed.searchParams.get("v")
+					: ["embed", "shorts", "live"].includes(segments[0] ?? "")
+						? segments[1]
+						: undefined;
+		if (!id || !YOUTUBE_ID.test(id)) return undefined;
+		const start = youtubeStart(parsed.searchParams.get("t") ?? parsed.searchParams.get("start"));
+		return {
+			kind: "youtube",
+			src: `https://www.youtube.com/embed/${id}${start ? `?start=${start}` : ""}`,
+		};
+	}
+	if (host === "twitter.com" || host === "x.com") {
+		const id = segments[1] === "status" ? segments[2] : undefined;
+		if (!id || !TWEET_ID.test(id)) return undefined;
+		return {
+			kind: "tweet",
+			// X lays the post out at this width (250–550), not the frame's.
+			src: `https://platform.twitter.com/embed/Tweet.html?dnt=true&width=550px&id=${id}`,
+		};
+	}
+	return undefined;
+}
+
+/**
+ * The frame for a web page Obsidian embeds from a markdown image —
+ * `![](https://www.youtube.com/watch?v=…)` or `![](https://x.com/…/status/…)` —
+ * or `undefined` when `url` is neither. As in Obsidian, the page is framed
+ * from the site's own embed URL; nothing else on the page loads their scripts.
+ * The ids are validated, so the URL is built, never copied.
+ *
+ * A size in the image's alt (`![560x315](…)`) sizes the frame; otherwise the
+ * stylesheet gives a video a 16:9 box and a tweet a fixed-height card.
+ */
+export function webEmbedHtml(
+	url: string,
+	options: { title?: string; width?: string; height?: string } = {},
+): string | undefined {
+	const source = webEmbedSource(url);
+	if (!source) return undefined;
+	const title = options.title || (source.kind === "youtube" ? "YouTube video" : "Post on X");
+	const size = options.width
+		? ` width="${options.width}"${options.height ? ` height="${options.height}"` : ""}`
+		: "";
+	return [
+		`<iframe class="obsidian-web-embed obsidian-web-embed-${source.kind}"`,
+		` src="${escapeHtmlAttribute(source.src)}" title="${escapeHtmlAttribute(title)}"${size}`,
+		' allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"',
+		// YouTube refuses to play in a frame that sends no referrer.
+		' allowfullscreen referrerpolicy="strict-origin-when-cross-origin"',
+		' sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-presentation"',
+		' frameborder="0" loading="lazy"></iframe>',
+	].join("");
+}

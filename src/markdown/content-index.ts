@@ -145,7 +145,7 @@ function normalizeIndexOptions(options: ContentIndexOptions): NormalizedIndexOpt
  * `/public/<path>`, which no route serves. Getting this wrong is invisible until
  * a page embeds the file: the `src` looks reasonable and 404s in the browser.
  */
-function assetUrlPath(relativePath: string, routePrefix: string): string {
+export function assetUrlPath(relativePath: string, routePrefix: string): string {
 	const segments = [...routePrefix.split("/"), ...relativePath.split("/")].filter(
 		(segment) => segment !== "",
 	);
@@ -316,6 +316,7 @@ async function buildContentIndexFromFiles(
 
 	const index: ContentIndex = {
 		rootDir,
+		routePrefix: options.routePrefix,
 		pages,
 		assets,
 		byAbsolutePath,

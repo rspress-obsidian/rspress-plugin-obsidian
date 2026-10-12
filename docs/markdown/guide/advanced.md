@@ -386,8 +386,8 @@ window, so the dev server keeps running. If the crash still appears, set
 
 ### `enableMediaEmbeds`
 
-- `false` (default) — `![[file]]` is rewritten to an embed anchor
-- `true` — renders media files as native HTML elements
+- `false` (default) — `![[file]]` is rewritten to an embed anchor, and a markdown-syntax audio, video, PDF or web embed (`![](tone.mp3)`, `![](https://youtu.be/…)`) to a link
+- `true` — renders media files as native HTML elements, in either syntax
 
 These are the formats Obsidian accepts, kept in one table
 (`src/shared/media-exts.ts`) that the canvas renderer reads too, so a format
@@ -425,7 +425,11 @@ a card and a note never disagree.
 
 Size parameter: `![[image.png|300x200]]` → `width="300" height="200"`. Width-only: `![[image.png|300]]` → `width="300"`. A caption and a size combine: `![[image.png|A caption|300]]` → `alt="A caption" width="300"`. A markdown image takes the same syntax, which is how Obsidian documents it — the size alone (`![300](image.png)`) or after a caption (`![A caption|300](image.png)`); anything that is not a bare dimension, `![A caption|wide](image.png)`, stays caption text.
 
-PDF embeds take their two knobs from the subpath: `![[doc.pdf#page=3]]` opens the frame at that page, `![[doc.pdf#height=400]]` sizes the frame (default 600). Only the page reaches the URL — the height is an attribute of the embed, not something the file is asked for.
+PDF embeds take their two knobs from the subpath: `![[doc.pdf#page=3]]` opens the frame at that page, `![[doc.pdf#height=400]]` sizes the frame (default 600), and `![[doc.pdf#page=3&height=400]]` does both. Only the page reaches the URL — the height is an attribute of the embed, not something the file is asked for.
+
+Audio, video and PDFs embed from a markdown image too — `![](tone.mp3)`, `![320](clip.mp4)`, `![](doc.pdf#page=3)` — which is how Obsidian writes embeds with `Use [[Wikilinks]]` off. They resolve like any attachment and render exactly as their wikilink forms; the import Rspress made for the file is dropped, so nothing is bundled as an image.
+
+A markdown image of a YouTube video (`watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`, with a `t=` start time) or of a post on X (`x.com` or `twitter.com` `/…/status/<id>`) becomes a frame of the site's own embed page, as in Obsidian. The id is validated and the frame URL built from it; the frame is sandboxed to what the players need. `![560x315](…)` sizes it; otherwise a video is 16:9 at full width (`.obsidian-web-embed-youtube`) and a post a 550 × 700 px card (`.obsidian-web-embed-tweet`), which a long post scrolls inside.
 
 Audio, video and PDF frames carry the site `base` (as do raw `<audio>`, `<video>`, `<source>` and `<iframe>` elements a note writes itself); images go through Rspress's `img` component, which adds it.
 
@@ -435,7 +439,7 @@ Media paths are resolved in order:
 3. On disk relative to the docs root
 4. Indexed asset at the docs-root path
 5. Unique asset basename anywhere in the index (exact, then case-insensitive) — this is what makes a bare `![[photo.png]]` work
-6. Root-relative URL fallback (`/filename`), reported as unresolved
+6. The URL the file would be published at (`/vault/media/x.png` for a vault note), reported as unresolved
 
 Markdown images (`![](photo.png)`, `![](media/photo.png)`, `![](<my photo.png>)`, `![](my%20photo.png)`) are resolved the same way, whether or not `enableMediaEmbeds` is on — they are core Markdown. Rspress turns every relative image into a bundler import before plugins run; the plugin rewrites that import to the file it found, relative to the page, so the image is bundled like any other Rspress image. It also exempts relative image urls from Rspress's dead-image gate (`markdown.image.checkDeadImages.excludes`, unless your config sets `checkDeadImages` itself) and reports an image found nowhere through `onBrokenLink` instead.
 

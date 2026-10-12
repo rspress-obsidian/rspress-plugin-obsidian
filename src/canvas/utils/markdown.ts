@@ -12,7 +12,7 @@ import {
 	PDF_EXT,
 	VIDEO_EXTS,
 } from "../../shared/media-exts.js";
-import { pdfEmbedHtml } from "../../shared/media-html.js";
+import { parsePdfSubpath, pdfEmbedHtml, webEmbedHtml } from "../../shared/media-html.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../../shared/paths.js";
 import { extractNoteSection } from "../../shared/transclusion.js";
 import type { CanvasLink, CanvasLinks } from "../types.js";
@@ -311,13 +311,11 @@ function renderMedia(c: RenderContext, url: string, extension: string, shape: Em
 	// Obsidian puts a PDF's two knobs in the subpath, and the markdown
 	// pipeline reads them there: `#page=3` opens the viewer at a page, so it
 	// stays in the URL, and `#height=400` sizes the frame, so it is a
-	// property of this embed and never travels to the file. Only one of the
-	// two is a subpath Obsidian writes, never both.
-	const pdfKnob = extension === PDF_EXT ? subpath : "";
-	const pdfPage = pdfKnob.match(/^page=(\d+)$/i)?.[1];
-	const pdfHeight = pdfKnob.match(/^height=(\d+)$/i)?.[1];
+	// property of this embed and never travels to the file. Obsidian writes
+	// either, or both joined by `&`.
+	const pdf = extension === PDF_EXT ? parsePdfSubpath(subpath) : undefined;
 	// Any other subpath rides along verbatim, the way it does in a note.
-	const fragment = pdfPage ? `#page=${pdfPage}` : pdfKnob ? "" : subpath ? `#${subpath}` : "";
+	const fragment = pdf ? (pdf.page ? `#page=${pdf.page}` : "") : subpath ? `#${subpath}` : "";
 	const src = escapeHtmlAttribute(`${safe}${fragment}`);
 	const title = escapeHtmlAttribute(shape.target);
 	const sizeAttr = shape.sizeStyle ? ` style="${shape.sizeStyle}"` : "";
@@ -337,8 +335,8 @@ function renderMedia(c: RenderContext, url: string, extension: string, shape: Em
 		return pdfEmbedHtml({
 			src: `${safe}${fragment}`,
 			target: shape.target,
-			page: pdfPage,
-			height: Number(pdfHeight ?? 600),
+			page: pdf?.page,
+			height: Number(pdf?.height ?? 600),
 			style: shape.sizeStyle || undefined,
 		});
 	}
@@ -783,7 +781,37 @@ const md = new Marked({
 		},
 		image({ href, title, text, tokens }) {
 			const alt = tokens ? plainText(tokens) : text;
-			const url = resolveMarkdownUrl(context(), href);
+			const c = context();
+			// Audio, video and PDFs embed from a markdown image as from `![[…]]`,
+			// and a YouTube or X url frames the page, as in a note.
+			const hashAt = href.indexOf("#");
+			const file = hashAt === -1 ? href : href.slice(0, hashAt);
+			const extension = extensionOf(file.split("?")[0] ?? file);
+			const size = alt.match(SIZE_RE);
+			if (AUDIO_EXTS.has(extension) || VIDEO_EXTS.has(extension) || extension === PDF_EXT) {
+				// The build maps the href as written; a caller with no links map
+				// supplies assets by file path, without the `#…`.
+				const resolved = resolveMarkdownUrl(c, lookup(c, href) ? href : file);
+				if (resolved === null) return unresolvedHtml(escapeHtmlText(alt));
+				const fileUrl = resolved.split("#")[0] ?? resolved;
+				return renderMedia(c, fileUrl, extension, {
+					target: file,
+					subpath: hashAt === -1 ? undefined : href.slice(hashAt),
+					alt: size ? file : alt || file,
+					sizeStyle: !size
+						? ""
+						: size[2]
+							? `width:${size[1]}px;height:${size[2]}px;`
+							: `width:${size[1]}px;`,
+				});
+			}
+			const web = webEmbedHtml(href, {
+				title: size ? "" : alt,
+				width: size?.[1],
+				height: size?.[2],
+			});
+			if (web) return web;
+			const url = resolveMarkdownUrl(c, href);
 			if (url === null) return unresolvedHtml(escapeHtmlText(alt));
 			const safe = sanitizeUrl(url);
 			if (!safe) return escapeHtmlText(alt);

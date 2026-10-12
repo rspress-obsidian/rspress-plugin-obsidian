@@ -1,5 +1,5 @@
 ---
-description: Live media embeds — every image, audio, video and PDF format Obsidian accepts, with sizing, PDF page and height subpaths, and the same renderer inside canvas text cards.
+description: Live media embeds — every image, audio, video and PDF format Obsidian accepts in both embed syntaxes, with sizing, PDF page and height subpaths, YouTube and X embeds, and the same renderer inside canvas text cards.
 ---
 
 # Media Embeds
@@ -79,6 +79,35 @@ A PDF with neither is drawn in a 600px frame:
 
 ![[media/sample.pdf]]
 
+Both knobs together, joined by `&` as Obsidian documents — page 2, in a 320px
+frame:
+
+![[media/sample.pdf#page=2&height=320]]
+
+## Markdown Syntax
+
+With **`Use [[Wikilinks]]`** off, Obsidian writes every embed as a markdown image.
+Each format embeds the same way in that form — a player, not an image:
+
+![](/vault/media/tone.mp3)
+
+![320](/vault/media/clip.mp4)
+
+![](/vault/media/sample.pdf#page=2&height=320)
+
+## Web Pages
+
+Obsidian embeds a YouTube video or a post on X from a markdown image of its URL.
+The plugin frames the site's own embed page; the size syntax sizes the frame:
+
+![](https://www.youtube.com/watch?v=NnTvZWp5Q7o)
+
+Short links (`youtu.be/…`), Shorts and a `t=` start time work too, as do
+`twitter.com` and `x.com` post URLs. A post is a fixed-height card: X sizes it to
+fit only through its own script, which the site does not load, so a long post
+scrolls inside the frame. Any other external URL is an image, and an `<iframe>`
+a note writes itself is kept as written.
+
 ## In a Canvas Card
 
 A canvas text card renders attachments with the same renderer, from the same
@@ -101,12 +130,16 @@ cards are ordinary text nodes.
 | `![300](image.png)` | Markdown image, width 300 |
 | `![300x180](image.png)` | Markdown image, width and height |
 | `![A caption\|300](image.png)` | Markdown image, caption then width |
-| `![[audio.mp3]]` | `<audio controls>` |
-| `![[video.mp4]]` | `<video controls>` |
-| `![[video.mp4\|320]]` | Video at 320px wide |
-| `![[doc.pdf]]` | PDF in a 600px frame |
+| `![[audio.mp3]]`, `![](audio.mp3)` | `<audio controls>` |
+| `![[video.mp4]]`, `![](video.mp4)` | `<video controls>` |
+| `![[video.mp4\|320]]`, `![320](video.mp4)` | Video at 320px wide |
+| `![[doc.pdf]]`, `![](doc.pdf)` | PDF in a 600px frame |
 | `![[doc.pdf#page=3]]` | PDF opened at page 3 |
 | `![[doc.pdf#height=400]]` | PDF in a 400px frame |
+| `![[doc.pdf#page=3&height=400]]` | Both |
+| `![](https://www.youtube.com/watch?v=…)`, `![](https://youtu.be/…)` | YouTube video, 16:9 |
+| `![](https://x.com/user/status/…)` | Post on X |
+| `![560x315](https://youtu.be/…)` | Web embed at 560×315 |
 
 ## Formats
 
@@ -142,5 +175,6 @@ work:
 - A **vault-relative path** resolved through the content index, the same lookup
   that resolves `[[Some Note]]`.
 
-A file that is missing keeps its root-relative `src` and logs a warning, so an
-embed starts working once the file lands and needs no rewrite.
+A file that is missing logs a warning and gets the URL it will be published at
+(`/vault/media/x.png` for a vault note), so an embed starts working once the file
+lands and needs no rewrite.

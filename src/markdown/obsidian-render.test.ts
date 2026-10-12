@@ -191,6 +191,33 @@ describe("markdown images resolve like Obsidian attachments", () => {
 		);
 	});
 
+	// The same transform imported an audio file or PDF as an image: a broken
+	// `<img>`, and a small PDF inlined into the page as a `data:` URL.
+	test("turns an audio file or PDF Rspress imported as an image into a player", async () => {
+		const remarkImageOptions = {
+			docDirectory: root,
+			remarkImageOptions: { checkDeadImages: false },
+		};
+		const { tree: result } = await tree("![](song.mp3) ![](doc.pdf#page=2&height=300)", {
+			page: "notes/inner.md",
+			before: [[remarkImage, remarkImageOptions]],
+		});
+		const kinds: string[] = [];
+		const markup: string[] = [];
+		visit(result, (node) => {
+			kinds.push(node.type);
+			if (node.type === "html") markup.push(node.value);
+		});
+
+		// Nothing is left for the bundler to import as an image.
+		expect(kinds).not.toContain("mdxjsEsm");
+		expect(kinds).not.toContain("mdxJsxFlowElement");
+		expect(markup[0]).toBe('<audio controls src="/attachments/song.mp3"></audio>');
+		expect(markup[1]).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/attachments/doc.pdf#page=2" title="doc.pdf" width="100%" height="300px"',
+		);
+	});
+
 	test("exempts every relative image url from Rspress's dead-image gate", () => {
 		expect(isPluginOwnedImageUrl("img.png")).toBe(true);
 		expect(isPluginOwnedImageUrl("my%20image.png")).toBe(true);
