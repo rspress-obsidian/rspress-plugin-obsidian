@@ -191,6 +191,7 @@ function mediaContextOf(ctx: RenderContext): MediaContext {
 		index: ctx.index,
 		enableCaseInsensitiveLookup: ctx.options.enableCaseInsensitiveLookup,
 		siteBase: ctx.siteBase,
+		embedMedia: ctx.options.enableMediaEmbeds,
 	};
 }
 

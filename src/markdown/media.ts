@@ -4,7 +4,9 @@
  * Obsidian resolves an attachment the same way whichever syntax names it — next
  * to the note, from the vault root, or by unique file name anywhere in the vault
  * — so `![[photo.png]]`, `![](photo.png)` and `![](media/photo.png)` all go
- * through {@link resolveMediaSrc}.
+ * through {@link resolveMediaSrc}. It embeds the same way too: `![](tone.mp3)`,
+ * `![](clip.mp4)` and `![](doc.pdf#page=3)` are players and frames, exactly as
+ * their wikilink forms are, and `![](https://youtu.be/…)` frames the video.
  *
  * Markdown images need extra care because Rspress gets to them first: its
  * `remarkImage` turns every relative `![](url)` into an `<img>` JSX element whose
@@ -19,8 +21,9 @@ import type { Parent } from "unist";
 import { visit } from "unist-util-visit";
 import { escapeHtmlAttribute, sanitizeUrl } from "../shared/escape.js";
 import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
-import { pdfEmbedHtml } from "../shared/media-html.js";
+import { parsePdfSubpath, pdfEmbedHtml, webEmbedHtml } from "../shared/media-html.js";
 import { humanizeBaseName } from "../shared/slug.js";
+import { assetUrlPath } from "./content-index.js";
 import type { ContentIndex, ParsedWikiLink } from "./types.js";
 import { normalizeFilePathKey, normalizeFsPath } from "./utils.js";
 
@@ -32,6 +35,8 @@ export interface MediaContext {
 	enableCaseInsensitiveLookup: boolean;
 	/** The site `base`, `/…/`. */
 	siteBase: string;
+	/** `enableMediaEmbeds`: markdown-syntax audio, video, PDFs and web pages embed. */
+	embedMedia: boolean;
 }
 
 export interface MediaResolveResult {
@@ -67,10 +72,11 @@ function decodePath(url: string): string {
  * Resolve a media embed target to a root-relative URL.
  *
  * Tries the file relative to the current markdown file, then relative to the
- * root, then a unique basename anywhere in the index. Falls back to a
- * root-relative path (reported as not found) when none matches. Each path
- * segment is percent-encoded so spaces and special characters produce valid
- * `src`/`href` URLs.
+ * root, then a unique basename anywhere in the index. Falls back to the URL the
+ * file would be published at from the root (reported as not found), so an
+ * embed starts working once the file lands. Each path segment is
+ * percent-encoded so spaces and special characters produce valid `src`/`href`
+ * URLs.
  */
 export function resolveMediaSrc(target: string, ctx: MediaContext): MediaResolveResult {
 	const { docsRoot, index } = ctx;
@@ -145,7 +151,12 @@ export function resolveMediaSrc(target: string, ctx: MediaContext): MediaResolve
 		if (match) return match;
 	}
 
-	return { url: encodePath(target.replace(/^\/+/, "").split("/")), found: false };
+	// Where the file would be served from had it been found: under this tree's
+	// route prefix (`/vault/…`), as every published attachment is.
+	const segments = target
+		.split("/")
+		.filter((segment) => segment !== "" && segment !== "." && segment !== "..");
+	return { url: assetUrlPath(segments.join("/"), index.routePrefix ?? ""), found: false };
 }
 
 function onlyOne<T>(candidates: T[] | undefined): T | undefined {
@@ -203,6 +214,52 @@ function sizeAttributes(size: { width: string; height?: string }): string {
 	return size.height ? ` width="${size.width}" height="${size.height}"` : ` width="${size.width}"`;
 }
 
+type MediaKind = "Image" | "Audio" | "Video" | "PDF";
+
+function mediaKindOf(target: string): MediaKind | undefined {
+	const ext = extensionOf(target);
+	if (IMAGE_EXTS.has(ext)) return "Image";
+	if (AUDIO_EXTS.has(ext)) return "Audio";
+	if (VIDEO_EXTS.has(ext)) return "Video";
+	return ext === PDF_EXT ? "PDF" : undefined;
+}
+
+/**
+ * The player or frame for an audio, video or PDF file at `src` (base already
+ * applied), shared by `![[x.mp3]]` and `![](x.mp3)`.
+ *
+ * @param subpath - The embed's `#…` without the `#`. Audio and video keep it (a
+ *   media fragment such as `t=10`); a PDF reads its `page` and `height` knobs.
+ * @param caption - The wikilink alias or markdown alt, for a video's size.
+ * @param target - The file as written, for the PDF bar's name.
+ */
+function playableMediaHtml(
+	kind: Exclude<MediaKind, "Image">,
+	src: string,
+	subpath: string,
+	caption: string,
+	target: string,
+): string {
+	const fragment = subpath ? `#${subpath}` : "";
+	if (kind === "Audio") {
+		return `<audio controls src="${escapeHtmlAttribute(`${src}${fragment}`)}"></audio>`;
+	}
+	if (kind === "Video") {
+		const size = splitImageSize(caption);
+		return `<video controls src="${escapeHtmlAttribute(`${src}${fragment}`)}"${size ? sizeAttributes(size) : ""}></video>`;
+	}
+	// Obsidian puts the two PDF knobs in the subpath: `#page=3` opens the viewer
+	// at a page, `#height=400` sizes the frame. Only the page belongs in the URL
+	// — the height is a property of this embed and never travels to the file.
+	const { page, height } = parsePdfSubpath(subpath);
+	return pdfEmbedHtml({
+		src: `${src}${page ? `#page=${page}` : ""}`,
+		target,
+		page,
+		height: Number(height ?? 600),
+	});
+}
+
 /**
  * The element a media wikilink embed (`![[x.png]]`, `.mp3`, `.mp4`, `.pdf`)
  * renders as, or `undefined` when the target is not media.
@@ -213,21 +270,12 @@ export function renderMediaEmbed(
 	report: (message: string) => void,
 ): PhrasingContent | undefined {
 	const target = parsed.target;
-	const ext = extensionOf(target);
-	const kind = IMAGE_EXTS.has(ext)
-		? "Image"
-		: AUDIO_EXTS.has(ext)
-			? "Audio"
-			: VIDEO_EXTS.has(ext)
-				? "Video"
-				: ext === PDF_EXT
-					? "PDF"
-					: undefined;
+	const kind = mediaKindOf(target);
 	if (!kind) return undefined;
 
 	const resolved = resolveMediaSrc(target, ctx);
 	if (!resolved.found) report(`${kind} "${target}" not found on disk for ${parsed.raw}.`);
-	const fragment = parsed.subpath ? `#${parsed.subpath.value}` : "";
+	const subpath = parsed.subpath?.value ?? "";
 	const caption = parsed.alias ?? "";
 
 	if (kind === "Image") {
@@ -236,38 +284,78 @@ export function renderMediaEmbed(
 		const alt = size ? size.alt || target : caption.trim() || target;
 		return {
 			type: "html",
-			value: `<img src="${escapeHtmlAttribute(`${resolved.url}${fragment}`)}" alt="${escapeHtmlAttribute(alt)}"${size ? sizeAttributes(size) : ""} loading="lazy" />`,
+			value: `<img src="${escapeHtmlAttribute(`${resolved.url}${subpath ? `#${subpath}` : ""}`)}" alt="${escapeHtmlAttribute(alt)}"${size ? sizeAttributes(size) : ""} loading="lazy" />`,
 		};
 	}
-	const src = withSiteBase(resolved.url, ctx.siteBase);
-	if (kind === "Audio") {
-		return {
-			type: "html",
-			value: `<audio controls src="${escapeHtmlAttribute(`${src}${fragment}`)}"></audio>`,
-		};
-	}
-	if (kind === "Video") {
-		const size = splitImageSize(caption);
-		return {
-			type: "html",
-			value: `<video controls src="${escapeHtmlAttribute(`${src}${fragment}`)}"${size ? sizeAttributes(size) : ""}></video>`,
-		};
-	}
-	// Obsidian puts the two PDF knobs in the subpath: `#page=3` opens the viewer
-	// at a page, `#height=400` sizes the frame. Only the page belongs in the URL
-	// — the height is a property of this embed and never travels to the file.
-	const subpathValue = parsed.subpath?.value ?? "";
-	const page = subpathValue.match(/^page=(\d+)$/i)?.[1];
-	const height = subpathValue.match(/^height=(\d+)$/i)?.[1] ?? "600";
 	return {
 		type: "html",
-		value: pdfEmbedHtml({
-			src: `${src}${page ? `#page=${page}` : ""}`,
+		value: playableMediaHtml(
+			kind,
+			withSiteBase(resolved.url, ctx.siteBase),
+			subpath,
+			caption,
 			target,
-			page,
-			height: Number(height),
-		}),
+		),
 	};
+}
+
+/**
+ * What a markdown image `![caption](url)` becomes when its url is not an
+ * image: a player or frame for audio, video and PDFs, a frame for a YouTube
+ * video or a tweet, or — with `enableMediaEmbeds` off, as a wikilink embed
+ * degrades — a link to the file. `undefined` leaves the image to the image
+ * pass.
+ */
+function markdownMediaNode(
+	url: string,
+	caption: string,
+	ctx: MediaContext,
+	reportMissing: (raw: string, message: string) => void,
+): PhrasingContent | undefined {
+	const hashAt = url.indexOf("#");
+	const file = hashAt === -1 ? url : url.slice(0, hashAt);
+	const subpath = hashAt === -1 ? "" : url.slice(hashAt + 1);
+	const decoded = decodePath(file.split("?")[0] ?? file);
+	const kind = mediaKindOf(decoded);
+	const playable = kind === "Image" ? undefined : kind;
+	const size = splitImageSize(caption);
+	const label = (size ? size.alt : caption).trim();
+	const web = kind
+		? undefined
+		: webEmbedHtml(url, { title: label, width: size?.width, height: size?.height });
+	if (!web && !playable) return undefined;
+
+	let src: string | null;
+	if (web) {
+		src = sanitizeUrl(url);
+	} else if (isPluginOwnedImageUrl(file)) {
+		const resolved = resolveMediaSrc(decoded, ctx);
+		if (!resolved.found) {
+			reportMissing(
+				`![${caption}](${url})`,
+				`${kind} "${url}" not found next to the note or in the vault.`,
+			);
+		}
+		src = withSiteBase(resolved.url, ctx.siteBase);
+	} else {
+		// Root-absolute (a `public/` file) or an external URL.
+		src = sanitizeUrl(withSiteBase(file, ctx.siteBase));
+	}
+	const fallbackText = label || (web ? url : altFromImageUrl(file));
+	if (!src) return { type: "text", value: fallbackText };
+	if (!ctx.embedMedia) {
+		// The link opens the file; a PDF keeps its page, not the frame height.
+		const page = playable === "PDF" ? parsePdfSubpath(subpath).page : undefined;
+		const fragment =
+			playable === "PDF" ? (page ? `#page=${page}` : "") : subpath ? `#${subpath}` : "";
+		return {
+			type: "link",
+			url: web ? src : `${src}${fragment}`,
+			children: [{ type: "text", value: fallbackText }],
+		};
+	}
+	const value = web ?? (playable && playableMediaHtml(playable, src, subpath, caption, decoded));
+	return value ? { type: "html", value } : undefined;
 }
 
 /**
@@ -391,9 +479,15 @@ export function processMarkdownImages(
 	const droppedImports = new Set<MdxjsEsm>();
 
 	visit(tree, (node, index, parent) => {
+		const siblings = (parent as (Parent & { children: PhrasingContent[] }) | undefined)?.children;
 		if (node.type === "image") {
 			const image = node as Image;
 			if (/\.(md|mdx)([#?]|$)/i.test(image.url)) return;
+			const media = markdownMediaNode(image.url, image.alt ?? "", ctx, reportMissing);
+			if (media && siblings && typeof index === "number") {
+				siblings.splice(index, 1, media);
+				return;
+			}
 			const size = splitImageSize(image.alt ?? "");
 			if (isPluginOwnedImageUrl(image.url)) {
 				const located = locateImage(image.url, ctx);
@@ -407,7 +501,7 @@ export function processMarkdownImages(
 					image.url = located.resolved.url;
 				}
 			}
-			if (!size || !parent || typeof index !== "number") return;
+			if (!size || !siblings || typeof index !== "number") return;
 			// A bare relative path carries no scheme to vet; anything else is
 			// checked like every other URL this package emits.
 			const src = isPluginOwnedImageUrl(image.url) ? image.url : sanitizeUrl(image.url);
@@ -418,7 +512,7 @@ export function processMarkdownImages(
 						value: `<img src="${escapeHtmlAttribute(src)}" alt="${escapeHtmlAttribute(alt)}"${sizeAttributes(size)} loading="lazy" />`,
 					}
 				: { type: "text", value: alt };
-			(parent as Parent & { children: PhrasingContent[] }).children.splice(index, 1, replacement);
+			siblings.splice(index, 1, replacement);
 			return;
 		}
 
@@ -435,6 +529,18 @@ export function processMarkdownImages(
 		const srcExpression = srcAttribute?.value as { value?: unknown } | undefined;
 		const bound =
 			typeof srcExpression?.value === "string" ? imports.get(srcExpression.value) : undefined;
+
+		// Rspress made an import of the file, which for audio, video or a PDF
+		// bundles it as an image (a small PDF inlined as a `data:` URL). The
+		// player replaces the element, and the import goes with it.
+		const writtenUrl =
+			bound?.url ?? (typeof srcAttribute?.value === "string" ? srcAttribute.value : undefined);
+		const media = writtenUrl ? markdownMediaNode(writtenUrl, alt, ctx, reportMissing) : undefined;
+		if (media && siblings && typeof index === "number") {
+			if (bound) droppedImports.add(bound.node);
+			siblings.splice(index, 1, media);
+			return;
+		}
 
 		if (bound && srcAttribute) {
 			const located = locateImage(bound.url, ctx);

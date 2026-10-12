@@ -465,6 +465,11 @@ export interface ContentPage {
  */
 export interface ContentIndex {
 	rootDir: string;
+	/**
+	 * The prefix this tree's routes and attachment URLs start with
+	 * (`vaultRoutePrefix` for the vault, `""` for the docs root).
+	 */
+	routePrefix?: string;
 	pages: ContentPage[];
 	assets: ContentAsset[];
 	byAbsolutePath: Map<string, ContentPage>;

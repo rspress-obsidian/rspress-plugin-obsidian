@@ -26,6 +26,33 @@
 	margin: 1rem 0;
 }
 
+/* `![](https://youtu.be/…)` and `![](https://x.com/…/status/…)` frames. A size
+ * in the image's alt arrives as width/height attributes and wins; otherwise a
+ * video fills the column at 16:9 and a post is a card of X's own width. The
+ * frame cannot learn the post's height without X's script, so the default fits
+ * a post with an image (about 660px) and a longer one scrolls. */
+.obsidian-web-embed {
+	display: block;
+	max-width: 100%;
+	margin: 1rem 0;
+	border: 0;
+	border-radius: 8px;
+}
+
+.obsidian-web-embed-youtube:not([width]) {
+	width: 100%;
+	aspect-ratio: 16 / 9;
+}
+
+.obsidian-web-embed-tweet:not([width]) {
+	width: 100%;
+	max-width: 550px;
+}
+
+.obsidian-web-embed-tweet:not([height]) {
+	height: 700px;
+}
+
 .obsidian-pdf {
 	margin: 1.25rem 0;
 	border: 1px solid var(--rp-c-divider, #e2e8f0);
