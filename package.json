@@ -195,7 +195,7 @@
 		"mdast-util-from-markdown": "^2.1.0",
 		"mdast-util-mdx-jsx": "^3.2.0",
 		"mdast-util-to-markdown": "^2.2.0",
-		"mermaid": "^11.17.2",
+		"mermaid": "^12.2.0",
 		"publint": "^0.3.25",
 		"react-force-graph-2d": "^1.29.2",
 		"react-router-dom": "^7.18.4",
