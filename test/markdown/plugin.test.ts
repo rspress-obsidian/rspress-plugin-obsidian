@@ -1576,16 +1576,16 @@ describe("vault route prefix", () => {
 
 describe("tag linking", () => {
 	test("rewrites tags into markdown links", async () => {
-		const processor = makeProcessor(fixtureRoot, {
+		const html = await renderHtml(fixtureRoot, "See #tag and #other_tag.", {
 			enableTagLinking: true,
 		});
 
-		const file = await processor.process({
-			value: "See #tag and #other_tag.",
-			path: path.resolve(fixtureRoot, "index.md"),
-		});
-
-		expect(String(file)).toBe("See [#tag](/tags/tag) and [#other\\_tag](/tags/other_tag).\n");
+		// Asserted on the rendered page, not the markdown `remark-stringify` writes back:
+		// whether that escapes the `_` in `#other_tag` is the serializer's choice, and
+		// both spellings render the same link.
+		expect(html).toBe(
+			'<p>See <a href="/tags/tag">#tag</a> and <a href="/tags/other_tag">#other_tag</a>.</p>',
+		);
 	});
 });
 
