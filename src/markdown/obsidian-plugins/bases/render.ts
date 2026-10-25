@@ -691,18 +691,41 @@ function coordinatesOf(value: unknown): [number, number] | undefined {
 const MAP_INSTALL_HINT =
 	"Interactive map views need the optional peer dependency `maplibre-gl`: install it next to rspress-plugin-obsidian (`npm install maplibre-gl`) and rebuild the site.";
 
-/**
- * Whether `maplibre-gl` resolves from `fromDir`. The default is this package's
- * own directory, where the bundler starts resolving the specifier the shipped
- * map component imports, so the answer matches what the build will do.
- */
-export function isMapLibraryInstalled(fromDir: string = moduleDir): boolean {
+/** The stylesheet the map component imports. */
+const MAP_LIBRARY_STYLESHEET = "maplibre-gl/dist/maplibre-gl.css";
+/** MapLibre 6's worker, a module of its own; MapLibre 5 inlines its worker in its main bundle. */
+const MAP_LIBRARY_WORKER = "maplibre-gl/dist/maplibre-gl-worker.mjs";
+
+function resolvesFrom(fromDir: string, specifier: string): boolean {
 	try {
-		createRequire(path.join(fromDir, "noop.js")).resolve("maplibre-gl");
+		createRequire(path.join(fromDir, "noop.js")).resolve(specifier);
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Whether `maplibre-gl` resolves from `fromDir`. The default is this package's
+ * own directory, where the bundler starts resolving the specifiers the shipped
+ * map component imports, so the answer matches what the build will do.
+ *
+ * It resolves the stylesheet the component imports, not the package's main
+ * entry: MapLibre 6 exports that entry under the `import` condition only, so
+ * `require.resolve("maplibre-gl")` fails though the bundler finds it, while
+ * `dist/*` resolves under any condition, in 5 (no `exports`) and 6 alike.
+ */
+export function isMapLibraryInstalled(fromDir: string = moduleDir): boolean {
+	return resolvesFrom(fromDir, MAP_LIBRARY_STYLESHEET);
+}
+
+/**
+ * Whether the `maplibre-gl` resolved from `fromDir` runs its worker from a
+ * module file of its own (MapLibre 6), which the site's bundler has to emit and
+ * the map component has to point MapLibre at.
+ */
+export function hasMapLibraryWorkerModule(fromDir: string = moduleDir): boolean {
+	return resolvesFrom(fromDir, MAP_LIBRARY_WORKER);
 }
 
 /**
@@ -721,11 +744,24 @@ export const mapLibrary: { installed?: boolean } = {};
  * put MapLibre's ~70 kB of rules in front of every page's first paint; this
  * group outranks it, so the rules ship as an async stylesheet the browser
  * fetches, and applies, before the map chunk runs.
+ *
+ * Either way it defines `__RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__`, which tells the
+ * component whether to have the bundler emit MapLibre 6's worker module: a
+ * build-time constant, so the branch referring to that file is dropped, never
+ * resolved, when MapLibre 5 (or no MapLibre) is installed.
  */
 export function mapLibraryBuilderConfig(): BuilderConfig {
 	mapLibrary.installed ??= isMapLibraryInstalled();
-	if (!mapLibrary.installed) return { resolve: { alias: { "maplibre-gl": false } } };
+	const define = {
+		__RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__: JSON.stringify(
+			mapLibrary.installed && hasMapLibraryWorkerModule(),
+		),
+	};
+	if (!mapLibrary.installed) {
+		return { resolve: { alias: { "maplibre-gl": false } }, source: { define } };
+	}
 	return {
+		source: { define },
 		splitChunks: {
 			cacheGroups: {
 				"obsidian-maplibre-css": {
