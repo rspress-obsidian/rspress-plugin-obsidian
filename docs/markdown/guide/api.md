@@ -1,93 +1,168 @@
 ---
-description: Complete API reference for rspress-plugin-obsidian. Covers the plugin, content and backlink indexes, daily-note and Dataview helpers, wikilink parsing and resolution, tag pages, and all public TypeScript types.
+title: API Reference
+description: Every markdown() option with its type and default, plus the helpers and types rspress-plugin-obsidian exports for building your own pipeline.
 ---
 
 # API Reference
 
-This document covers the public API exported from `rspress-plugin-obsidian`.
+This page lists every option `markdown()` accepts, then the helpers and types
+the package exports. To learn how a feature works, read its guide. Come here
+when you need an option's exact name, type or default.
 
-> **Quick start:** If you use wikilinks, Canvas, and graph view together, use the umbrella factory `pluginObsidian((markdown, canvas, graphview) => [ markdown({...}), canvas({...}), graphview({...}) ])` from `rspress-plugin-obsidian`.
+## Options
 
-## Plugin Function
-
-Creates an Rspress plugin that rewrites wikilinks during the remark pipeline.
+`markdown()` takes one optional object of type `RspressPluginMarkdownOptions`,
+and every field in it is optional. Some syntax is always on:
+wikilinks, embeds, heading and block links, `==highlights==`, `%%comments%%`,
+footnotes and Markdown links to notes. Everything else stays off until you
+turn it on.
 
 ```ts
-import { markdown } from "rspress-plugin-obsidian";
 import { defineConfig } from "@rspress/core";
+import { markdown } from "rspress-plugin-obsidian";
 
 export default defineConfig({
   plugins: [
     markdown({
-      onBrokenLink: "error",
+      vaultRoot: "./vault",
       enableCallouts: true,
-      enableTagLinking: true,
-      enableTagPages: true,
+      enableTransclusion: true,
+      enableMediaEmbeds: true,
       enableDefaultStyles: true,
     }),
   ],
 });
 ```
 
-#### Options
+To combine Markdown with Canvas and Graph View, register all three through
+`pluginObsidian((markdown, canvas, graphview) => [...])`. The options below are
+the same either way.
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `vaultRoot` | `string` | unset | Absolute path to an Obsidian vault published alongside `docs/`, with wikilinks resolving against the vault |
-| `vaultRoutePrefix` | `string` | `"/vault"` | Route prefix vault pages publish under |
-| `onBrokenLink` | `DiagnosticMode` | `"error"` | How to handle missing link targets |
-| `onAmbiguousLink` | `DiagnosticMode` | `"warn"` | How to report a name several files share (the link resolves like Obsidian either way) |
-| `enableFuzzyMatching` | `boolean` | `false` | Enable shortest-suffix path fallback |
-| `enableCaseInsensitiveLookup` | `boolean` | `true` | Case-insensitive path resolution (matches Obsidian; set `false` for strict matching) |
-| `enableMarkdownLinks` | `boolean` | `true` | Resolve `[label](Page.md)` markdown links and `![alt](note.md)` embeds against the vault |
-| `onDataviewError` | `DiagnosticMode` | `"error"` | How to report invalid or unsupported Dataview blocks |
-| `onUnsupportedBlock` | `DiagnosticMode` | `"warn"` | How to report a fence that belongs to a plugin this site has not enabled (`tasks`, `base`, `excalidraw`, and Dataview while `enableDataview` is off) — the block stays in the page as code, and the message names the option that turns it on |
-| `onPluginError` | `DiagnosticMode` | `"error"` | How to report a Tasks, Kanban, Excalidraw, Bases or Templater block that will not render (a query that does not parse, a malformed base, a failing template command). The problem is shown in place either way |
-| `enableDataview` | `boolean` | `false` | Evaluate static Dataview DQL blocks and inline expressions at build time |
-| `enableDailyNotes` | `boolean` | `false` | Enable static Daily Notes date expansion and navigation |
-| `dailyNotes` | `DailyNotesOptions` | `{ folder: "", dateFormat: "YYYY-MM-DD", navigation: true, template: "", calendar: "" }` | Configure the Daily Notes folder, filename format, navigation, template note and calendar page |
-| `enableTagLinking` | `boolean` | `false` | Convert `#tag` to `/tags/tag` links |
-| `enableCallouts` | `boolean` | `false` | Transform `> [!note]` callouts |
-| `enableBacklinks` | `boolean` | `false` | Append backlinks panel to each page |
-| `enableUnlinkedMentions` | `boolean` | `false` | Also list pages that name the current page without linking to it. Implies `enableBacklinks` and keeps a capped copy of each page body while indexing |
-| `enableTransclusion` | `boolean` | `false` | Inline `![[Page]]` content |
-| `enableMediaEmbeds` | `boolean` | `false` | Render `![[img.png]]` as `<img>` |
-| `enableTagPages` | `boolean` | `false` | Generate `/tags/{name}` index pages |
-| `enableMath` | `boolean` | `false` | Render `$inline$` / `$$display$$` math with KaTeX (pages with math link KaTeX's stylesheet) |
-| `mathEngine` | `"katex" \| "mathjax"` | `"katex"` | Which engine renders that math. `"mathjax"` is Obsidian's own engine and needs the optional `mathjax-full` package; it emits its own generated stylesheet inline |
-| `enableMermaid` | `boolean` | `false` | Render ` ```mermaid ` fences as diagrams in the browser. Needs the optional `mermaid` package; without it diagrams stay as source with an install hint |
-| `mermaidSecurityLevel` | `"strict" \| "loose" \| "antiscript" \| "sandbox"` | `"strict"` | Mermaid `securityLevel` for note diagrams. `strict` sanitizes the SVG and strips unsafe link URLs; looser levels allow what a strict build refuses |
-| `enableDefaultStyles` | `boolean` | `false` | Inject bundled CSS stylesheet |
-| `strictLineBreaks` | `boolean` | unset | Obsidian's "Strict line breaks". Unset: vault pages render a single newline as `<br>` (Obsidian's default) and docs-root pages keep CommonMark; `false`: every page renders `<br>`; `true`: no page does |
-| `enableTasks` | `boolean` | `false` | Run ` ```tasks ` queries over every published task. See [Tasks](./tasks.md) |
-| `tasks` | `TasksOptions` | `{}` | `now`, `globalFilter`, `removeGlobalFilter`, `globalQuery`, `statuses`, `presets`, `useFilenameAsScheduledDate`, `filenameAsScheduledDateFormat`, `filenameAsDateFolders`, `readVaultSettings`; each overrides the vault's Tasks setting |
-| `enableKanban` | `boolean` | `false` | Publish Kanban plugin boards as read-only boards. See [Kanban](./kanban.md) |
-| `kanban` | `KanbanOptions` | `{}` | `now`, `showArchive`, `readVaultSettings` and Kanban's own settings in camelCase (`dateFormat`, `moveTags`, `metadataKeys`, `tagColors`, `laneWidth`, …) |
-| `enableExcalidraw` | `boolean` | `false` | Draw Excalidraw drawings, embeds and plain `.excalidraw` files as static SVG. See [Excalidraw](./excalidraw.md) |
-| `excalidraw` | `ExcalidrawOptions` | `{}` | `theme`, `preferExportedImage`, `padding`, `background`, `embedWidth`, `fonts`, `cjkFonts`, `readVaultSettings` |
-| `enableBases` | `boolean` | `false` | Render `.base` files as pages, `![[x.base]]` embeds and ` ```base ` blocks. See [Bases](./bases.md) |
-| `bases` | `BasesOptions` | `{ routePrefix: "/bases" }` | `routePrefix`, `now`, `dateFormat`, `dateTimeFormat`, `mapTiles` (`BasesMapTiles`: background of map views), `readVaultSettings` |
-| `enableTemplater` | `boolean` | `false` | Run Templater templates on empty daily, folder and regex-matched notes and render `<%+ %>` commands; keep the templates folder private. See [Templater](./templater.md) |
-| `templater` | `TemplaterOptions` | `{}` | `templatesFolder`, `triggerOnFileCreation`, `folderTemplates`, `fileTemplates`, `ignoreFolders`, `userScriptsFolder`, `renderCommands`, `now`, `readVaultSettings` |
+### Vault and routes
 
-## Remark Plugin
+| Option | Type | Default | What it does |
+|--------|------|---------|--------------|
+| `vaultRoot` | `string` | unset | Path to an Obsidian vault, published alongside `docs/`. A relative path resolves from the working directory. When unset, the plugin publishes only the docs directory. See [Publishing a vault](./advanced.md#publishing-a-vault). |
+| `vaultRoutePrefix` | `string` | `"/vault"` | Route prefix for vault pages and attachments. `Notes/Setup.md` publishes at `/vault/Notes/Setup`. If you use Canvas, its `fileRoutePrefix` must match this value. |
+
+### Link resolution
+
+| Option | Type | Default | What it does |
+|--------|------|---------|--------------|
+| `enableMarkdownLinks` | `boolean` | `true` | Resolves `[label](Note.md)` links and `![alt](Note.md)` embeds the same way it resolves wikilinks. When `false`, Rspress handles Markdown links itself. |
+| `enableCaseInsensitiveLookup` | `boolean` | `true` | Falls back to a case-insensitive path or file-name match, as Obsidian does. Set it to `false` for strict matching. |
+| `enableFuzzyMatching` | `boolean` | `false` | Adds a last resort: any page whose path ends with the target, ignoring case. |
+
+The order the plugin tries these in is described in
+[How a link resolves](./link-resolution.md#how-a-link-resolves).
+
+### Diagnostics
+
+Each of these options takes a `DiagnosticMode`, which is `"error" | "warn"`.
+`"error"` fails the build. `"warn"` prints a warning and continues.
+
+| Option | Default | What it reports |
+|--------|---------|-----------------|
+| `onBrokenLink` | `"error"` | A wikilink, Markdown link or image whose file, heading or block does not exist. With `"warn"`, the link renders as unresolved text instead of a link. |
+| `onAmbiguousLink` | `"warn"` | A name that several files share. Either way the link resolves the way Obsidian picks, and the message lists the alternatives. |
+| `onDataviewError` | `"error"` | A Dataview query or inline expression that does not parse or evaluate. |
+| `onUnsupportedBlock` | `"warn"` | A `tasks`, `base`, `excalidraw`, `dataview` or `dataviewjs` fence whose feature is off. The block stays on the page as code, and the message names the option that turns the feature on. |
+| `onPluginError` | `"error"` | A Tasks, Kanban, Excalidraw, Bases or Templater block that cannot render. The error is shown in place either way. |
+
+For what each message looks like and how to work through a first build, see
+[Diagnostics](./advanced.md#diagnostics).
+
+### Features
+
+| Option | Type | Default | What it does |
+|--------|------|---------|--------------|
+| `enableCallouts` | `boolean` | `false` | Turns `> [!note]` blockquotes into callouts, foldable with `+` or `-`. See [Callouts](./callouts.md). |
+| `enableTransclusion` | `boolean` | `false` | `![[Note]]`, `![[Note#Heading]]` and `![[Note#^block]]` insert the target's content. See [Transclusion](./transclusion.md). |
+| `enableMediaEmbeds` | `boolean` | `false` | `![[file]]` renders images, audio, video and PDFs as native elements. Markdown-image embeds of audio, video, PDFs, YouTube and X do the same. See [Media Embeds](./media-embeds.md). |
+| `enableBacklinks` | `boolean` | `false` | Adds a panel to each page listing the pages that link to it. See [Backlinks](./backlinks.md). |
+| `enableUnlinkedMentions` | `boolean` | `false` | Also lists pages that name this page without linking to it. Setting it turns on `enableBacklinks`. |
+| `enableTagLinking` | `boolean` | `false` | Turns inline `#tag` into a link to `/tags/<tag>`. See [Tags & Daily Notes](./tags-and-daily-notes.md). |
+| `enableTagPages` | `boolean` | `false` | Generates a `/tags/<tag>` page for every tag in the docs and the vault. |
+| `enableDailyNotes` | `boolean` | `false` | Treats date-named notes as daily notes: previous/next navigation, plus optional template and calendar. |
+| `dailyNotes` | `DailyNotesOptions` | see [below](#dailynotes) | Folder, file-name format, navigation, template and calendar for daily notes. |
+| `enableDataview` | `boolean` | `false` | Evaluates `dataview` and `dataviewjs` blocks and inline queries at build time. See [Dataview](./dataview.md). |
+| `enableMath` | `boolean` | `false` | Renders `$inline$` and `$$display$$` math. See [Math](./advanced.md#math). |
+| `mathEngine` | `"katex" \| "mathjax"` | `"katex"` | Picks the math engine. `"mathjax"` needs the optional `mathjax-full` package. |
+| `enableMermaid` | `boolean` | `false` | Draws ` ```mermaid ` fences as diagrams in the browser. Needs the optional `mermaid` package. See [Mermaid](./advanced.md#mermaid-diagrams). |
+| `mermaidSecurityLevel` | `"strict" \| "loose" \| "antiscript" \| "sandbox"` | `"strict"` | Mermaid's `securityLevel` for diagrams in notes. `"strict"` sanitizes the SVG and drops unsafe link URLs. |
+
+#### `dailyNotes`
+
+| Key | Type | Default | What it does |
+|-----|------|---------|--------------|
+| `folder` | `string` | `""` (the root) | Folder of daily notes, relative to the vault or docs root. |
+| `dateFormat` | `string` | `"YYYY-MM-DD"` | Moment.js format that daily-note file names follow. |
+| `navigation` | `boolean` | `true` | Adds previous/next links to each daily note. |
+| `template` | `string` | unset | Note whose content fills a daily note that is still empty. |
+| `calendar` | `string` | unset | Route of a generated page that lists every daily note by month, such as `"/daily"`. |
+
+### Obsidian plugins
+
+Each plugin has an `enable*` switch and an options object. The guide for each
+plugin documents every key of its object, including the vault setting the key
+overrides.
+
+| Option | Type | Default | What it does |
+|--------|------|---------|--------------|
+| `enableTasks` | `boolean` | `false` | Runs ` ```tasks ` queries over every task on the site. |
+| `tasks` | `TasksOptions` | `{}` | See [Tasks options](./tasks.md#options). |
+| `enableKanban` | `boolean` | `false` | Publishes Kanban boards as read-only boards. |
+| `kanban` | `KanbanOptions` | `{}` | See [Kanban options](./kanban.md#options). |
+| `enableExcalidraw` | `boolean` | `false` | Renders Excalidraw drawings, as pages and as embeds, as static SVG. |
+| `excalidraw` | `ExcalidrawOptions` | `{}` | See [Excalidraw options](./excalidraw.md#options). |
+| `enableBases` | `boolean` | `false` | Renders `.base` files as pages, along with `![[x.base]]` embeds and ` ```base ` blocks. |
+| `bases` | `BasesOptions` | `{}` (pages under `/bases`) | See [Bases options](./bases.md#options). |
+| `enableTemplater` | `boolean` | `false` | Runs Templater templates and `<% %>` commands at build time. |
+| `templater` | `TemplaterOptions` | `{}` | See [Templater options](./templater.md#options). |
+
+When one of these blocks fails, `onPluginError` decides what happens. When a
+block's plugin is off, `onUnsupportedBlock` decides.
+
+### Styling and rendering
+
+| Option | Type | Default | What it does |
+|--------|------|---------|--------------|
+| `enableDefaultStyles` | `boolean` | `false` | Adds the bundled stylesheet through Rspress `globalStyles`. Callouts, backlinks, tag pages, embeds and the plugin layouts emit markup only, so they look unstyled without it. See [Styles](./advanced.md#styles). |
+| `strictLineBreaks` | `boolean` | unset | Obsidian's "Strict line breaks". When unset, vault pages render a single newline as `<br>` (Obsidian's default) and docs pages keep CommonMark. `false` gives every page `<br>`, and `true` gives none. |
+
+## Remark plugin
 
 ### `remarkWikilink(options: RemarkWikiLinkPluginOptions)`
 
-The remark pass itself, for composing your own unified pipeline instead of using `markdown()`. Register it with `.use(remarkWikilink, options)`, after `remark-gfm` (Rspress runs GFM first; footnotes and tables depend on it): the plugin adds its Obsidian syntax extensions (`[[…]]`, `![[…]]`, `==…==` and, with `enableMath`, `$…$`) to the processor's parser when it is attached, the way `remark-gfm` does. It expects the plugin's runtime context: `getDocsRoot(filePath?)`, an optional `getContentIndex(filePath)`, an optional `getSiteBase()` (the site `base`, for media URLs), and `options` as an already-normalized `NormalizedPluginOptions` object ([shape documented below](#normalizedpluginoptions)). Sites that just want the feature should use `markdown()`.
+`remarkWikilink` is the remark pass that `markdown()` runs. Use it only to
+compose your own unified pipeline; for an Rspress site, use `markdown()`.
+Register it with `.use(remarkWikilink, options)` after `remark-gfm`, because
+footnotes and tables depend on GFM. When attached, it adds the Obsidian syntax
+(`[[…]]`, `![[…]]`, `==…==`, and `$…$` when `enableMath` is on) to the parser.
 
-## Content Index
+It takes the plugin's runtime context:
+
+- `getDocsRoot(filePath?)`: the content root that a file belongs to.
+- `getContentIndex(filePath)` (optional): the index for that file.
+- `getPublishedIndexes()` (optional): every published index, read by Tasks and Bases.
+- `getSiteBase()` (optional): the site `base`, used to build media URLs.
+- `getKatexStylesheetHref()` (optional): where KaTeX's stylesheet is served. When unset, pages link no KaTeX stylesheet.
+- `options`: a complete `NormalizedPluginOptions`. This is every option above
+  with its default filled in, `vaultRoot` made absolute, and `dailyNotes` fully
+  populated.
+
+## Content index
 
 ### `buildContentIndex(rootDir: string, options?: ContentIndexOptions): Promise<ContentIndex>`
 
-Scans all `.md` and `.mdx` files under `rootDir` and builds a lookup index. Runs on every call.
+Scans every `.md` and `.mdx` file under `rootDir` and builds the lookup index.
+It rescans on every call. The scan skips hidden files and folders,
+`node_modules`, `_`-prefixed paths, symlinks and `publish: false` notes.
 
-`ContentIndexOptions` (exported) has two optional fields:
-
-| Field | Type | Default | Description |
+| `ContentIndexOptions` field | Type | Default | What it does |
 |-------|------|---------|-------------|
-| `routePrefix` | `string` | `""` | Prefix prepended to emitted page and asset route paths |
-| `unlinkedMentions` | `boolean` | `false` | Keep a stripped copy of each page body so `getMentions` can find pages that name another page without linking to it (the only option that retains page text) |
+| `routePrefix` | `string` | `""` | Prefix added to every page and attachment route. |
+| `unlinkedMentions` | `boolean` | `false` | Keeps a stripped copy of each page body so `getMentions` can find pages that name another page. |
 
 ```ts
 import { buildContentIndex } from "rspress-plugin-obsidian";
@@ -99,120 +174,23 @@ console.log(index.byTag.get("tutorial"));
 
 ### `getCachedContentIndex(rootDir: string, options?: ContentIndexOptions): Promise<ContentIndex>`
 
-Returns a cached index when file mtimes and sizes are unchanged since the last call. The options are part of the cache key, so calls with different options get separate entries. Preferred over `buildContentIndex` in hot paths.
+Works like `buildContentIndex`, but returns the cached index while no file's
+modification time or size has changed. The options are part of the cache key.
+Prefer it in code that runs often.
 
-```ts
-import { getCachedContentIndex } from "rspress-plugin-obsidian";
+### `extractPageLinks(markdown: string): PageLinks`
 
-const index = await getCachedContentIndex("/path/to/docs");
-```
+Returns the links and tags that one note contains. `outlinks` holds every link
+as a `ParsedWikiLink`: wikilinks and embeds, relative Markdown links and
+images, reference definitions, `obsidian://open` URIs, and wikilinks in
+frontmatter properties. `tags` holds frontmatter and inline tags without the
+`#`. Backlinks and attachment publishing resolve the same list.
 
-## Daily Notes
-
-The daily-note helpers are also available for integrations that need to expand
-date templates or render navigation outside the plugin pipeline. Their
-configuration uses this structural shape:
-
-```ts
-{
-  folder: string;
-  dateFormat: string;
-  navigation: boolean;
-  template: string;
-  calendar: string;
-}
-```
-
-The helper module calls this shape `DailyNoteConfig`; that name is not
-re-exported from the package. For plugin configuration, use the exported
-`DailyNotesOptions` type instead.
-
-### `normalizeDailyNoteConfig(config?: Partial<DailyNoteConfig>): DailyNoteConfig`
-
-Normalizes an optional daily-note configuration. The defaults are an empty
-folder, `YYYY-MM-DD` filenames, and navigation enabled.
-
-```ts
-import { normalizeDailyNoteConfig } from "rspress-plugin-obsidian";
-
-const config = normalizeDailyNoteConfig({
-  folder: "Daily",
-  dateFormat: "YYYY-MM-DD",
-  navigation: true,
-});
-```
-
-### `parseDailyNoteDate(relativePath: string, config: DailyNoteConfig): Date | undefined`
-
-Parses a date-formatted daily-note path to a local date. Returns `undefined`
-when the path is outside the configured folder, does not match the Moment
-format, or names a date that does not format back to the same name (such as
-`2026-02-30`).
-
-### `formatDailyNoteDate(date: Date, format: string): string`
-
-Formats a local date with Moment.js tokens (`YYYY`, `MM`, `Do`, `dddd`, `ww`,
-`W`, `gggg`, `HH`, `mm`, `A`, `[literal]`, …).
-
-### `expandDailyTemplateText(value: string, date: Date, format?: string, now?: Date): string`
-
-Expands `{{date}}`, `{{time}}` and `{{date|time±N unit:FORMAT}}` the way
-Obsidian's daily-notes core expands a template: dates render in `format`
-(default `YYYY-MM-DD`) at `now`'s time of day, `{{time}}` is `now` as `HH:mm`,
-and offsets use Moment units (`M` months, `m` minutes).
-
-> The template and calendar pages a `dailyNotes` config produces are built by the
-> plugin, not by you — `dailyNotes.template` and `dailyNotes.calendar` are covered
-> in [Advanced Usage](./advanced). Only the helpers above are exported.
-
-### `renderDailyNavigation(currentPage: ContentPage, pages: ContentPage[], config: DailyNoteConfig): string`
-
-Renders the previous/current/next daily-note navigation HTML. Returns an empty
-string when navigation is disabled or the current page is not a dated note.
-
-## Dataview
-
-These helpers evaluate Dataview queries with the Dataview plugin's semantics.
-DataviewJS blocks run through a restricted interpreter, not a JavaScript
-engine: it supports declarations, `if`/`for … of`, arrow functions, template
-literals and the `dv` API (`pages`, `current`, `page`, `table`, `list`,
-`taskList`, `paragraph`, `header`, `span`, `el`, `execute`, `func`, …). An
-identifier naming a host or runtime API (`process`, `require`, `fetch`, `eval`,
-`Function`, `globalThis`, …) is rejected and reported through
-`onDataviewError`; the same words inside strings are just text.
-
-### `extractDataviewMetadata(markdown: string, frontmatter: Record<string, unknown>, filePath: string): { fields: Record<string, unknown>; tasks: DataviewTask[]; lists: DataviewListItem[] }`
-
-Extracts normalized fields, tasks, and list items from a Markdown document:
-
-```ts
-{
-  fields: Record<string, unknown>;
-  tasks: DataviewTask[];
-  lists: DataviewListItem[];
-}
-```
-
-### `renderDataviewQuery(query: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig, settings?: DataviewSettings): { html?: string; error?: string }`
-
-Evaluates a `TABLE`, `LIST`, `TASK`, or `CALENDAR` query written on
-`currentPage` (which is `this`) and returns rendered HTML on success. Invalid
-queries — including text left over after a clause — return an `error`
-instead. `settings.now` fixes the clock `date(today)` reads; `settings.resolve`
-passes the link-resolution options.
-
-### `renderDataviewInline(expression: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig, settings?: DataviewSettings): { html?: string; error?: string }`
-
-Evaluates the expression of one inline query (the `expr` of `` `= expr` ``)
-with only `this` in scope, as Dataview does, and returns a rendered `<span>`,
-or an `error`.
-
-
-## Wikilink Parsing
+## Wikilinks
 
 ### `findWikilinkMatches(input: string): WikilinkMatch[]`
 
-Finds all wikilinks (including embed syntax) in a markdown string.
+Finds every wikilink and embed in a string.
 
 ```ts
 import { findWikilinkMatches } from "rspress-plugin-obsidian";
@@ -222,9 +200,11 @@ const matches = findWikilinkMatches("Check [[Page1]] and ![[Page2|Embed]].");
 // matches[1] → { fullMatch: "![[Page2|Embed]]", inner: "Page2|Embed", start: 20, end: 36 }
 ```
 
+`start` and `end` are string offsets, and `end` is exclusive.
+
 ### `parseWikiLink(inner: string, raw: string): ParsedWikiLink`
 
-Parses the inner content of a wikilink into its components.
+Splits a wikilink into its target, alias and subpath.
 
 ```ts
 import { parseWikiLink } from "rspress-plugin-obsidian";
@@ -243,11 +223,13 @@ const parsed = parseWikiLink(
 // }
 ```
 
-## Wikilink Resolution
-
 ### `resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext): ResolvedWikiLink`
 
-Resolves a parsed wikilink to its final href using the content index.
+Resolves a parsed wikilink against an index, following the same steps as the
+plugin. On a miss in `context.index`, it tries `context.fallbackIndexes`
+(by default, `index.linkedIndexes`). Case-insensitive and fuzzy lookups run only
+when you turn them on in `context.options`. The plugin turns case-insensitive
+lookup on by default, but this function does not.
 
 ```ts
 import {
@@ -262,82 +244,91 @@ const currentPage = index.byPathKey.get("guide/intro")!;
 
 const [match] = findWikilinkMatches("See [[getting-started]].");
 const parsed = parseWikiLink(match.inner, match.fullMatch);
-const resolved = resolveWikiLink(parsed, { currentPage, index });
+const resolved = resolveWikiLink(parsed, {
+  currentPage,
+  index,
+  options: { enableCaseInsensitiveLookup: true },
+});
 
 if (resolved.status === "ok") {
   console.log(resolved.href);  // "/guide/getting-started"
-  console.log(resolved.label); // "getting-started" — the target as typed
+  console.log(resolved.label); // "getting-started", the target as typed
 }
 ```
 
-## Backlinks
-
-### `buildBacklinksIndex(index: ContentIndex): Promise<Map<string, BacklinkRef[]>>`
-
-Builds the backlinks map from the content index. Backlinks are now built automatically during content indexing (via `buildContentIndex`), so you seldom need this function directly. Use `getCachedBacklinksIndex` instead.
+## Backlinks and mentions
 
 ### `getCachedBacklinksIndex(index: ContentIndex): Promise<Map<string, BacklinkRef[]>>`
 
-Returns the backlinks map for the given content index. When the index was built via `buildContentIndex` or `getCachedContentIndex`, backlinks are already populated — this is a simple property access with no I/O. A fallback cache handles indexes constructed manually.
+Returns the backlinks map, keyed by target route. Indexing builds backlinks, so
+for an index from `buildContentIndex` or `getCachedContentIndex` this call just
+reads a property. Indexes you build by hand go through a fallback cache.
 
 ```ts
-import { getCachedContentIndex, getCachedBacklinksIndex } from "rspress-plugin-obsidian";
+import { getCachedBacklinksIndex, getCachedContentIndex } from "rspress-plugin-obsidian";
 
 const index = await getCachedContentIndex("/path/to/docs");
 const backlinks = await getCachedBacklinksIndex(index);
 const refs = backlinks.get("/guide/getting-started") ?? [];
-// refs: [{ routePath: "/guide/intro", title: "Introduction" }]
+// [{ routePath: "/guide/intro", relativePath: "guide/intro.md", title: "Introduction" }]
 ```
+
+### `buildBacklinksIndex(index: ContentIndex): Promise<Map<string, BacklinkRef[]>>`
+
+Rebuilds the backlinks map from scratch. You rarely need it; use
+`getCachedBacklinksIndex`.
 
 ### `renderBacklinksHtml(refs: BacklinkRef[], mentions?: MentionRef[]): string`
 
-Renders the backlink references as a `<div class="obsidian-backlinks">` HTML string. When `mentions` is non-empty, a second `<div class="obsidian-backlinks obsidian-unlinked-mentions">` section follows it, listing pages that name the current page without linking to it, each with its context snippet. Returns an empty string when both lists are empty.
-
-## Mentions
-
-Helpers behind `enableUnlinkedMentions`: finding pages that *name* another page without linking to it (Obsidian's "unlinked mentions").
+Renders the backlinks panel as `<div class="obsidian-backlinks">`. When
+`mentions` is not empty, a second `obsidian-unlinked-mentions` panel follows,
+with a snippet for each mention. Returns `""` when both lists are empty.
 
 ### `getMentions(index: ContentIndex): Map<string, MentionRef[]>`
 
-Returns unlinked mentions for every page, keyed by target route path. Only answers when the index was built with `unlinkedMentions: true`; otherwise the map is empty. Pages that also link to the target are dropped — a real link already appears in the backlinks panel.
+Returns unlinked mentions for every page, keyed by target route. The index must
+be built with `unlinkedMentions: true`; otherwise the map is empty. A page that
+also links to the target appears only as a backlink, not as a mention.
 
 ```ts
 import { getCachedContentIndex, getMentions } from "rspress-plugin-obsidian";
 
 const index = await getCachedContentIndex("/path/to/docs", { unlinkedMentions: true });
-const mentions = getMentions(index);
-console.log(mentions.get("/guide/getting-started"));
+console.log(getMentions(index).get("/guide/getting-started"));
 // [{ routePath: "/inbox/idea", relativePath: "inbox/idea.md", title: "Idea", snippet: "…" }]
 ```
 
 ### `buildMentionsIndex(sources: MentionSource[]): Map<string, MentionRef[]>`
 
-The low-level builder `getMentions` uses internally: matches each source's stripped `text` against every page name derived from its `page`. Names shorter than 3 characters and names shared by multiple pages are ignored, self-mentions are skipped, and each target keeps at most 20 mentions with a ±70-character snippet.
+The builder behind `getMentions`. It matches each source's `text` against
+every page name. Names shorter than 3 characters are ignored, as are names
+that several pages share, and so are self-mentions. Each target keeps at most
+20 mentions, each with a snippet of ±70 characters.
 
 ### `stripMentionText(markdown: string): string`
 
-Strips frontmatter, fenced blocks, inline code, and comments from a note, leaving the prose that mention matching runs against.
+Removes frontmatter, fenced code, inline code and comments from a note, leaving
+the prose that mention matching reads.
 
-## Tag Pages
+## Tag pages
 
 ### `generateTagPages(index: ContentIndex): AdditionalPage[]`
 
-Generates one page entry per unique tag found across all pages. Each entry has the shape `{ routePath, content }` compatible with the Rspress `addPages` hook.
+Returns one `{ routePath, content }` page per tag, in the shape that the Rspress
+`addPages` hook expects.
 
 ```ts
 import { buildContentIndex, generateTagPages } from "rspress-plugin-obsidian";
 
 const index = await buildContentIndex("/path/to/docs");
 const pages = generateTagPages(index);
-// [
-//   { routePath: "/tags/tutorial", content: "---\ntitle: \"#tutorial\"\n---\n..." },
-//   { routePath: "/tags/obsidian", content: "..." },
-// ]
+// [{ routePath: "/tags/tutorial", content: "---\ntitle: \"#tutorial\"\n---\n..." }, ...]
 ```
 
 ### `encodeTagPathSegment(tag: string): string`
 
-Encodes a tag name for safe use in URL path segments. Preserves Unicode letters, hyphens, underscores, and nested-tag separators (`/`). Encodes whitespace, HTML-reserved, and URL-reserved characters.
+Encodes a tag for use in a URL path. It keeps Unicode letters, `-`, `_` and the
+nested-tag `/`, and encodes whitespace and reserved characters.
 
 ```ts
 import { encodeTagPathSegment } from "rspress-plugin-obsidian";
@@ -347,210 +338,135 @@ encodeTagPathSegment("parent/child"); // "parent/child"
 encodeTagPathSegment("中文");          // "中文"
 ```
 
+## Daily notes
+
+These helpers take a daily-note config shaped like `dailyNotes`, with every
+field filled in (`folder`, `dateFormat`, `navigation`, `template`,
+`calendar`). The module calls that shape `DailyNoteConfig`, but the package
+does not export the name; use `normalizeDailyNoteConfig` to build one. The
+template and calendar pages are built by the plugin, not by these helpers.
+
+### `normalizeDailyNoteConfig(config?: Partial<DailyNoteConfig>): DailyNoteConfig`
+
+Fills in the defaults listed in [`dailyNotes`](#dailynotes) and trims leading and
+trailing slashes from `folder` and `template`.
+
+```ts
+import { normalizeDailyNoteConfig } from "rspress-plugin-obsidian";
+
+const config = normalizeDailyNoteConfig({ folder: "Daily" });
+```
+
+### `parseDailyNoteDate(relativePath: string, config: DailyNoteConfig): Date | undefined`
+
+Reads the local date from a daily-note path. Returns `undefined` when the path
+is outside the folder, does not match the format, or names a date that does not
+exist, such as `2026-02-30`.
+
+### `formatDailyNoteDate(date: Date, format: string): string`
+
+Formats a local date with Moment.js tokens (`YYYY`, `MM`, `Do`, `dddd`, `ww`,
+`W`, `gggg`, `HH`, `mm`, `A`, `[literal]`, …).
+
+### `expandDailyTemplateText(value: string, date: Date, format?: string, now?: Date): string`
+
+Expands `{{date}}`, `{{time}}` and `{{date|time±N unit:FORMAT}}` the same way
+Obsidian's daily-notes core expands a template. Dates render in `format`
+(`YYYY-MM-DD` by default) at the time of day of `now`. `{{time}}` renders `now`
+as `HH:mm`.
+
+### `renderDailyNavigation(currentPage: ContentPage, pages: ContentPage[], config: DailyNoteConfig): string`
+
+Renders the previous/current/next navigation HTML. Returns `""` when navigation
+is off or the page is not a daily note.
+
+## Dataview
+
+These helpers evaluate queries with the Dataview plugin's semantics. DataviewJS
+runs through a restricted interpreter, not a JavaScript engine; see
+[Dataview](./dataview.md#dataviewjs).
+
+### `extractDataviewMetadata(markdown: string, frontmatter: Record<string, unknown>, filePath: string)`
+
+Returns `{ fields, tasks, lists }`: the note's fields (frontmatter and inline),
+its `DataviewTask[]`, and its `DataviewListItem[]`.
+
+### `renderDataviewQuery(query: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig, settings?: DataviewSettings): { html?: string; error?: string }`
+
+Evaluates a `TABLE`, `LIST`, `TASK` or `CALENDAR` query that is written on
+`currentPage`, which acts as `this`. Returns `html`, or `error` for an invalid
+query, including one with leftover text after a clause. `settings.now` fixes
+the clock that `date(today)` reads. `settings.resolve` sets the
+link-resolution options; case-insensitive lookup is on by default.
+
+### `renderDataviewInline(expression: string, currentPage: ContentPage, index: ContentIndex, dailyConfig?: DailyNoteConfig, settings?: DataviewSettings): { html?: string; error?: string }`
+
+Evaluates the `expr` of one `` `= expr` `` inline query with only `this` in
+scope, as Dataview does. Returns a `<span>` or an `error`.
+
 ## Types
 
-### `RspressPluginMarkdownOptions`
+All of these are exported as types from `rspress-plugin-obsidian`. The
+declarations ship with doc comments in `dist/index.d.ts`, so your editor shows
+the same information.
 
-All properties are optional. The defaults below are applied by
-`markdown`.
+`RspressPluginMarkdownOptions` is the options object described in
+[Options](#options). `NormalizedPluginOptions` is the same object with every
+default applied. `DailyNotesOptions` is the [`dailyNotes`](#dailynotes) object,
+and `DiagnosticMode` is `"error" | "warn"`.
 
-```ts
-interface RspressPluginMarkdownOptions {
-  vaultRoot?: string;
-  vaultRoutePrefix?: string;
-  onBrokenLink?: DiagnosticMode;
-  onAmbiguousLink?: DiagnosticMode;
-  enableFuzzyMatching?: boolean;
-  enableCaseInsensitiveLookup?: boolean;
-  enableMarkdownLinks?: boolean;
-  onDataviewError?: DiagnosticMode;
-  onUnsupportedBlock?: DiagnosticMode;
-  onPluginError?: DiagnosticMode;
-  enableDataview?: boolean;
-  enableDailyNotes?: boolean;
-  dailyNotes?: DailyNotesOptions;
-  enableTagLinking?: boolean;
-  enableCallouts?: boolean;
-  enableBacklinks?: boolean;
-  enableUnlinkedMentions?: boolean;
-  enableTransclusion?: boolean;
-  enableMediaEmbeds?: boolean;
-  enableTagPages?: boolean;
-  enableMath?: boolean;
-  mathEngine?: MathEngine;
-  enableMermaid?: boolean;
-  mermaidSecurityLevel?: MermaidSecurityLevel;
-  enableDefaultStyles?: boolean;
-  strictLineBreaks?: boolean;
-  enableTasks?: boolean;
-  tasks?: TasksOptions;
-  enableKanban?: boolean;
-  kanban?: KanbanOptions;
-  enableExcalidraw?: boolean;
-  excalidraw?: ExcalidrawOptions;
-  enableBases?: boolean;
-  bases?: BasesOptions;
-  enableTemplater?: boolean;
-  templater?: TemplaterOptions;
-}
-```
-
-`MermaidSecurityLevel` is `"strict" | "loose" | "antiscript" | "sandbox"`, and
-`MathEngine` is `"katex" | "mathjax"`. The five plugin option objects are
-documented key by key in their guides: [Tasks](./tasks.md),
-[Kanban](./kanban.md), [Excalidraw](./excalidraw.md), [Bases](./bases.md) and
-[Templater](./templater.md).
-
-### `NormalizedPluginOptions`
-
-The fully populated options object passed to the remark pipeline:
-
-```ts
-interface NormalizedPluginOptions {
-  vaultRoot?: string;
-  vaultRoutePrefix: string;
-  onBrokenLink: DiagnosticMode;
-  onAmbiguousLink: DiagnosticMode;
-  enableFuzzyMatching: boolean;
-  enableCaseInsensitiveLookup: boolean;
-  enableMarkdownLinks: boolean;
-  onDataviewError: DiagnosticMode;
-  onUnsupportedBlock: DiagnosticMode;
-  onPluginError: DiagnosticMode;
-  enableDataview: boolean;
-  enableDailyNotes: boolean;
-  dailyNotes: Required<DailyNotesOptions>;
-  enableTagLinking: boolean;
-  enableCallouts: boolean;
-  enableBacklinks: boolean;
-  enableUnlinkedMentions: boolean;
-  enableTransclusion: boolean;
-  enableMediaEmbeds: boolean;
-  enableTagPages: boolean;
-  enableMath: boolean;
-  mathEngine: MathEngine;
-  enableMermaid: boolean;
-  mermaidSecurityLevel: MermaidSecurityLevel;
-  enableDefaultStyles: boolean;
-  strictLineBreaks?: boolean;
-  enableTasks: boolean;
-  tasks: TasksOptions;
-  enableKanban: boolean;
-  kanban: KanbanOptions;
-  enableExcalidraw: boolean;
-  excalidraw: ExcalidrawOptions;
-  enableBases: boolean;
-  bases: BasesOptions;
-  enableTemplater: boolean;
-  templater: TemplaterOptions;
-}
-```
-
-
-### `DailyNotesOptions`
-
-```ts
-interface DailyNotesOptions {
-  folder?: string;
-  dateFormat?: string;
-  navigation?: boolean;
-  template?: string;
-  calendar?: string;
-}
-```
-
-### `ParsedWikiLink`
+### `ParsedWikiLink` and `WikiSubpath`
 
 ```ts
 interface ParsedWikiLink {
-  raw: string;
+  raw: string;                     // Source text, including [[ ]] or ![[ ]]
   target: string;
-  alias?: string;
-  isEmbed: boolean;
-  subpath?: WikiSubpath;
-  search?: "heading" | "block";
-  isCurrentPageReference: boolean;
+  alias?: string;                  // Text after |
+  isEmbed: boolean;                // ![[…]]
+  subpath?: WikiSubpath;           // After #
+  search?: "heading" | "block";    // [[##query]] or [[^^query]]
+  isCurrentPageReference: boolean; // [[#Heading]]
 }
-```
 
-### `ContentAsset`
-
-```ts
-interface ContentAsset {
-  absolutePath: string;
-  relativePath: string;
-  pathKey: string;
-  baseName: string;
-  urlPath: string;
+interface WikiSubpath {
+  kind: "heading" | "block";
+  value: string;                   // Heading text or block id (no ^)
 }
-```
-### `WikilinkMatch`
 
-The raw match metadata returned by `findWikilinkMatches` before parsing:
-
-```ts
 interface WikilinkMatch {
   fullMatch: string;
   inner: string;
   start: number;
-  end: number;
+  end: number;                     // Exclusive
 }
 ```
 
-`start` and `end` are JavaScript string offsets, with `end` exclusive.
-
-### `DataviewTask`
+### `ResolveContext` and `ResolvedWikiLink`
 
 ```ts
-interface DataviewTask {
-  text: string;
-  completed: boolean;
-  line: number;
-  path: string;
-  fields: Record<string, unknown>;
+interface ResolveContext {
+  currentPage: ContentPage;
+  index: ContentIndex;
+  fallbackIndexes?: ContentIndex[]; // Default: index.linkedIndexes
+  options?: Partial<
+    Pick<NormalizedPluginOptions, "enableFuzzyMatching" | "enableCaseInsensitiveLookup">
+  >;
 }
-```
 
-### `DataviewListItem`
+type ResolveStatus = "ok" | "broken-page" | "broken-anchor" | "ambiguous-page";
 
-```ts
-interface DataviewListItem {
-  text: string;
-  line: number;
-  path: string;
-  fields: Record<string, unknown>;
-}
-```
-
-
-### `ContentPage`
-
-```ts
-
-interface ContentPage {
-  absolutePath: string;        // Absolute file path on disk
-  relativePath: string;        // Relative to docs root e.g. "guide/intro.md"
-  routePath: string;           // Rspress route e.g. "/guide/intro"
-  pathKey: string;             // Route-oriented key e.g. "guide/intro"
-  filePathKey: string;         // Exact vault-relative key without ".md"
-  baseName: string;            // Filename without extension e.g. "intro"
-  title?: string;              // Frontmatter title
-  aliases: string[];           // Frontmatter aliases
-  tags: string[];              // Frontmatter tags
-  cssclasses: string[];        // Frontmatter cssclasses
-  excerpt?: string;            // Frontmatter excerpt
-  publish: boolean;             // Frontmatter publish (default: true)
-  fileCtimeMs: number;          // File creation time in milliseconds
-  fileMtimeMs: number;          // File modification time in milliseconds
-  fileSizeBytes: number;        // File size in bytes
-  headings: HeadingEntry[];    // Parsed headings from the file
-  wikilinkTargets: string[];   // Pre-extracted wikilink targets (used for backlinks)
-  headingBySlug: Map<string, HeadingEntry>;   // Slug → heading, O(1) resolution
-  headingByText: Map<string, HeadingEntry>;   // Normalized text → heading, O(1) resolution
-  blocks: BlockEntry[];        // Parsed block IDs from the file
-  dataviewFields: Record<string, unknown>; // Frontmatter and inline Dataview fields
-  dataviewTasks: DataviewTask[];            // Tasks extracted for static Dataview queries
-  dataviewLists: DataviewListItem[];        // List items extracted for static Dataview queries
+interface ResolvedWikiLink {
+  status: ResolveStatus;
+  href?: string;
+  label?: string;                  // Obsidian's display text
+  targetPage?: ContentPage;
+  targetAsset?: ContentAsset;      // When the target is an attachment
+  message?: string;                // Why it failed
+  description?: string;            // Heading preview, for tooltips
+  ambiguity?: string;              // Set when several files shared the name
+  candidates?: WikiLinkCandidate[]; // A vault search with several matches
+  canvasSrc?: string;              // A published canvas board
+  fileRoute?: PublishedFileRoute;  // A .base or .excalidraw page
 }
 ```
 
@@ -559,144 +475,123 @@ interface ContentPage {
 ```ts
 interface ContentIndex {
   rootDir: string;
+  routePrefix?: string;            // vaultRoutePrefix for the vault, "" for docs
   pages: ContentPage[];
   assets: ContentAsset[];
   byAbsolutePath: Map<string, ContentPage>;
-  byPathKey: Map<string, ContentPage>;          // Route-oriented lookup
-  byFilePathKey: Map<string, ContentPage>;      // Exact vault-relative lookup
+  byPathKey: Map<string, ContentPage>;       // Route-oriented key
+  byFilePathKey: Map<string, ContentPage>;   // Exact vault-relative key
   byBaseName: Map<string, ContentPage[]>;
   byTitle: Map<string, ContentPage[]>;
   byAlias: Map<string, ContentPage[]>;
   byTag: Map<string, ContentPage[]>;
   byAssetPath: Map<string, ContentAsset>;
   byAssetBaseName: Map<string, ContentAsset[]>;
-  byPathKeyCI: Map<string, ContentPage[]>;
+  byPathKeyCI: Map<string, ContentPage[]>;   // CI = case-insensitive
   byFilePathKeyCI: Map<string, ContentPage[]>;
   byBaseNameCI: Map<string, ContentPage[]>;
-  byAssetPathCI: Map<string, ContentAsset[]>;   // Case-insensitive exact asset lookup
+  byAssetPathCI: Map<string, ContentAsset[]>;
   byAssetBaseNameCI: Map<string, ContentAsset[]>;
-  backlinks: Map<string, BacklinkRef[]>;       // Pre-built during indexing
+  backlinks: Map<string, BacklinkRef[]>;     // Built during indexing
+  linkedIndexes?: ContentIndex[];            // The other tree on the site
 }
 ```
 
-### `HeadingEntry`
+### `ContentPage`
 
 ```ts
+interface ContentPage {
+  absolutePath: string;
+  relativePath: string;            // "guide/intro.md"
+  routePath: string;               // "/guide/intro"
+  pathKey: string;                 // "guide/intro"; may drop a trailing index
+  filePathKey: string;             // Vault-relative path without the extension
+  baseName: string;                // "intro"
+  title?: string;
+  aliases: string[];
+  tags: string[];
+  cssclasses: string[];
+  excerpt?: string;
+  publish: boolean;
+  fileCtimeMs: number;
+  fileMtimeMs: number;
+  fileSizeBytes: number;
+  headings: HeadingEntry[];
+  wikilinkTargets: string[];
+  outlinks?: ParsedWikiLink[];     // Every link the page makes
+  headingBySlug: Map<string, HeadingEntry>;
+  headingByText: Map<string, HeadingEntry>;
+  blocks: BlockEntry[];            // { id } without the ^
+  dataviewFields: Record<string, unknown>;
+  dataviewTasks: DataviewTask[];
+  dataviewLists: DataviewListItem[];
+}
+
 interface HeadingEntry {
-  rawText: string;          // Heading text (markdown formatting stripped)
-  slug: string;             // GitHub-style slug
-  explicitId?: string;      // Custom anchor from {#custom-anchor}
-  preview?: string;         // Plain-text content snippet after heading (for tooltips)
+  rawText: string;                 // Text as rendered
+  slug: string;
+  explicitId?: string;             // From {#custom-id}
+  depth?: number;                  // 1–6
+  sourceText?: string;             // Inline Markdown as written
+  preview?: string;                // First ~200 characters of the section
+}
+
+interface ContentAsset {
+  absolutePath: string;
+  relativePath: string;
+  pathKey: string;
+  baseName: string;
+  urlPath: string;
 }
 ```
 
-### `BlockEntry`
+### `DataviewListItem` and `DataviewTask`
 
 ```ts
-interface BlockEntry {
-  id: string; // Block ID without the leading ^
+interface DataviewListItem {
+  text: string;
+  line: number;                    // Zero-based
+  lineCount: number;
+  path: string;
+  fields: Record<string, unknown>;
+  symbol: string;                  // "-", "*", "1." …
+  parent?: number;                 // line of the parent item
+  children: number[];
+  section?: string;                // Nearest heading above
+  tags: string[];
+  status?: string;                 // Checkbox character, on tasks
+}
+
+interface DataviewTask extends DataviewListItem {
+  status: string;
+  completed: boolean;              // Only for x / X
+  fullyCompleted: boolean;         // Completed, with every subtask
 }
 ```
 
-### `ResolveStatus`
-
-```ts
-type ResolveStatus =
-  | "ok"
-  | "broken-page"
-  | "broken-anchor"
-  | "ambiguous-page";
-```
-
-### `ResolvedWikiLink`
-
-```ts
-interface ResolvedWikiLink {
-  status: ResolveStatus;
-  href?: string;
-  label?: string;
-  targetPage?: ContentPage;
-  message?: string;
-  description?: string;
-}
-```
-
-### `ResolveContext`
-
-```ts
-interface ResolveContext {
-  currentPage: ContentPage;
-  index: ContentIndex;
-  options?: Partial<
-    Pick<
-      NormalizedPluginOptions,
-      "enableFuzzyMatching" | "enableCaseInsensitiveLookup"
-    >
-  >;
-}
-```
-
-
-### `BacklinkRef`
+### Backlink, mention and page types
 
 ```ts
 interface BacklinkRef {
-  routePath: string;       // Route of the linking page
-  relativePath?: string;   // Vault-relative source path (absent on hand-built refs)
-  title: string;           // Title or basename of the linking page
+  routePath: string;
+  relativePath?: string;           // Absent on hand-built refs
+  title: string;
 }
-```
 
-### `MentionRef`
-
-```ts
 interface MentionRef {
-  routePath: string;   // Route of the mentioning page
-  relativePath: string; // Its vault-relative path
-  title: string;       // Its panel label
-  snippet: string;     // Plain text around the match, ±70 characters
+  routePath: string;
+  relativePath: string;
+  title: string;
+  snippet: string;                 // ±70 characters around the match
 }
-```
 
-### `MentionSource`
-
-```ts
 interface MentionSource {
-  page: ContentPage; // The page doing the naming
-  text: string;      // Its body, stripped of frontmatter and code
+  page: ContentPage;
+  text: string;                    // Body without frontmatter or code
 }
-```
 
-### `ContentIndexOptions`
-
-```ts
-interface ContentIndexOptions {
-  routePrefix?: string;     // Prefix for emitted route paths. Default: ""
-  unlinkedMentions?: boolean; // Retain page text for getMentions. Default: false
-}
-```
-
-### `DiagnosticMode`
-
-```ts
-type DiagnosticMode = "error" | "warn";
-```
-
-### `WikiSubpath`
-
-```ts
-interface WikiSubpath {
-  kind: "heading" | "block";
-  value: string; // Heading text or block ID (without ^)
-}
-```
-
-### `AdditionalPage`
-
-```ts
 interface AdditionalPage {
-  routePath: string; // e.g. "/tags/tutorial"
-  content: string;   // Raw markdown content for the generated page
+  routePath: string;               // "/tags/tutorial"
+  content: string;                 // Markdown of the generated page
 }
 ```
-

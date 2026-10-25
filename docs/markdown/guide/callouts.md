@@ -1,52 +1,103 @@
 ---
-description: Styled callouts like Obsidian — notes, warnings, tips, and foldable sections.
+title: Callouts
+description: Render Obsidian callouts — every built-in type and alias, custom types, foldable and nested callouts — and style them with CSS.
 ---
 
 # Callouts
 
-Callouts are styled content blocks that highlight important information. They support multiple types, fold states, and nested structures.
+Callouts are blockquotes that start with `[!type]`, rendered as coloured boxes
+with an icon and a title, as in Obsidian. Turn them on with
+[`enableCallouts`](./api.md#features). Load the bundled stylesheet too, since it
+provides the colours and icons:
 
-## Basic Syntax
-
-```markdown
-> [!note] This is a note
-> This is the content inside the callout.
-
-> [!warning] Warning Title
-> Be careful with this operation.
-
-> [!tip] Helpful Tip
-> You can use **bold**, *italics*, and `code` inside callouts.
+```ts
+markdown({
+  enableCallouts: true,
+  enableDefaultStyles: true,
+});
 ```
 
-## Callout Types
+With `enableCallouts` off, callouts stay plain blockquotes.
 
-| Type | Color | Use For |
-|------|-------|---------|
-| `note` | Blue | General information |
-| `tip` | Teal | Helpful suggestions |
-| `info` | Cyan | Supplementary details |
-| `todo` | Blue | Tasks and checklists |
-| `success` | Green | Positive outcomes |
-| `question` | Lime | Open questions |
-| `warning` | Orange | Cautionary information (aliases: `caution`, `attention`) |
-| `danger` | Red | Critical warnings |
-| `failure` | Red | Negative outcomes |
-| `bug` | Pink | Known issues |
-| `example` | Purple | Code samples |
-| `abstract` | Cyan | Summaries |
-| `quote` | Gray | Citations |
+## Syntax
 
-## Custom Callout Types
+```markdown
+> [!warning] Back up first
+> This deletes the generated files.
+```
 
-A type outside the table above — for example `[!roadmap]` or `[!my-roadmap]`;
-any characters up to `]` work — keeps its own `callout-roadmap` class and falls
-back to Obsidian's `note` styling: a blue card with the pencil glyph. Without a
-title the type is the title, capitalised (`> [!tip]` reads "Tip"). The plugin
-also emits Obsidian's `data-callout` attribute with the type as written (so
-`[!caution]` is `class="callout callout-warning" data-callout="caution"`), and
-Obsidian's metadata — `> [!roadmap|wide]` — as `data-callout-metadata`, so the
-documented Obsidian customization recipes work unchanged:
+The first line holds the type and an optional title. The lines after it are
+the body, which can contain any Markdown. If you leave out the title, the type
+becomes the title, capitalised: `> [!tip]` reads "Tip". The title is inline
+Markdown, so bold text, code and wikilinks render in it:
+
+```markdown
+> [!question] See [[getting-started|Getting Started]] for **setup**
+> Body text.
+```
+
+## Types
+
+| Type | Colour | Aliases |
+|------|--------|---------|
+| `note` | Blue | |
+| `abstract` | Cyan | `summary`, `tldr` |
+| `info` | Cyan | |
+| `todo` | Blue | |
+| `tip` | Teal | `hint`, `important` |
+| `success` | Green | `check`, `done` |
+| `question` | Lime | `help`, `faq` |
+| `warning` | Orange | `caution`, `attention` |
+| `failure` | Red | `fail`, `missing` |
+| `danger` | Red | `error` |
+| `bug` | Pink | |
+| `example` | Purple | |
+| `quote` | Grey | `cite` |
+
+An alias renders exactly like its type. The output follows Obsidian's markup:
+the class names the canonical type, and `data-callout` keeps the type as you
+wrote it. `> [!caution] Watch out` followed by one line of body renders as:
+
+```html
+<div class="callout callout-warning" data-callout="caution">
+  <div class="callout-title">Watch out</div>
+  <div class="callout-content"><p>This will be transformed.</p></div>
+</div>
+```
+
+## Foldable callouts
+
+Add `-` after the type to collapse a callout by default, or `+` to expand it.
+Foldable callouts render as native `<details>` elements, so they need no
+JavaScript:
+
+```markdown
+> [!note]- Collapsed by default
+> Hidden until the reader opens it.
+
+> [!tip]+ Expanded by default
+> Visible, but the reader can collapse it.
+```
+
+## Nested callouts
+
+To nest a callout, quote it one level deeper:
+
+```markdown
+> [!example] Outer callout
+> The outer body.
+>
+> > [!question] Nested question
+> > The inner callout renders too.
+```
+
+## Custom types
+
+You can use any type, for example `[!roadmap]`. An unknown type keeps its own
+`callout-roadmap` class, gets `data-callout="roadmap"`, and looks like a `note`
+until you style it. Text after a `|` in the type, as in `> [!roadmap|wide]`,
+becomes `data-callout-metadata`. The CSS recipes from Obsidian's documentation
+work unchanged:
 
 ```css
 .callout[data-callout="roadmap"] {
@@ -62,54 +113,16 @@ documented Obsidian customization recipes work unchanged:
 }
 ```
 
-This requires `enableDefaultStyles: true` (the bundled stylesheet provides the
-colours and title glyphs).
+Put these rules in a stylesheet listed in your Rspress `globalStyles`.
 
-## Foldable Callouts
+## Callouts and Rspress alerts
 
-Add `+` to expand by default, `-` to collapse:
+Rspress has its own GitHub-style alerts that use the same syntax for `note`,
+`tip`, `info`, `warning`, `caution`, `danger` and `details`. Rspress converts
+them before plugins run, which loses Obsidian's fold marker and the first
+paragraph of a multi-paragraph callout. With `enableCallouts` on, the plugin
+detects those converted blocks, restores the original blockquote from the
+source, and renders it as an Obsidian callout. Rspress's `:::note` containers
+are a different syntax and keep Rspress's styling.
 
-```markdown
-> [!tip]+ Expanded by Default
-> This content is visible immediately.
-
-> [!note]- Collapsed by Default
-> This content is hidden until expanded.
-```
-
-## Nested Callouts
-
-Callouts can be nested inside other callouts:
-
-```markdown
-> [!example] Outer Callout
-> This is the outer callout.
->
-> > [!question] Nested Question
-> > This inner callout is fully processed.
->
-> Back to the outer content.
-```
-
-## Title Markdown
-
-Callout titles support inline markdown:
-
-```markdown
-> [!example] A **bold** title with [[getting-started|wikilinks]]
-> The title renders markdown and resolved wikilinks.
-```
-
-## Configuration
-
-```ts
-markdown({
-  enableCallouts: true,
-  enableDefaultStyles: true,  // Inject bundled CSS
-});
-```
-
-## Next Steps
-
-- Learn about [[backlinks|Backlinks]] for automatic link discovery
-- Explore [[transclusion|Transclusion]] for embedding content
+The [Live Examples](./examples.md#callouts) page renders every type.

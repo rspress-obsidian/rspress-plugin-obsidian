@@ -1,69 +1,75 @@
 ---
 title: Styling
-description: Customize the canvas appearance with CSS class overrides and CSS variables.
+description: Restyle canvas boards with CSS variables and the plugin's CSS classes, in light and dark mode.
 ---
 
 # Styling
 
-The plugin ships with a complete default stylesheet. Override any part by targeting the exposed CSS classes.
+Boards ship with a stylesheet that follows Obsidian's look and switches with
+Rspress's dark mode. This page lists the CSS variables and classes you can
+override. Change a variable when you only want different colours; target a
+class when you want to change layout or type.
 
-## Import
+## Add your own CSS
 
-The default stylesheet is injected automatically (`enableDefaultStyles` defaults to `true`). Only if you set `enableDefaultStyles: false` do you need to import it yourself:
+Put your rules in a stylesheet that Rspress loads on every page, for example
+through `globalStyles` in `rspress.config.ts`:
 
 ```ts
-import 'rspress-plugin-obsidian/canvas/styles.css';
+import path from "node:path";
+import { defineConfig } from "@rspress/core";
+
+export default defineConfig({
+  globalStyles: path.join(import.meta.dirname, "theme.css"),
+});
 ```
 
-## Class Reference
+Scope your rules under `.canvas-container`, the element around every board.
+Variables set there apply to the board whatever order the stylesheets load in,
+and a selector that starts with `.canvas-container` is more specific than the
+plugin's own rules.
 
-### Viewport
+The plugin injects its stylesheet for you. With
+[`enableDefaultStyles: false`](./configuration.md#enabledefaultstyles) it does
+not, and you import `rspress-plugin-obsidian/canvas/styles.css` yourself, for
+example from your theme.
 
-| Class | Purpose |
-|-------|---------|
-| `.canvas-viewport` | Outer container; sets the viewport background color |
-| `.canvas-background` | Dot-grid layer behind the world |
-| `.canvas-world` | Transformable layer holding nodes and edges |
+## Variables
 
-### Nodes
+Light values are set on `:root`; dark values on `html.dark`, `.dark` and
+`[data-theme="dark"]`.
 
-| Class | Purpose |
-|-------|---------|
-| `.canvas-node-frame` | Positioned, focusable frame around a card (`role="group"`, stacking order) |
-| `.canvas-node` | Base node styling (border-radius, shadow) |
-| `.canvas-node-hovered` / `.canvas-node-selected` | Hover and selection states |
-| `.canvas-node-text`, `.canvas-node-file`, `.canvas-node-link`, `.canvas-node-group` | Per-type hooks |
-| `.canvas-file-note`, `.canvas-file-image`, `.canvas-file-pdf`, … | File cards by kind (`canvas-file-<kind>` on `.canvas-node`) |
-| `.canvas-node-colored` | A card or group with a colour; the colour is in `--canvas-node-accent` |
-| `.canvas-node-label` | The name above a file or link card |
+| Variable | Colours |
+|----------|---------|
+| `--canvas-bg`, `--canvas-grid-dot` | The board background and its dot grid |
+| `--canvas-node-bg`, `--canvas-node-border`, `--canvas-node-border-hover` | Card background and border |
+| `--canvas-node-text`, `--canvas-node-text-subtle` | Card text, and the names above cards |
+| `--canvas-accent`, `--canvas-accent-subtle` | Links in cards, and the focus and selection ring |
+| `--canvas-edge-color`, `--canvas-edge-label-bg`, `--canvas-edge-label-text` | Edges without a colour, and edge labels |
+| `--canvas-group-bg`, `--canvas-group-border`, `--canvas-group-label` | Groups without a colour |
+| `--canvas-code-bg`, `--canvas-code-text`, `--canvas-blockquote-border` | Code and quotes in cards |
+| `--canvas-shadow`, `--canvas-shadow-hover` | Card shadows |
+| `--canvas-toolbar-bg`, `--canvas-toolbar-btn-hover` | The toolbar |
 
-### Edges
+For example, a warmer board in both modes:
 
-| Class | Purpose |
-|-------|---------|
-| `.canvas-edges` | SVG container for all edge paths |
-| `.canvas-edge` | One edge (`.canvas-edge-path` is its stroke) |
-| `.canvas-edge-highlighted` | Glow effect on connected edges |
-| `.canvas-edge-label` | The label box on the curve's midpoint |
+```css
+.canvas-container {
+  --canvas-bg: #fbf7f0;
+  --canvas-grid-dot: #e2d6c3;
+  --canvas-accent: #9a3412;
+}
 
-### Content
-
-| Class | Purpose |
-|-------|---------|
-| `.canvas-markdown` | Markdown content wrapper inside text nodes |
-| `.canvas-group-label` | Group label above the group's top-left corner |
-| `.canvas-file-fallback` | File node card (clickable link or bare filename) |
-| `.canvas-file-media` | Audio/video element inside a file node |
-| `.canvas-file-pdf` | PDF iframe inside a file node |
-| `.canvas-link` | Link node URL display (with `linkPreview: false`) |
-| `.canvas-link-frame` | The website preview frame of a link node |
-| `.wiki-link` | Obsidian wiki-link color |
-| `.canvas-unresolved-link` | A link whose target is not published |
-| `.canvas-error` | Parse error message display |
+html.dark .canvas-container {
+  --canvas-bg: #1c1917;
+  --canvas-grid-dot: rgba(255, 255, 255, 0.06);
+  --canvas-accent: #fdba74;
+}
+```
 
 ## Colours
 
-The six JSON Canvas presets use Obsidian's palette and switch with dark mode:
+The six JSON Canvas presets use Obsidian's palette:
 
 | Variable | Light | Dark |
 |----------|-------|------|
@@ -74,46 +80,95 @@ The six JSON Canvas presets use Obsidian's palette and switch with dark mode:
 | `--canvas-color-5` (cyan) | `#00bfbc` | `#53dfdd` |
 | `--canvas-color-6` (purple) | `#7852ee` | `#a882ff` |
 
-A coloured card is tinted with `--canvas-card-tint` of its colour over the card
-background, and a coloured group with `--canvas-group-tint`, for presets and
-custom colours alike.
+A coloured card gets the class `.canvas-node-colored`, and its colour, preset or
+custom, in `--canvas-node-accent`. The card is tinted with
+`--canvas-card-tint` of that colour (10% light, 14% dark) and a group with
+`--canvas-group-tint` (7% light, 9% dark).
 
-## Override Example
+## Classes
+
+### Board
+
+| Class | Element |
+|-------|---------|
+| `.canvas-container` | The frame around a board. Also has `.canvas-editor` when the editor is on. |
+| `.canvas-viewport` | The visible area. Its height is `min(80vh, 700px)`. |
+| `.canvas-background` | The dot grid |
+| `.canvas-world` | The layer that pans and zooms, holding cards and edges |
+| `.canvas-toolbar` | The toolbar in the top-right corner; each button is `.canvas-toolbar-btn` |
+| `.canvas-help-modal` | The controls dialog the **?** button opens |
+| `.canvas-loading` | The placeholder while a board page loads |
+| `.canvas-error` | The message shown when a board page cannot load its board |
+| `.canvas-embed` | The wrapper of a board embedded in a page |
+| `.canvas-embed-loading` | The placeholder while an embedded board loads. Unstyled by default. |
+| `.canvas-embed-error` | The message shown when an embedded board cannot load. Unstyled by default. |
+
+### Cards
+
+| Class | Element |
+|-------|---------|
+| `.canvas-node-frame` | The positioned, focusable frame around a card. Also has `.is-selected` when selected. |
+| `.canvas-node` | The card itself: border, background, shadow |
+| `.canvas-node-text`, `.canvas-node-file`, `.canvas-node-link`, `.canvas-node-group` | The card type, on `.canvas-node` |
+| `.canvas-file-note`, `.canvas-file-image`, `.canvas-file-pdf`, … | The kind of file a file card shows, on `.canvas-node`: `canvas-file-` followed by `note`, `image`, `audio`, `video`, `pdf`, `canvas`, `file`, `missing`, `private`, or `unresolved` for a card the build did not resolve |
+| `.canvas-node-hovered` | A card being hovered |
+| `.canvas-node-selected` | A selected card |
+| `.canvas-node-colored` | A card or group with a colour |
+| `.canvas-node-label` | The name above a file or link card |
+| `.canvas-node-content` | The card's content box, which clips its content |
+| `.canvas-group-label` | A group's label, above its top-left corner |
+| `.canvas-group-collapse` | A group's collapse button |
+| `.canvas-resize-handle` | The resize handle of a selected card in the editor |
+| `.canvas-editor-banner` | The editor's banner above the board |
+| `.canvas-editor-textarea` | The text field while you edit a text card |
+
+### Card content
+
+| Class | Element |
+|-------|---------|
+| `.canvas-markdown` | The Markdown body of a text card or a note card. When it overflows, it scrolls only while the pointer is over the card or focus is inside it. |
+| `.wiki-link` | A wikilink in a card |
+| `.canvas-unresolved-link` | A link whose target is missing or not published |
+| `.canvas-tag` | A `#tag` |
+| `.canvas-callout` | A callout; the type is added as `canvas-callout-<type>`, with `.canvas-callout-title` and `.canvas-callout-body` inside |
+| `.canvas-math` | A formula; display math also has `.canvas-math-display`, and TeX KaTeX cannot render has `.canvas-math-error` |
+| `.canvas-footnotes` | The footnote list at the end of a card |
+| `.obsidian-mermaid-block` | A Mermaid diagram; a diagram that cannot render also has `.obsidian-mermaid-error` |
+| `.canvas-file-notice` | The notice on a note card whose `subpath` is not in the note |
+| `.canvas-file-fallback` | The card for another board, any other file, or a file that is not available |
+| `.canvas-file-error-text` | The "not available" text of a missing or unpublished file |
+| `.canvas-file-media` | The audio or video player |
+| `.canvas-link` | A link card with `linkPreview: false` |
+| `.canvas-link-frame` | The website preview of a link card |
+
+### Edges
+
+| Class | Element |
+|-------|---------|
+| `.canvas-edges` | The SVG that holds every edge |
+| `.canvas-edge` | One edge; its line is `.canvas-edge-path` |
+| `.canvas-edge-highlighted` | An edge of the hovered or selected card |
+| `.canvas-edge-selected` | The selected edge in the editor |
+| `.canvas-edge-label` | An edge's label |
+
+## Examples
 
 ```css
-/* Darker grid background */
-.canvas-viewport {
-  background-color: #1a1a2e;
-  background-image:
-    linear-gradient(#2a2a3e 1px, transparent 1px),
-    linear-gradient(90deg, #2a2a3e 1px, transparent 1px);
+/* Taller boards */
+.canvas-container .canvas-viewport {
+  height: 90vh;
 }
 
-/* Thicker node borders */
-.canvas-node {
+/* Thicker card borders */
+.canvas-container .canvas-node {
   border-width: 3px;
 }
 
-/* Custom group style */
-.canvas-node-group {
-  border-color: #7b2cbf;
-  background-color: rgba(123, 44, 191, 0.08);
+/* Text in cards */
+.canvas-container .canvas-markdown {
+  font-size: 15px;
 }
-
-/* Edge color on highlight */
-.canvas-edge-highlighted path {
-  filter: drop-shadow(0 0 4px rgba(123, 44, 191, 0.5));
+.canvas-container .canvas-markdown h1 {
+  font-size: 1.6em;
 }
-```
-
-## Markdown Content Styling
-
-Text node Markdown inherits from `.canvas-markdown`. Override heading sizes, code block colors, and link styles:
-
-```css
-.canvas-markdown h1 { font-size: 1.6em; }
-.canvas-markdown code { background-color: #2d2d2d; color: #e0e0e0; }
-.canvas-markdown a { color: #7b2cbf; }
-.canvas-markdown img { border: 1px solid #e0e0e0; }
-.canvas-markdown hr { border-color: #c0c0c0; }
 ```

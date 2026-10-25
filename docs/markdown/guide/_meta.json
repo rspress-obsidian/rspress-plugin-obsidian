@@ -1,17 +1,27 @@
 [
   "getting-started",
   "examples",
+  "note-syntax",
   "link-resolution",
   "callouts",
   "transclusion",
+  "media-embeds",
   "backlinks",
   "tags-and-daily-notes",
-  "media-embeds",
+  {
+    "type": "section-header",
+    "label": "Obsidian plugins"
+  },
+  "dataview",
   "tasks",
   "kanban",
   "excalidraw",
   "bases",
   "templater",
+  {
+    "type": "section-header",
+    "label": "Reference"
+  },
   "advanced",
   "api"
 ]

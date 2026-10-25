@@ -1,88 +1,76 @@
 ---
-description: Automatic backlinks panel showing pages that link to the current page.
+title: Backlinks
+description: Add a backlinks panel to every page listing the notes that link to it, and optionally the notes that mention it without linking.
 ---
 
 # Backlinks
 
-Backlinks automatically show which pages link to the current page, creating a bidirectional link system like Obsidian.
-
-## How It Works
-
-When `enableBacklinks` is on, the plugin:
-1. Collects every link each page makes during build: wikilinks and embeds,
-   Markdown links and images, reference definitions, `obsidian://open` URIs, and
-   wikilinks in frontmatter properties (`related: "[[Target]]"`, `up: ["[[a/b]]"]`,
-   which Obsidian 1.4+ counts as links)
-2. Resolves each one exactly as the rendered link is resolved, and records a
-   backlink on the page it reaches — an ambiguous name only on the page it
-   resolved to
-3. Appends a backlinks panel to each page
-
-With `vaultRoot` set, a docs page linking a vault note shows up in that note's
-panel, and the other way round.
-
-## Unlinked Mentions
-
-Obsidian's backlinks pane has two lists: pages that link here, and pages that only *name* this page. Set `enableUnlinkedMentions` to render the second one, with a snippet of the surrounding text:
+A backlinks panel lists, at the bottom of each page, the notes that link to
+that page, as Obsidian's backlinks pane does. Turn it on with
+[`enableBacklinks`](./api.md#features):
 
 ```ts
 markdown({
   enableBacklinks: true,
-  enableUnlinkedMentions: true,
+  enableDefaultStyles: true, // styles the panel
 });
 ```
 
-A page's names are its frontmatter `title`, its `aliases`, and its file name — a heading is not a name. A page that also links here is a backlink, not a mention, so the two lists never repeat each other. Mention matching keeps a capped copy of each page body for the duration of the index (about 20k characters per page), which is why it is off by default.
+Scroll to the bottom of [Live Examples](./examples.md) to see one.
 
-## Basic Usage
+## What counts as a link
+
+A link counts as a backlink when it resolves to the page, by the same rules the
+rendered link follows. A name that several notes share counts only for the note
+it resolved to. These forms count:
+
+- wikilinks and embeds: `[[Page]]`, `[[Page#Heading]]`, `![[Page]]`
+- Markdown links and images: `[text](Page.md)`, `![](diagram.png)`
+- reference definitions: `[ref]: Page.md`
+- `obsidian://open` URIs
+- wikilinks in frontmatter properties, such as `related: "[[Page]]"` or
+  `up: ["[[a/b]]"]`, which Obsidian 1.4 and later counts as links
+
+Tags, external URLs, same-page links such as `[[#Heading]]`, and footnote or
+citation definitions are not links.
+
+With `vaultRoot` set, links between `docs/` and the vault count in both
+directions. The [Graph View](/graph/) uses the same set of links, so the two
+always agree.
+
+## Unlinked mentions
+
+Obsidian's backlinks pane has a second list: notes that name this page without
+linking to it. To add that list, with a snippet of the text around each
+mention, set `enableUnlinkedMentions`. It turns on `enableBacklinks` as well:
 
 ```ts
-markdown({
-  enableBacklinks: true,
-});
+markdown({ enableUnlinkedMentions: true });
 ```
 
-The panel appears at the bottom of each page:
-
-```
-┌─────────────────────────────────────┐
-│ Backlinks                            │
-│                                     │
-│ • Getting Started                   │
-│ • Advanced Configuration            │
-│ • Examples                          │
-└─────────────────────────────────────┘
-```
-
-## What Counts as a Backlink
-
-| Source | Counted |
-|--------|---------|
-| `[[Page]]` wikilinks | ✅ |
-| `![[Page]]` transclusions | ✅ |
-| `#tag` inline tags | ❌ |
-| External URLs | ❌ |
-| Pure anchor links `[[#Heading]]` | ❌ |
-
-## Configuration
-
-```ts
-markdown({
-  enableBacklinks: true,
-  enableDefaultStyles: true,  // Inject bundled CSS
-});
-```
+A page's names are its frontmatter `title`, its `aliases` and its file name.
+Headings are not names. A note that also links to the page appears only under
+backlinks, so the two lists never repeat each other. To find mentions, the
+plugin keeps a copy of each page's text while it builds, capped at about 20,000
+characters per page. That cost is why the option is off by default.
 
 ## Styling
 
-The backlinks panel uses these CSS classes:
+The panel is plain HTML with these classes:
 
-- `.obsidian-backlinks` — Container
-- `.obsidian-backlinks h2` — Title
-- `.obsidian-backlinks ul` — Link list
-- `.obsidian-backlinks a` — Individual links
+```html
+<div class="obsidian-backlinks">
+  <h2>Backlinks</h2>
+  <ul>
+    <li><a href="/guide/intro">Introduction</a></li>
+  </ul>
+</div>
+<div class="obsidian-backlinks obsidian-unlinked-mentions">
+  <h2>Unlinked mentions</h2>
+  …
+</div>
+```
 
-## Next Steps
-
-- Learn about [[transclusion|Transclusion]] for embedding content
-- Explore [Wikilinks](/markdown/guide/link-resolution) for linking syntax
+`enableDefaultStyles` styles it with Rspress's theme variables, so it follows
+light and dark mode. To restyle it, target `.obsidian-backlinks` in your own
+stylesheet.
