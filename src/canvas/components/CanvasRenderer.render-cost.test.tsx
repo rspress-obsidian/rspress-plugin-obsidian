@@ -52,20 +52,16 @@ const cardRenders: string[] = [];
 const edgeRenders: string[] = [];
 const nodeModule = { ...(await import("./CanvasNode")) };
 const edgeModule = { ...(await import("./CanvasEdge")) };
-mock.module("./CanvasNode", () => ({
-	...nodeModule,
-	CanvasNodeComponent: memo((props: Parameters<typeof nodeModule.CanvasNodeComponent>[0]) => {
-		cardRenders.push(props.node.id);
-		return <nodeModule.CanvasNodeComponent {...props} />;
-	}),
-}));
-mock.module("./CanvasEdge", () => ({
-	...edgeModule,
-	CanvasEdge: memo((props: Parameters<typeof edgeModule.CanvasEdge>[0]) => {
-		edgeRenders.push(props.edge.id);
-		return <edgeModule.CanvasEdge {...props} />;
-	}),
-}));
+const CountingCanvasNode = memo((props: Parameters<typeof nodeModule.CanvasNodeComponent>[0]) => {
+	cardRenders.push(props.node.id);
+	return <nodeModule.CanvasNodeComponent {...props} />;
+});
+const CountingCanvasEdge = memo((props: Parameters<typeof edgeModule.CanvasEdge>[0]) => {
+	edgeRenders.push(props.edge.id);
+	return <edgeModule.CanvasEdge {...props} />;
+});
+mock.module("./CanvasNode", () => ({ ...nodeModule, CanvasNodeComponent: CountingCanvasNode }));
+mock.module("./CanvasEdge", () => ({ ...edgeModule, CanvasEdge: CountingCanvasEdge }));
 
 const { CanvasRenderer } = await import("./CanvasRenderer");
 const { CanvasNodeComponent } = nodeModule;

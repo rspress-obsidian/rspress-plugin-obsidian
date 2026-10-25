@@ -72,6 +72,10 @@ mock.module("@rspress/core/runtime", () => ({
 	},
 }));
 
+function Callout({ children }: { children?: ReactNode }) {
+	return createElement("div", { className: "callout" }, children);
+}
+
 /**
  * The theme entry imports Rspress's virtual modules too; these are the parts
  * the plugin renders with. The headings carry `rp-toc-include`, as the theme's
@@ -85,8 +89,7 @@ mock.module("@rspress/core/theme", () => ({
 				(props: object) => createElement(tag, { ...props, className: "rp-toc-include" }),
 			]),
 		),
-	Callout: ({ children }: { children?: ReactNode }) =>
-		createElement("div", { className: "callout" }, children),
+	Callout,
 }));
 
 // The plugins hand each other build state through module-level registries

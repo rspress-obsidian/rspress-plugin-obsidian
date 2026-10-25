@@ -55,6 +55,10 @@ function textIn(container: HTMLElement, text: string): boolean {
 	return [...container.querySelectorAll("*")].some((el) => el.textContent === text);
 }
 
+function Boom(): never {
+	throw new Error("render failure");
+}
+
 describe("GraphView error boundary", () => {
 	beforeEach(() => {
 		cleanup();
@@ -62,9 +66,6 @@ describe("GraphView error boundary", () => {
 
 	test("renders fallback UI when a child throws", () => {
 		const errorSpy = spyOn(console, "error").mockImplementation(() => {});
-		const Boom = () => {
-			throw new Error("render failure");
-		};
 
 		const { container } = render(
 			<GraphErrorBoundary fallback={<GraphFallback width={100} height={100} color="#333" />}>
