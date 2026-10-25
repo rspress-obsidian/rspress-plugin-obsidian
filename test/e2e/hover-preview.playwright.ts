@@ -242,10 +242,17 @@ test.describe("Page preview", () => {
 
 	test("opens above a link near the bottom of the window", async ({ page }) => {
 		const link = page.locator(WIKILINK).first();
+		// `behavior: "instant"`: the site sets `scroll-behavior: smooth`, so a plain
+		// scrollTo only starts an animation, and a slow runner hovered the link
+		// while it was still moving up the window.
 		await link.evaluate((element) => {
 			const top = element.getBoundingClientRect().top + window.scrollY;
-			window.scrollTo(0, top - window.innerHeight + 60);
+			window.scrollTo({ top: top - window.innerHeight + 60, behavior: "instant" });
 		});
+		const nearBottom = await link.evaluate(
+			(element) => window.innerHeight - element.getBoundingClientRect().bottom,
+		);
+		expect(nearBottom, "the link must sit at the bottom of the window").toBeLessThan(100);
 		await hoverLink(link);
 		const popover = page.locator(POPOVER);
 		await expect(popover).toBeVisible();
