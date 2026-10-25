@@ -115,6 +115,12 @@ npm install mermaid
 markdown({ enableMermaid: true });
 ```
 
+Mermaid 11 and 12 both work (the peer range is `^11.17.2 || ^12.2.0`).
+Mermaid 12 lays out flowchart, state, class and ER diagrams with ELK by
+default; a diagram that should keep Mermaid 11's layout sets `layout: dagre` in
+its `config` front matter. The theme stays Mermaid's `default`, or `dark` on a
+dark page, under either major.
+
 Mermaid needs a browser, so the build leaves a placeholder and a client
 component draws the diagram after the page loads and after each navigation. The
 same package draws Mermaid blocks in canvas text cards.
