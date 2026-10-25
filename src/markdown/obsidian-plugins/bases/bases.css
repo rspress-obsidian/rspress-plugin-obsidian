@@ -69,7 +69,7 @@ html.dark .bases-container {
 
 /* No tab chosen and no view in the URL fragment: the first view, as in Obsidian. */
 .bases-views:not(:has(> .bases-view-tab-input:checked)):not(:has(> .bases-view:target))
-> .bases-view:first-of-type,
+	> .bases-view:first-of-type,
 .bases-views:not(:has(> .bases-view-tab-input:checked)) > .bases-view:target {
 	display: block;
 }
