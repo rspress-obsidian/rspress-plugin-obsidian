@@ -197,6 +197,27 @@ test("does not re-render a block that already holds a diagram", () => {
 	expect(block.classList.contains(MERMAID_RENDERED_CLASS)).toBe(false);
 });
 
+test("a diagram that fails to parse leaves its source in place and nothing behind in the body", async () => {
+	const warn = spyOn(console, "warn").mockImplementation(() => {});
+	try {
+		const code = "flowchart TD\n  A -->> B[[[";
+		const { root, block } = createBlock(code, false);
+		block.textContent = code;
+		const settled = waitForSettled(block);
+		renderMermaidBlocks(root);
+		await settled;
+
+		expect(block.classList.contains(MERMAID_ERROR_CLASS)).toBe(true);
+		expect(block.textContent).toBe(code);
+		// Mermaid renders into a temporary `#d<id>` container on `<body>`; on a
+		// parse error it used to draw its "Syntax error" diagram there and leave it.
+		const strays = [...document.body.children].filter((el) => el !== root).map((el) => el.id);
+		expect(strays).toEqual([]);
+	} finally {
+		warn.mockRestore();
+	}
+});
+
 test("keeps the theme observer alive for another consumer's diagram after a release", async () => {
 	// A canvas unmounting calls `disposeMermaid`; a markdown page's diagram is still
 	// in the document and must keep re-rendering on a theme change.

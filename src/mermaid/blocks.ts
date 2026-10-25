@@ -178,6 +178,11 @@ async function ensureMermaid(): Promise<Mermaid> {
 			startOnLoad: false,
 			securityLevel,
 			theme,
+			// Mermaid renders into a temporary container it appends to `<body>`. On
+			// a syntax error it otherwise draws its "Syntax error" diagram there and
+			// throws before removing it, stranding one per broken block at the end
+			// of the page. The block keeps its source and the error class instead.
+			suppressErrorRendering: true,
 		});
 		initializedTheme = theme;
 		initializedSecurityLevel = securityLevel;
