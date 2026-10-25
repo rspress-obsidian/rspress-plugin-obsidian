@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import fc from "fast-check";
+import { normalizeFsPath } from "../shared/route-path.js";
 import { normalizeUnicode } from "../shared/slug.js";
 import {
 	isPathInsideRoot,
@@ -54,7 +55,10 @@ describe("pathUnderRoot", () => {
 		fs.symlinkSync(real, link, "dir");
 		try {
 			expect(pathUnderRoot(`${link}/a/Note.md`, link)).toBe(`${link}/a/Note.md`);
-			expect(pathUnderRoot(`${real}/a/Note.md`, link)).toBe(`${link}/a/Note.md`);
+			// Rewritten paths use `/` separators, the spelling the content index keys by.
+			expect(pathUnderRoot(`${real}/a/Note.md`, link)).toBe(
+				normalizeFsPath(`${link}/a/Note.md`),
+			);
 			expect(pathUnderRoot(`${real}-other/Note.md`, link)).toBeUndefined();
 			expect(pathUnderRoot("/elsewhere/Note.md", link)).toBeUndefined();
 		} finally {

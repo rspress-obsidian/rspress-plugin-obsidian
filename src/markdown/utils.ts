@@ -88,7 +88,8 @@ export function pathUnderRoot(filePath: string, rootDir: string): string | undef
 	}
 	for (const realRoot of realRoots) {
 		if (isPathInsideRoot(filePath, realRoot)) {
-			return `${rootDir.replace(/[\\/]+$/, "")}${filePath.slice(realRoot.length)}`;
+			const root = normalizeFsPath(rootDir).replace(/\/+$/, "");
+			return `${root}${normalizeFsPath(filePath).slice(realRoot.length)}`;
 		}
 	}
 	return undefined;
