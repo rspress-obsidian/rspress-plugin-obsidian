@@ -579,17 +579,17 @@ test("removes every window and container listener when it unmounts", () => {
 	}
 });
 
-describe("usePanZoom storage", () => {
-	function Stored({ storageKey, id }: { storageKey?: string; id: string }) {
-		const { viewport, transform } = usePanZoom({ storageKey });
-		return (
-			<div
-				data-testid={id}
-				style={{ transform }}
-			>{`${viewport.x}|${viewport.y}|${viewport.zoom}`}</div>
-		);
-	}
+function Stored({ storageKey, id }: { storageKey?: string; id: string }) {
+	const { viewport, transform } = usePanZoom({ storageKey });
+	return (
+		<div
+			data-testid={id}
+			style={{ transform }}
+		>{`${viewport.x}|${viewport.y}|${viewport.zoom}`}</div>
+	);
+}
 
+describe("usePanZoom storage", () => {
 	test("restores the stored viewport for a key once mounted", () => {
 		localStorage.setItem("board-a", JSON.stringify({ x: 10, y: 20, zoom: 2 }));
 		const { getByTestId } = render(<Stored storageKey="board-a" id="a" />);
