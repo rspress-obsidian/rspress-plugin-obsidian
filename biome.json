@@ -19,6 +19,9 @@
 	},
 	"linter": {
 		"enabled": true,
+		"domains": {
+			"playwright": "none"
+		},
 		"rules": {
 			"preset": "recommended",
 			"style": {
@@ -72,6 +75,14 @@
 					"style": {
 						"noNonNullAssertion": "off"
 					}
+				}
+			}
+		},
+		{
+			"includes": ["test/e2e/**", "**/*.playwright.ts"],
+			"linter": {
+				"domains": {
+					"playwright": "recommended"
 				}
 			}
 		}
