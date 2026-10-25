@@ -1,0 +1,83 @@
+name: Bug report
+description: Something renders wrong, the build fails, or a page behaves differently from Obsidian.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before filing, check the
+        [Obsidian compatibility matrix](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md):
+        a feature listed there as unsupported is not a bug.
+
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Feature
+      options:
+        - markdown() — wikilinks, embeds, callouts, backlinks, tags
+        - markdown() — Dataview
+        - markdown() — Tasks, Kanban, Excalidraw, Bases or Templater
+        - markdown() — math or Mermaid
+        - canvas()
+        - graphview() — graph panel or hover previews
+        - Build, install or packaging
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. Screenshots help for rendering bugs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: |
+        The smallest note, canvas or config that shows the problem. Paste the
+        Markdown source, not a screenshot of it.
+      placeholder: |
+        Note.md:
+        > [!todo] Title
+        > body
+
+        rspress.config.ts:
+        markdown({ vaultRoot, enableCallouts: true })
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Build output or browser console
+      description: Any error or warning the build printed, or the browser console showed.
+      render: shell
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: rspress-plugin-obsidian version
+      placeholder: e.g. 1.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: rspress-version
+    attributes:
+      label: "@rspress/core version"
+      placeholder: e.g. 2.0.21
+    validations:
+      required: true
+
+  - type: input
+    id: runtime
+    attributes:
+      label: OS, Node.js and package manager
+      placeholder: e.g. macOS 15, Node 22.14.0, bun 1.4.4
+    validations:
+      required: true

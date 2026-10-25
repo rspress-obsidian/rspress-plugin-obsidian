@@ -1,0 +1,52 @@
+# Weekly upgrade pull requests, opened against `dev` (where the package is
+# developed) so each one runs the full CI matrix before it can reach `main`.
+#
+# Minor and patch releases are grouped into one PR per dependency type; a major
+# release gets a PR of its own, so a breaking upgrade never hides inside a
+# batch. Commit prefixes follow Conventional Commits for semantic-release:
+# `fix(deps)` for runtime dependencies (a consumer gets them, so they ship a
+# patch release), `chore(deps-dev)` for tooling (no release).
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: fix
+      prefix-development: chore
+      include: scope
+    groups:
+      runtime:
+        dependency-type: production
+        update-types: [minor, patch]
+      dev-tooling:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # Kept in step with the Bun in `packageManager` (which CI installs) by
+      # hand: types for a newer Bun than the one running would type-check APIs
+      # the runtime does not have.
+      - dependency-name: "@types/bun"
+
+  # Actions are pinned to commit SHAs; Dependabot bumps the SHA and the
+  # `# vX.Y.Z` comment beside it together.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
