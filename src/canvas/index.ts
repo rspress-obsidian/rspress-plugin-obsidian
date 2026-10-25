@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
 import { buildContentIndex, getCachedContentIndex } from "../markdown/content-index.js";
 import { parseWikiLink } from "../markdown/parse-wikilink.js";
 import { resolveWikiLink } from "../markdown/resolve-wikilink.js";
@@ -581,11 +582,14 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 	// `addPages` fills in the site base it learns from the final config.
 	const define: Record<string, string> = {
 		__RSPRESS_OBSIDIAN_CANVAS_BASE__: JSON.stringify("/"),
+		__RSPRESS_OBSIDIAN_KATEX_STYLESHEET__: JSON.stringify(KATEX_STYLESHEET_PATH),
 	};
 	const mermaidConfig = mermaidBuilderConfig({ diagramsRequested: false });
 	const builderConfig: NonNullable<RspressPlugin["builderConfig"]> = {
 		...mermaidConfig,
-		plugins: [...(mermaidConfig.plugins ?? []), deferInvalidationPlugin],
+		// Cards typeset their math in the browser, which loads KaTeX's stylesheet
+		// from this public directory first.
+		plugins: [...(mermaidConfig.plugins ?? []), deferInvalidationPlugin, katexStylesheetPlugin()],
 		source: { ...mermaidConfig.source, define },
 		server: {
 			...mermaidConfig.server,

@@ -17,7 +17,7 @@ import type {
 export const KANBAN_FRONTMATTER_KEY = "kanban-plugin";
 
 /** How a board is laid out: lanes side by side, lanes stacked, or one table. */
-export type KanbanView = "board" | "list" | "table";
+type KanbanView = "board" | "list" | "table";
 
 /** A layer of raw settings, keyed as Kanban stores them (`date-format`). */
 export type KanbanSettingsLayer = Record<string, unknown>;

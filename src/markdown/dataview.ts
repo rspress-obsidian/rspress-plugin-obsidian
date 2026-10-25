@@ -95,7 +95,7 @@ interface FileValues {
 }
 
 /** A page as queries see it (Dataview's `SMarkdownPage`): `file` plus its fields. */
-export interface PageValues {
+interface PageValues {
 	file: FileValues;
 	[key: string]: unknown;
 }

@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 
 /** What the link's fragment asks for, before the page is loaded. */
-export type RequestedAnchor =
+type RequestedAnchor =
 	| { kind: "heading"; text: string } // decoded `#Install`, `#second-section`
 	| { kind: "block"; id: string }; // decoded `#^blk` → "^blk"
 
@@ -96,14 +96,14 @@ export const IDLE: PreviewState = { phase: "idle" };
 export const HOVER_DELAY_MS = 300;
 export const CLOSE_GRACE_MS = 300;
 /** Obsidian's `--popover-width` and `--popover-height`. */
-export const POPOVER_WIDTH = 450;
-export const POPOVER_MAX_HEIGHT = 400;
+const POPOVER_WIDTH = 450;
+const POPOVER_MAX_HEIGHT = 400;
 /** Gap between the link and the popover. */
-export const POPOVER_GAP = 6;
-export const VIEWPORT_MARGIN = 8;
+const POPOVER_GAP = 6;
+const VIEWPORT_MARGIN = 8;
 export const POPOVER_CLASS = "obsidian-hover-preview";
 /** Every id inside the popover carries this, so none collides with the host page's. */
-export const ID_PREFIX = "obsidian-hover-preview-";
+const ID_PREFIX = "obsidian-hover-preview-";
 
 type Pending = Extract<PreviewState, { phase: "pending" }>;
 

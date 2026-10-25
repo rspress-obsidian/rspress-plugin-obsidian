@@ -888,6 +888,149 @@ export function CanvasRenderer({
 		[canvas.nodes, hiddenNodeIds],
 	);
 
+	// Arrowheads depend only on the edges' ids and colours, so a card drag never
+	// rebuilds the two markers every edge carries.
+	const edgeMarkers = useMemo(
+		() =>
+			visibleEdges.map((edge) => {
+				const color = edgeColor(edge.color);
+				const ids = markerIds(instanceId, edge.id);
+				return (
+					<g key={edge.id}>
+						<marker
+							id={ids.end}
+							markerWidth="10"
+							markerHeight="7"
+							refX="9"
+							refY="3.5"
+							orient="auto"
+							markerUnits="userSpaceOnUse"
+						>
+							<polygon points="0 0, 10 3.5, 0 7" fill={color} />
+						</marker>
+						<marker
+							id={ids.start}
+							markerWidth="10"
+							markerHeight="7"
+							refX="1"
+							refY="3.5"
+							orient="auto"
+							markerUnits="userSpaceOnUse"
+						>
+							<polygon points="10 0, 0 3.5, 10 7" fill={color} />
+						</marker>
+					</g>
+				);
+			}),
+		[visibleEdges, instanceId],
+	);
+
+	// Everything inside the transformed world, which a pan or zoom does not
+	// change: returning the same element lets React skip the whole subtree on
+	// the per-frame viewport re-render instead of diffing every card and edge.
+	const worldContent = useMemo(
+		() => (
+			<>
+				{showGrid && <div className="canvas-background" aria-hidden="true" />}
+				<svg
+					className="canvas-edges"
+					xmlns="http://www.w3.org/2000/svg"
+					style={{ zIndex: edgeLayer }}
+					// Editable edges are real buttons: hiding them would leave focusable
+					// controls inside an aria-hidden subtree (an axe violation).
+					aria-hidden={editable ? undefined : true}
+				>
+					<title>Canvas edges</title>
+					<defs>{edgeMarkers}</defs>
+					{visibleEdges.map((edge) => {
+						const fromNode = nodeMap.get(edge.fromNode);
+						const toNode = nodeMap.get(edge.toNode);
+						if (!fromNode || !toNode) return null;
+						return (
+							<CanvasEdge
+								key={edge.id}
+								edge={edge}
+								fromNode={fromNode}
+								toNode={toNode}
+								markerPrefix={instanceId}
+								isHighlighted={connectedEdgeIds.has(edge.id)}
+								isSelected={selectedEdgeId === edge.id}
+								onSelect={editable ? selectEdge : undefined}
+							/>
+						);
+					})}
+				</svg>
+				{visibleNodes.map((node) => {
+					const isSelected = selectedNodeIds.includes(node.id);
+					const isHovered = node.id === hoveredNodeId;
+					const raised = node.type !== "group" && (isSelected || isHovered);
+					return (
+						<NodeFrame
+							key={node.id}
+							node={node}
+							zIndex={(zIndexById.get(node.id) ?? 0) + (raised ? topLayer : 0)}
+							isSelected={isSelected}
+							isHovered={isHovered}
+							editable={editable}
+							isEditing={editable && editingNodeId === node.id}
+							draftText={editable && editingNodeId === node.id ? draftText : undefined}
+							memberCount={node.type === "group" ? (groupMembers.get(node.id)?.length ?? 0) : 0}
+							isCollapsed={collapsedGroupIds.includes(node.id)}
+							assets={canvas.assets}
+							notes={canvas.notes}
+							links={canvas.links}
+							idPrefix={instanceId}
+							fileRoutePrefix={fileRoutePrefix}
+							linkPreview={linkPreview}
+							iframeSandbox={iframeSandbox}
+							onPointerDown={handleNodePointerDown}
+							onResizePointerDown={handleResizePointerDown}
+							onSelect={selectNode}
+							onEdit={startEditing}
+							onHover={setHoveredNodeId}
+							onToggleCollapse={toggleGroupCollapse}
+							onDraftChange={setDraftText}
+							onCommitEdit={commitEdit}
+						/>
+					);
+				})}
+			</>
+		),
+		[
+			showGrid,
+			edgeLayer,
+			editable,
+			edgeMarkers,
+			visibleEdges,
+			nodeMap,
+			instanceId,
+			connectedEdgeIds,
+			selectedEdgeId,
+			selectEdge,
+			visibleNodes,
+			selectedNodeIds,
+			hoveredNodeId,
+			zIndexById,
+			topLayer,
+			editingNodeId,
+			draftText,
+			groupMembers,
+			collapsedGroupIds,
+			canvas.assets,
+			canvas.notes,
+			canvas.links,
+			fileRoutePrefix,
+			linkPreview,
+			iframeSandbox,
+			handleNodePointerDown,
+			handleResizePointerDown,
+			selectNode,
+			startEditing,
+			toggleGroupCollapse,
+			commitEdit,
+		],
+	);
+
 	return (
 		<div ref={rootRef} className={`canvas-container ${editable ? "canvas-editor" : ""}`}>
 			{editable && (
@@ -940,100 +1083,7 @@ export function CanvasRenderer({
 				onKeyDown={handleKeyDown}
 			>
 				<div className="canvas-world" style={{ transform }}>
-					{showGrid && <div className="canvas-background" aria-hidden="true" />}
-					<svg
-						className="canvas-edges"
-						xmlns="http://www.w3.org/2000/svg"
-						style={{ zIndex: edgeLayer }}
-						// Editable edges are real buttons: hiding them would leave focusable
-						// controls inside an aria-hidden subtree (an axe violation).
-						aria-hidden={editable ? undefined : true}
-					>
-						<title>Canvas edges</title>
-						<defs>
-							{visibleEdges.map((edge) => {
-								const color = edgeColor(edge.color);
-								const ids = markerIds(instanceId, edge.id);
-								return (
-									<g key={edge.id}>
-										<marker
-											id={ids.end}
-											markerWidth="10"
-											markerHeight="7"
-											refX="9"
-											refY="3.5"
-											orient="auto"
-											markerUnits="userSpaceOnUse"
-										>
-											<polygon points="0 0, 10 3.5, 0 7" fill={color} />
-										</marker>
-										<marker
-											id={ids.start}
-											markerWidth="10"
-											markerHeight="7"
-											refX="1"
-											refY="3.5"
-											orient="auto"
-											markerUnits="userSpaceOnUse"
-										>
-											<polygon points="10 0, 0 3.5, 10 7" fill={color} />
-										</marker>
-									</g>
-								);
-							})}
-						</defs>
-						{visibleEdges.map((edge) => {
-							const fromNode = nodeMap.get(edge.fromNode);
-							const toNode = nodeMap.get(edge.toNode);
-							if (!fromNode || !toNode) return null;
-							return (
-								<CanvasEdge
-									key={edge.id}
-									edge={edge}
-									fromNode={fromNode}
-									toNode={toNode}
-									markerPrefix={instanceId}
-									isHighlighted={connectedEdgeIds.has(edge.id)}
-									isSelected={selectedEdgeId === edge.id}
-									onSelect={editable ? selectEdge : undefined}
-								/>
-							);
-						})}
-					</svg>
-					{visibleNodes.map((node) => {
-						const isSelected = selectedNodeIds.includes(node.id);
-						const isHovered = node.id === hoveredNodeId;
-						const raised = node.type !== "group" && (isSelected || isHovered);
-						return (
-							<NodeFrame
-								key={node.id}
-								node={node}
-								zIndex={(zIndexById.get(node.id) ?? 0) + (raised ? topLayer : 0)}
-								isSelected={isSelected}
-								isHovered={isHovered}
-								editable={editable}
-								isEditing={editable && editingNodeId === node.id}
-								draftText={editable && editingNodeId === node.id ? draftText : undefined}
-								memberCount={node.type === "group" ? (groupMembers.get(node.id)?.length ?? 0) : 0}
-								isCollapsed={collapsedGroupIds.includes(node.id)}
-								assets={canvas.assets}
-								notes={canvas.notes}
-								links={canvas.links}
-								idPrefix={instanceId}
-								fileRoutePrefix={fileRoutePrefix}
-								linkPreview={linkPreview}
-								iframeSandbox={iframeSandbox}
-								onPointerDown={handleNodePointerDown}
-								onResizePointerDown={handleResizePointerDown}
-								onSelect={selectNode}
-								onEdit={startEditing}
-								onHover={setHoveredNodeId}
-								onToggleCollapse={toggleGroupCollapse}
-								onDraftChange={setDraftText}
-								onCommitEdit={commitEdit}
-							/>
-						);
-					})}
+					{worldContent}
 				</div>
 			</div>
 			<div className="canvas-toolbar" role="toolbar" aria-label="Canvas controls">

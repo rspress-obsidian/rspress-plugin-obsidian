@@ -4,7 +4,7 @@ import { readObsidianPluginSettings } from "../settings.js";
 import type { TemplaterFileTemplate, TemplaterFolderTemplate } from "./options.js";
 
 /** Templater's plugin id: its settings live in `.obsidian/plugins/templater-obsidian/`. */
-export const TEMPLATER_PLUGIN_ID = "templater-obsidian";
+const TEMPLATER_PLUGIN_ID = "templater-obsidian";
 
 /** Templater's settings as this site applies them: vault settings under site options. */
 export interface TemplaterSettings {
@@ -27,7 +27,7 @@ export interface TemplaterSettings {
 }
 
 /** `Templates/`, `/Templates` and `Templates` alike; `/` and `` are the vault root. */
-export function normalizeVaultFolder(folder: string): string {
+function normalizeVaultFolder(folder: string): string {
 	return folder
 		.replace(/\\/g, "/")
 		.replace(/^\.?\/+|\/+$/g, "")

@@ -176,7 +176,7 @@ const FULL_LINE_KEY =
 	/^[^0-9\p{L}\p{N}_]*((?:[\p{L}\p{N}_\s/-]|\p{Extended_Pictographic}|\u200d|\ufe0f)+?)[_*~`]*$/u;
 
 /** `key:: value` filling a whole line (or list item). */
-export function extractFullLineField(text: string): InlineField | undefined {
+function extractFullLineField(text: string): InlineField | undefined {
 	const separator = text.indexOf("::");
 	if (separator < 0) return undefined;
 	const match = FULL_LINE_KEY.exec(text.slice(0, separator).trim());
@@ -249,7 +249,7 @@ function splitInlineList(value: string): string[] {
  * tag, link, boolean, number or `null` — or a comma-separated list of those —
  * and otherwise the text itself. An empty value is `null`.
  */
-export function parseInlineValue(value: string): unknown {
+function parseInlineValue(value: string): unknown {
 	if (value.trim() === "") return null;
 	const parts = splitInlineList(value);
 	if (parts.length > 1) {
@@ -341,7 +341,7 @@ function normalizeFrontmatterValue(
  * kept, whitespace becomes `-`, emoji kept, everything else dropped — so
  * `Due Date` is also readable as `due-date` and `**Status**` as `status`.
  */
-export function canonicalizeKey(key: string): string {
+function canonicalizeKey(key: string): string {
 	let result = "";
 	for (const match of key.matchAll(
 		/(\p{Extended_Pictographic}(?:\u200d\p{Extended_Pictographic}|\ufe0f)*)|([\p{L}\p{N}_-]+)|(\s)|./gsu,
@@ -428,7 +428,7 @@ export function linksInText(text: string): DataviewLink[] {
 }
 
 /** The `#tags` in a piece of text, with their `#`. */
-export function tagsInText(text: string): string[] {
+function tagsInText(text: string): string[] {
 	const tags: string[] = [];
 	for (const match of text.matchAll(INLINE_TAG_PATTERN)) {
 		const tag = tagNameFromMatch(match[1] ?? "");

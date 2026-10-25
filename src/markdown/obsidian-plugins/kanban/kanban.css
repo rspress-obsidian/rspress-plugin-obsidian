@@ -114,6 +114,17 @@
 	min-height: 2.5rem;
 }
 
+/* Not Rspress's padded, hover-greyed <details>: only the summary toggles. */
+details.kanban-plugin__lane-collapsed {
+	margin: 0;
+	padding: 0;
+	cursor: auto;
+}
+
+details.kanban-plugin__lane-collapsed:hover {
+	background-color: transparent;
+}
+
 .kanban-plugin__lane-collapsed > summary {
 	padding: 6px 10px;
 	font-size: 12px;
@@ -178,7 +189,8 @@
 	padding-inline-start: 1.25em;
 }
 
-.kanban-plugin__item-markdown li {
+/* Scoped under the root to outrank Rspress's 0.5rem between list items. */
+.kanban-plugin .kanban-plugin__item-markdown li {
 	margin: 0;
 }
 

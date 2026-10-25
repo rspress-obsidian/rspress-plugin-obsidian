@@ -13,7 +13,7 @@
 	"bugs": {
 		"url": "https://github.com/rspress-obsidian/rspress-plugin-obsidian/issues"
 	},
-	"packageManager": "bun@1.4.2",
+	"packageManager": "bun@1.4.4",
 	"sideEffects": [
 		"**/*.css"
 	],
@@ -97,7 +97,7 @@
 		"test": "bun test",
 		"test:doc-examples": "bun scripts/check-doc-examples.ts",
 		"test:publish": "bun scripts/test-publish.ts",
-		"test:types": "publint && attw --pack . -f ascii --no-emoji --no-color --ignore-rules no-resolution cjs-resolves-to-esm",
+		"test:types": "publint",
 		"test:coverage": "bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage && bun scripts/check-coverage.ts 0.97",
 		"test:e2e": "playwright test --config playwright.config.ts",
 		"docs:dev": "rspress dev",
@@ -171,7 +171,6 @@
 		}
 	},
 	"devDependencies": {
-		"@arethetypeswrong/cli": "^0.18.5",
 		"@biomejs/biome": "^2.5.12",
 		"@excalidraw/excalidraw": "^0.18.1",
 		"@happy-dom/global-registrator": "^20.14.0",
@@ -185,12 +184,11 @@
 		"@semantic-release/release-notes-generator": "^14.1.1",
 		"@testing-library/dom": "^10.4.1",
 		"@testing-library/react": "^16.3.3",
-		"@types/bun": "1.4.1",
+		"@types/bun": "1.4.4",
 		"@types/estree": "^1.0.9",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.7",
 		"fast-check": "^4.9.0",
-		"happy-dom": "^20.14.0",
 		"lightningcss": "^1.33.0",
 		"maplibre-gl": "^5.24.0",
 		"mathjax-full": "^3.2.2",

@@ -155,7 +155,16 @@ graph TD
 ## Unresolved Links
 
 A wikilink to a page that does not exist keeps the label a reader expects and
-is marked as unresolved instead of becoming a link: [[not-a-real-page|Missing page]].
+is marked as unresolved instead of becoming a link:
+
+```md
+[[not-a-real-page|Missing page]]
+```
+
+renders `Missing page` as `<span class="obsidian-unresolved">`, with the reason
+in its tooltip, and the build reports the link through `onBrokenLink`. That
+report is why this page shows the syntax instead of a live example: it would
+warn on every build of this site.
 
 ## Private Notes
 

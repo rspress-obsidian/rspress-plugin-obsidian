@@ -57,7 +57,7 @@ function subpathFrom(anchor: string): WikiSubpath | undefined {
  * relative file reference: external URLs, protocol-relative and root-absolute
  * paths are site URLs, and a bare `#anchor` stays on the page.
  */
-export function markdownDestinationToWikiLink(
+function markdownDestinationToWikiLink(
 	destination: string,
 	raw: string,
 	isEmbed: boolean,
@@ -123,7 +123,7 @@ function obsidianUriToWikiLink(uri: string, raw: string): ParsedWikiLink | undef
  * Frontmatter tags: a YAML list, or the legacy single string Obsidian splits
  * on commas and spaces (`tags: a, b` and `tags: a b` are two tags).
  */
-export function frontmatterTagValues(value: unknown): string[] {
+function frontmatterTagValues(value: unknown): string[] {
 	const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,\s]+/) : [];
 	const tags: string[] = [];
 	for (const entry of raw) {

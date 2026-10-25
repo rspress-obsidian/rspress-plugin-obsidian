@@ -7,7 +7,7 @@ import { templaterFeature } from "./templater/index.js";
 import type { BuilderConfig, ObsidianPluginFeature } from "./types.js";
 
 /** Every reproduced Obsidian plugin, in the order their hooks run. */
-export const OBSIDIAN_PLUGIN_FEATURES: readonly ObsidianPluginFeature[] = [
+const OBSIDIAN_PLUGIN_FEATURES: readonly ObsidianPluginFeature[] = [
 	templaterFeature,
 	tasksFeature,
 	kanbanFeature,
@@ -76,10 +76,4 @@ function chainAliases(...aliases: Array<AliasChain | undefined>): AliasChain | u
 	return entries.length > 0 ? (entries as AliasChain) : undefined;
 }
 
-export type {
-	BuilderConfig,
-	ObsidianPluginFeature,
-	PluginBuildContext,
-	PluginPage,
-	PluginRenderContext,
-} from "./types.js";
+export type { BuilderConfig, ObsidianPluginFeature, PluginBuildContext } from "./types.js";

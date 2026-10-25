@@ -31,7 +31,7 @@ interface ExpressionValue {
 }
 
 /** The HTML the formula element renders to, or `undefined` for any other node. */
-export function mathElementHtml(node: JsxNode): string | undefined {
+function mathElementHtml(node: JsxNode): string | undefined {
 	const inner = node.attributes?.find((entry) => entry.name === "dangerouslySetInnerHTML");
 	const markup = (inner?.value as ExpressionValue | undefined)?.data?.estree?.body?.[0]?.expression
 		?.properties?.[0]?.value?.value;

@@ -37,16 +37,6 @@ test.describe("Math and Mermaid rendering", () => {
 		expect(source).toContain("graph TD");
 	});
 
-	test("shows an unresolved wikilink as a marked label, not a link", async ({ page }) => {
-		const marker = page.locator("span.obsidian-unresolved").first();
-
-		await expect(marker).toBeVisible();
-		await expect(marker).toHaveText("Missing page");
-		await expect(marker).toHaveAttribute("data-wikilink", "[[not-a-real-page|Missing page]]");
-		// A marker, not a navigable link.
-		await expect(page.locator("a.obsidian-unresolved")).toHaveCount(0);
-	});
-
 	test("does not publish commented-out content", async ({ page }) => {
 		await expect(page.getByText("This paragraph is not published either")).toHaveCount(0);
 		await expect(page.getByText("Still visible.")).toBeVisible();

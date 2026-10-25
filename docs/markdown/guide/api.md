@@ -53,7 +53,7 @@ export default defineConfig({
 | `enableTransclusion` | `boolean` | `false` | Inline `![[Page]]` content |
 | `enableMediaEmbeds` | `boolean` | `false` | Render `![[img.png]]` as `<img>` |
 | `enableTagPages` | `boolean` | `false` | Generate `/tags/{name}` index pages |
-| `enableMath` | `boolean` | `false` | Render `$inline$` / `$$display$$` math with KaTeX (loads KaTeX's stylesheet) |
+| `enableMath` | `boolean` | `false` | Render `$inline$` / `$$display$$` math with KaTeX (pages with math link KaTeX's stylesheet) |
 | `mathEngine` | `"katex" \| "mathjax"` | `"katex"` | Which engine renders that math. `"mathjax"` is Obsidian's own engine and needs the optional `mathjax-full` package; it emits its own generated stylesheet inline |
 | `enableMermaid` | `boolean` | `false` | Render ` ```mermaid ` fences as diagrams in the browser. Needs the optional `mermaid` package; without it diagrams stay as source with an install hint |
 | `mermaidSecurityLevel` | `"strict" \| "loose" \| "antiscript" \| "sandbox"` | `"strict"` | Mermaid `securityLevel` for note diagrams. `strict` sanitizes the SVG and strips unsafe link URLs; looser levels allow what a strict build refuses |

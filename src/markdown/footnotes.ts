@@ -22,12 +22,12 @@ import type {
 	RootContent,
 } from "mdast";
 import type { Parent } from "unist";
-import { visit } from "unist-util-visit";
 import type { VFile } from "vfile";
 import { escapeHtmlAttribute } from "../shared/escape.js";
 import { replaceInlineFootnotes } from "./inline-footnotes.js";
 import { reportPluginDiagnostic } from "./remark-diagnostics.js";
 import { parseObsidianMarkdown, plainText } from "./syntax.js";
+import { visit } from "./visit.js";
 
 export interface FootnoteContext {
 	file: VFile;

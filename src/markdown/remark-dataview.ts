@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Html, PhrasingContent, Root } from "mdast";
 import type { Node, Parent } from "unist";
-import { visit } from "unist-util-visit";
 import type { VFile } from "vfile";
 import { escapeHtmlText } from "../shared/escape.js";
 import { stripFrontmatter } from "../shared/frontmatter.js";
@@ -20,6 +19,7 @@ import { extractInlineFields } from "./dataview-metadata.js";
 import { createTextNode, reportPluginDiagnostic, SKIP_PARENT_TYPES } from "./remark-diagnostics.js";
 import { parseObsidianMarkdown } from "./syntax.js";
 import type { ContentIndex, ContentPage, NormalizedPluginOptions } from "./types.js";
+import { visit } from "./visit.js";
 
 /** The plugin options the Dataview pass reads. */
 type DataviewPassOptions = Pick<

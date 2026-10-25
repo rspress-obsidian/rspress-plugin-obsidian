@@ -5,13 +5,13 @@
  * archive, and a `%% kanban:settings %%` block holds the board's settings.
  */
 import type { Heading, List, ListItem, Root, RootContent } from "mdast";
-import { visit } from "unist-util-visit";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../../../shared/paths.js";
 import { extractInlineFields, type InlineField } from "../../dataview-metadata.js";
 import { escapeRegExp } from "../../dataview-values.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import { parseObsidianMarkdown, plainText } from "../../syntax.js";
 import type { ParsedWikiLink } from "../../types.js";
+import { visit } from "../../visit.js";
 import type { KanbanSettingsLayer, ResolvedKanbanSettings } from "./board-settings.js";
 
 /** One card: a top-level item of a lane's list, with everything under it. */

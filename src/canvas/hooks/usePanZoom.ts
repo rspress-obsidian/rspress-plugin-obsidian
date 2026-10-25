@@ -24,14 +24,14 @@ export const MAX_ZOOM = 5;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 /** `localStorage` key prefix for a canvas viewport, one per board. */
-export const VIEWPORT_KEY_PREFIX = "rspress-canvas-viewport:";
+const VIEWPORT_KEY_PREFIX = "rspress-canvas-viewport:";
 
 /**
  * Screen pixels a press must travel before it becomes a pan and claims pointer
  * capture. Capturing on pointerdown would retarget the compatibility click to
  * the viewport, so every link inside a card would stop navigating.
  */
-export const PAN_CAPTURE_THRESHOLD = 3;
+const PAN_CAPTURE_THRESHOLD = 3;
 
 /** Elements that own their own drag gesture; a press on them never pans. */
 const OWN_GESTURE_SELECTOR =
@@ -42,7 +42,7 @@ function clampZoom(zoom: number): number {
 }
 
 /** Read a stored viewport, ignoring anything that is not a usable triple. */
-export function readStoredViewport(key: string | undefined): Viewport | undefined {
+function readStoredViewport(key: string | undefined): Viewport | undefined {
 	if (!key) return undefined;
 	try {
 		const raw = localStorage.getItem(key);
@@ -254,13 +254,36 @@ export function usePanZoom(options: PanZoomOptions = {}) {
 			isPointerOver.current = false;
 		};
 
+		// A single press on the board pans it (or drags a card) and never selects
+		// text, yet the browser starts a selection on the press and hit-tests for
+		// it on every move of the drag. Double and triple clicks still select a
+		// word or a paragraph, and form fields keep their own selection.
+		let pressCount = 0;
+		const onMouseDown = (e: MouseEvent) => {
+			pressCount = e.detail;
+		};
+		const onSelectStart = (e: Event) => {
+			const single = pressCount === 1;
+			pressCount = 0;
+			const node = e.target as Node | null;
+			const target = node instanceof Element ? node : node?.parentElement;
+			if (!single || target?.closest(OWN_GESTURE_SELECTOR)) return;
+			e.preventDefault();
+			// What the press would have done to an earlier selection: clear it.
+			window.getSelection()?.removeAllRanges();
+		};
+
 		el.addEventListener("wheel", onWheel, { passive: false });
 		el.addEventListener("pointerenter", onEnter);
 		el.addEventListener("pointerleave", onLeave);
+		el.addEventListener("mousedown", onMouseDown, true);
+		el.addEventListener("selectstart", onSelectStart);
 		return () => {
 			el.removeEventListener("wheel", onWheel);
 			el.removeEventListener("pointerenter", onEnter);
 			el.removeEventListener("pointerleave", onLeave);
+			el.removeEventListener("mousedown", onMouseDown, true);
+			el.removeEventListener("selectstart", onSelectStart);
 		};
 	}, []);
 

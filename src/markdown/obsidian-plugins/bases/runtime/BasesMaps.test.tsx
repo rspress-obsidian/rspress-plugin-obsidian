@@ -6,7 +6,7 @@
  * request — position, zoom, background, markers and their links, popups —
  * and the page around it.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test, vi } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 import BasesMaps from "./BasesMaps";
 import {
@@ -218,6 +218,7 @@ afterEach(() => {
 	document.documentElement.classList.remove("dark");
 	globalThis.ResizeObserver = realResizeObserver;
 	setMapLibraryLoader(null);
+	vi.useRealTimers();
 });
 
 describe("mapStyle", () => {
@@ -341,12 +342,13 @@ describe("renderBasesMaps", () => {
 		expect(navigate).toHaveBeenCalledWith("/Places/Paris");
 
 		// Leaving the marker closes the popup after a moment, unless the pointer reaches it.
+		vi.useFakeTimers();
 		paris?.element.dispatchEvent(new MouseEvent("mouseleave"));
 		popup?.element.dispatchEvent(new MouseEvent("mouseenter"));
-		await Bun.sleep(200);
+		vi.advanceTimersByTime(200);
 		expect(popup?.isOpen).toBe(true);
 		popup?.element.dispatchEvent(new MouseEvent("mouseleave"));
-		await Bun.sleep(200);
+		vi.advanceTimersByTime(200);
 		expect(popup?.isOpen).toBe(false);
 
 		// Keyboard focus opens it too; Rome has no page, no filled cell to list.
@@ -354,7 +356,7 @@ describe("renderBasesMaps", () => {
 		expect(popup?.content?.querySelector(".bases-map-popup-title")?.tagName).toBe("DIV");
 		expect(popup?.content?.querySelector(".bases-map-popup-properties")).toBeNull();
 		rome?.element.dispatchEvent(new FocusEvent("blur"));
-		await Bun.sleep(200);
+		vi.advanceTimersByTime(200);
 		expect(popup?.isOpen).toBe(false);
 	});
 

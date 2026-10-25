@@ -349,7 +349,7 @@ describe("map views", () => {
 		expect(components[0]).toMatch(/BasesMaps\.(tsx|js)$/);
 		expect(existsSync(components[0] ?? "")).toBe(true);
 		// maplibre-gl is installed here, so nothing is aliased away.
-		expect(basesFeature.builderConfig?.(options)).toEqual({});
+		expect(basesFeature.builderConfig?.(options)).not.toHaveProperty("resolve");
 	});
 
 	test("on the base's own page the map fills the page; embedded it is sized, centred on `this`", async () => {

@@ -1,6 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { setTimeout as delay } from "node:timers/promises";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { viewportStorageKey } from "../hooks/usePanZoom";
 import type { CanvasData } from "../types";
 import { CanvasRenderer } from "./CanvasRenderer";
@@ -17,7 +16,25 @@ const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRec
 
 afterEach(() => {
 	HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+	vi.useRealTimers();
 });
+
+/**
+ * Let `ms` pass for a board rendered after `vi.useFakeTimers()`. The mount fit
+ * waits 100ms on a timer, which the fake clock fires at once, and then an
+ * animation frame, which happy-dom runs on a real `setImmediate` the fake clock
+ * does not own — hence one real turn after the advance.
+ */
+async function elapse(ms: number): Promise<void> {
+	act(() => {
+		vi.advanceTimersByTime(ms);
+	});
+	const { promise, resolve } = Promise.withResolvers<void>();
+	setImmediate(resolve);
+	await act(async () => {
+		await promise;
+	});
+}
 
 /**
  * happy-dom lays nothing out, so every element measures 0x0. Fit-to-view leaves
@@ -158,32 +175,35 @@ describe("CanvasRenderer toolbar and viewport", () => {
 	});
 
 	test("reopens a board at the viewport the reader left it at", async () => {
+		vi.useFakeTimers();
 		stubViewportRect(800, 500);
 		const first = render(<CanvasRenderer data={oneNode()} boardId="Board.canvas" />);
-		await delay(150);
+		await elapse(150);
 		fireEvent.click(pick<HTMLButtonElement>(first.container, '[aria-label="Zoom in"]'));
 		const moved = worldTransform(first.container);
 		cleanup();
 
 		// The second visit must not re-fit over the remembered position.
 		const second = render(<CanvasRenderer data={oneNode()} boardId="Board.canvas" />);
-		await delay(150);
+		await elapse(150);
 		expect(worldTransform(second.container)).toBe(moved);
 		expect(localStorage.getItem(viewportStorageKey("Board.canvas"))).not.toBeNull();
 	});
 
 	test("a first visit fits the board to the viewport", async () => {
+		vi.useFakeTimers();
 		stubViewportRect(800, 500);
 		const { container } = render(<CanvasRenderer data={oneNode()} boardId="Fresh.canvas" />);
-		await delay(150);
+		await elapse(150);
 		expect(worldTransform(container)).toBe("translate(250px, 175px) scale(1.5)");
 	});
 
 	test("ignores a stored viewport that is not a usable triple", async () => {
 		localStorage.setItem(viewportStorageKey("Bad.canvas"), '{"x":"left"}');
+		vi.useFakeTimers();
 		stubViewportRect(800, 500);
 		const { container } = render(<CanvasRenderer data={oneNode()} boardId="Bad.canvas" />);
-		await delay(150);
+		await elapse(150);
 		expect(worldTransform(container)).toBe("translate(250px, 175px) scale(1.5)");
 	});
 
@@ -670,15 +690,14 @@ describe("CanvasRenderer editor: selection, drag and delete", () => {
 	});
 
 	test("fits once on mount and leaves the viewport alone after a drag", async () => {
+		vi.useFakeTimers();
 		stubViewportRect(800, 500);
 		const { container } = render(<CanvasRenderer data={oneNode()} editable />);
-		await waitFor(() =>
-			expect(worldTransform(container)).toBe("translate(250px, 175px) scale(1.5)"),
-		);
+		await elapse(150);
+		expect(worldTransform(container)).toBe("translate(250px, 175px) scale(1.5)");
 		dragCard(container, "a", 40, 20);
-		// The mount fit is deferred by a real 100ms timer; a refit after the
-		// move would have landed within this wait.
-		await delay(250);
+		// A refit after the move would land within this much time.
+		await elapse(250);
 		expect(worldTransform(container)).toBe("translate(250px, 175px) scale(1.5)");
 	});
 });

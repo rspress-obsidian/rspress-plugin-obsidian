@@ -147,7 +147,7 @@ export function propertyValue(ref: PropertyRef, env: EvalEnv, row: RowScope): Va
 }
 
 /** `formula.name` for `row`: computed once per row, with circular references reported. */
-export function evaluateFormula(name: string, env: EvalEnv, row: RowScope): Value {
+function evaluateFormula(name: string, env: EvalEnv, row: RowScope): Value {
 	return guarded(() => formulaValue(name, env, row));
 }
 

@@ -11,7 +11,7 @@ export type FilterNode =
 	| { kind: "statement"; source: string }
 	| { kind: "and" | "or" | "not"; children: FilterNode[] };
 
-export type SortDirection = "ASC" | "DESC";
+type SortDirection = "ASC" | "DESC";
 
 export interface SortSpec {
 	property: string;

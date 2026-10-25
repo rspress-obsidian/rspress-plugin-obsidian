@@ -465,6 +465,11 @@ export interface ContentPage {
  */
 export interface ContentIndex {
 	rootDir: string;
+	/**
+	 * The prefix this tree's routes and attachment URLs start with
+	 * (`vaultRoutePrefix` for the vault, `""` for the docs root).
+	 */
+	routePrefix?: string;
 	pages: ContentPage[];
 	assets: ContentAsset[];
 	byAbsolutePath: Map<string, ContentPage>;
@@ -613,4 +618,11 @@ export interface RemarkWikiLinkPluginOptions {
 	 * Rspress, so those URLs must be prefixed here. Defaults to `/`.
 	 */
 	getSiteBase?: () => string;
+	/**
+	 * Where KaTeX's stylesheet is served, base included. Set by the `markdown()`
+	 * plugin, which publishes the file and registers the `KatexStylesheet`
+	 * component: a page that renders KaTeX math then links the stylesheet from
+	 * its head. Unset, the pass links nothing, and the site styles KaTeX itself.
+	 */
+	getKatexStylesheetHref?: () => string;
 }

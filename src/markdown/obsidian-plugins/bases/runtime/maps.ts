@@ -51,6 +51,10 @@ function defaultImport(): Promise<unknown> {
 	// import would put MapLibre (~800 kB) in the chunk every page loads.
 	return Promise.all([
 		import("maplibre-gl"),
+		// Lands in its own async stylesheet, fetched with this chunk, only
+		// because the Bases feature's builder config (`mapLibraryBuilderConfig`)
+		// gives it a split chunk: Rspress otherwise hoists every imported
+		// stylesheet, lazy ones included, into the global one every page loads.
 		// @ts-expect-error -- a stylesheet: the site's bundler injects it; it has no module type.
 		import("maplibre-gl/dist/maplibre-gl.css"),
 	]).then(([library]) => library);

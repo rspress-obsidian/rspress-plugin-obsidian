@@ -155,14 +155,17 @@ describe("luxonPlus", () => {
 	});
 
 	test("fractions are exact time at casual lengths (365-day year, 30-day month)", () => {
-		expect(show(luxonPlus(new Date(2024, 0, 31), { years: 1.5 }))).toBe("2025-08-01 12:00:00.000");
-		expect(show(luxonPlus(new Date(2024, 0, 31), { months: 1.5 }))).toBe("2024-03-15 00:00:00.000");
-		expect(show(luxonPlus(new Date(2024, 0, 31), { weeks: 1.5 }))).toBe("2024-02-10 12:00:00.000");
-		expect(show(luxonPlus(new Date(2024, 0, 31), { days: 1.5 }, -1))).toBe(
-			"2024-01-29 12:00:00.000",
-		);
-		expect(show(luxonPlus(new Date(2024, 0, 31), { hours: 25, minutes: 1, seconds: 1 }))).toBe(
-			"2024-02-01 01:01:01.000",
+		// The fraction is elapsed milliseconds after the calendar step, as in Luxon,
+		// so across a DST change the wall clock shifts by the offset difference.
+		const day = 86_400_000;
+		const start = new Date(2024, 0, 31);
+		const exactly = (date: Date, ms: number) => new Date(date.getTime() + ms);
+		expect(luxonPlus(start, { years: 1.5 })).toEqual(exactly(new Date(2025, 0, 31), 182.5 * day));
+		expect(luxonPlus(start, { months: 1.5 })).toEqual(exactly(new Date(2024, 1, 29), 15 * day));
+		expect(luxonPlus(start, { weeks: 1.5 })).toEqual(exactly(new Date(2024, 1, 7), 3.5 * day));
+		expect(luxonPlus(start, { days: 1.5 }, -1)).toEqual(exactly(new Date(2024, 0, 30), -0.5 * day));
+		expect(luxonPlus(start, { hours: 25, minutes: 1, seconds: 1 })).toEqual(
+			exactly(start, 25 * 3_600_000 + 61_000),
 		);
 	});
 });

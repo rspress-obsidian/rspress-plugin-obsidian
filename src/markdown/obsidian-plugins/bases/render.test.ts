@@ -678,12 +678,29 @@ views:
 		} finally {
 			mapLibrary.installed = undefined;
 		}
-		expect(mapLibraryBuilderConfig()).toEqual({});
+		expect(mapLibraryBuilderConfig()).not.toHaveProperty("resolve");
 	});
 
 	test("maplibre-gl is looked up where the site's bundler resolves it", () => {
 		expect(isMapLibraryInstalled()).toBe(true);
 		expect(isMapLibraryInstalled(os.tmpdir())).toBe(false);
+	});
+
+	test("MapLibre's stylesheet gets a lazy chunk of its own, not a place in the global one", () => {
+		const { splitChunks } = mapLibraryBuilderConfig();
+		const group = splitChunks ? splitChunks.cacheGroups?.["obsidian-maplibre-css"] : undefined;
+		if (!group || typeof group !== "object" || !(group.test instanceof RegExp)) {
+			throw new Error("expected a cache group with a RegExp test");
+		}
+		// Rspress's `styles` group (priority 99) pulls every stylesheet into the
+		// one every page loads; only a higher priority keeps this one out of it.
+		expect(group).toMatchObject({ chunks: "async", enforce: true });
+		expect(group.priority).toBeGreaterThan(99);
+		expect(group.test.test("/site/node_modules/maplibre-gl/dist/maplibre-gl.css")).toBe(true);
+		expect(group.test.test("C:\\site\\node_modules\\maplibre-gl\\dist\\maplibre-gl.css")).toBe(
+			true,
+		);
+		expect(group.test.test("/site/node_modules/maplibre-gl/dist/maplibre-gl.js")).toBe(false);
 	});
 
 	test("a layout only a plugin provides renders as a table, reported", async () => {

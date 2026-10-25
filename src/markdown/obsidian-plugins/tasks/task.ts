@@ -38,7 +38,7 @@ export type TaskDateField = "created" | "start" | "scheduled" | "due" | "cancell
 /** Priorities as Tasks numbers them: 0 highest … 5 lowest; 3 is "none". */
 export type Priority = 0 | 1 | 2 | 3 | 4 | 5;
 
-export const PRIORITY_NONE: Priority = 3;
+const PRIORITY_NONE: Priority = 3;
 
 /** Priority names as group headings and `data-task-priority` show them (3 is "Normal"). */
 export const PRIORITY_NAMES: readonly string[] = [
@@ -71,7 +71,7 @@ interface ListEntryBase {
 }
 
 /** A list item that is not a task: shown under its parent task in `show tree`. */
-export interface PlainListItem extends ListEntryBase {
+interface PlainListItem extends ListEntryBase {
 	kind: "item";
 	/** The checkbox character of an item the global filter excludes. */
 	statusCharacter?: string;
@@ -238,7 +238,7 @@ interface ParsedTaskBody {
 }
 
 /** Peel the signifiers off a task body, as Tasks' serializer does (at most 20 passes). */
-export function parseTaskBody(body: string): ParsedTaskBody {
+function parseTaskBody(body: string): ParsedTaskBody {
 	const parsed: ParsedTaskBody = {
 		description: body,
 		priority: PRIORITY_NONE,

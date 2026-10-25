@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test, vi } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 import { graphDataModule, graphNode } from "./graph-fixture";
 
@@ -98,5 +98,61 @@ describe("GraphView nodePointerAreaPaint", () => {
 		expect(lastArc.y).toBe(34);
 		expect(lastArc.radius).toBe(5);
 		expect(lastFillStyle).toBe("#ff00ff");
+	});
+
+	test("paints every link's hit area from the first link's call, and nothing from the others", async () => {
+		render(<GraphView width={400} height={300} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+		const painter = capturedProps?.linkPointerAreaPaint as (
+			link: object,
+			paintColor: string,
+			ctx: CanvasRenderingContext2D,
+			globalScale: number,
+		) => void;
+		const graphData = capturedProps?.graphData as { links: object[] } | undefined;
+		const firstLink = graphData?.links[0];
+		if (!firstLink) throw new Error("GraphView handed the force graph no links");
+
+		// A context that accepts any call and counts them; the painter's cache
+		// canvas gets one too (happy-dom has no 2D canvas).
+		const calls: string[] = [];
+		const recordingContext = (canvas: object) =>
+			new Proxy({} as Record<string | symbol, unknown>, {
+				get: (_, prop) => {
+					if (prop === "canvas") return canvas;
+					if (prop === "getTransform") return () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+					return (..._args: unknown[]) => {
+						calls.push(String(prop));
+					};
+				},
+				set: () => true,
+			}) as unknown as CanvasRenderingContext2D;
+		const cacheCanvas = { width: 0, height: 0, getContext: () => recordingContext(cacheCanvas) };
+		const createElement = document.createElement.bind(document);
+		const spy = spyOn(document, "createElement").mockImplementation(((tag: string) =>
+			tag === "canvas"
+				? (cacheCanvas as unknown as HTMLCanvasElement)
+				: createElement(tag)) as typeof document.createElement);
+		try {
+			const shadow = recordingContext({ width: 400, height: 300 });
+			painter({}, "#000002", shadow, 1);
+			expect(calls).toEqual([]);
+
+			// The first repaint paints in place; once the view has held still
+			// through an idle period, repaints copy the cached layer.
+			vi.useFakeTimers();
+			try {
+				painter(firstLink, "#000001", shadow, 1);
+				vi.advanceTimersByTime(1000);
+				painter(firstLink, "#000001", shadow, 1);
+			} finally {
+				vi.useRealTimers();
+			}
+			expect(calls.filter((name) => name === "drawImage")).toHaveLength(1);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });

@@ -9,15 +9,20 @@ interface VirtualModulesPluginLike {
 	getVirtualFileStore(): { writeVirtualFileSync(filePath: string, contents: string): void };
 }
 
+interface HookLike {
+	tap(name: string, fn: () => void): void;
+}
+
 /** The part of an rspack compiler the refresher drives. */
 interface CompilerLike {
 	context: string;
 	watching?: {
 		invalidateWithChangesAndRemovals(changed: Set<string>, removed: Set<string>): void;
 	};
+	hooks: Record<"watchRun" | "done" | "failed", HookLike>;
 }
 
-/** A tiny rspack plugin that only remembers the compiler it is applied to. */
+/** A tiny rspack plugin that remembers the compiler it is applied to and when it compiles. */
 interface CompilerCapture {
 	name: string;
 	apply(compiler: CompilerLike): void;
@@ -61,6 +66,13 @@ export interface GraphDevRefresherOptions {
 	moduleDir: string;
 	/** Rebuild every graph module; returns module id → source. */
 	rebuild: () => Promise<Record<string, string>>;
+	/**
+	 * Quiet time after the last watcher event before rebuilding. One save is a
+	 * burst of events under a millisecond apart (an atomic save is two renames),
+	 * so a short window still rebuilds once per save; the rebuild itself is a few
+	 * milliseconds, and every millisecond here delays the graph behind the page.
+	 * @default 25
+	 */
 	debounceMs?: number;
 	watch?: WatchFunction;
 }
@@ -97,6 +109,10 @@ export function createGraphDevRefresher(options: GraphDevRefresherOptions): Grap
 	let watchers: Array<Pick<FSWatcher, "close">> = [];
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let pending: Promise<void> = Promise.resolve();
+	// Compilers between `watchRun` and `done`, and whether a watched change is
+	// waiting for them.
+	const compiling = new Set<CompilerLike>();
+	let refreshAfterCompile = false;
 	const watch = options.watch ?? (fsWatch as WatchFunction);
 
 	const fileFor = (moduleId: string) => path.join(options.moduleDir, `${moduleId}.js`);
@@ -138,8 +154,19 @@ export function createGraphDevRefresher(options: GraphDevRefresherOptions): Grap
 		return pending;
 	};
 
+	// The note a save changed is usually being recompiled when the debounce
+	// ends. Invalidating mid-compile makes rspack run the page again with the
+	// graph before the page's hot update goes out, which held the edited text
+	// back by ~40ms; waiting for that compile ships the page first and the graph
+	// right behind it.
+	const scheduleRefresh = () => {
+		if (compiling.size > 0) refreshAfterCompile = true;
+		else void refresh();
+	};
+
 	const stopWatching = () => {
 		clearTimeout(timer);
+		refreshAfterCompile = false;
 		for (const watcher of watchers) watcher.close();
 		watchers = [];
 	};
@@ -165,12 +192,24 @@ export function createGraphDevRefresher(options: GraphDevRefresherOptions): Grap
 						plugin: new rspack.experiments.VirtualModulesPlugin(current),
 					};
 					targets.push(target);
+					const name = "rspress-plugin-obsidian:graph-dev-compiler";
 					appendPlugins([
 						target.plugin,
 						{
-							name: "rspress-plugin-obsidian:graph-dev-compiler",
+							name,
 							apply(compiler) {
 								target.compiler = compiler;
+								const settle = () => {
+									compiling.delete(compiler);
+									if (!refreshAfterCompile || compiling.size > 0) return;
+									refreshAfterCompile = false;
+									void refresh();
+								};
+								compiler.hooks.watchRun.tap(name, () => {
+									compiling.add(compiler);
+								});
+								compiler.hooks.done.tap(name, settle);
+								compiler.hooks.failed.tap(name, settle);
 							},
 						},
 					]);
@@ -185,7 +224,7 @@ export function createGraphDevRefresher(options: GraphDevRefresherOptions): Grap
 				const name = String(file ?? "");
 				if (/(?:^|[\\/])(?:node_modules|\.git)(?:[\\/]|$)/.test(name)) return;
 				clearTimeout(timer);
-				timer = setTimeout(() => void refresh(), options.debounceMs ?? 150);
+				timer = setTimeout(scheduleRefresh, options.debounceMs ?? 25);
 			};
 			watchers = [...new Set(roots)].flatMap((root) => {
 				try {

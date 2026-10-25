@@ -170,7 +170,57 @@ describe("dv API", () => {
 
 	test("dv.el builds only plain text elements", () => {
 		expect(js('dv.el("b", "bold", { cls: "x" })').html).toBe('<b class="x">bold</b>');
+		expect(js('dv.el("span", "x", { cls: ["a", "b"] })').html).toBe('<span class="a b">x</span>');
+		expect(js('dv.el("em", "z", { cls: 3 })').html).toBe('<em class="3">z</em>');
+		expect(js('dv.el("div", "y")').html).toBe("<div>y</div>");
 		expect(js('dv.el("script", "x")').error).toContain("does not create <script>");
+	});
+
+	const paragraph = (source: string) =>
+		js(`dv.paragraph(${source})`).html?.replace(/^<p class="dataviewjs-paragraph">|<\/p>$/g, "");
+
+	test("dv.pagePaths selects with the DQL source grammar and returns vault paths", () => {
+		expect(paragraph('dv.pagePaths(\'"N"\').join(",")')).toBe("N/Alpha.md,N/Beta.md,N/Gamma.md");
+	});
+
+	test("dv.array wraps a scalar, keeps a list, and makes undefined empty", () => {
+		expect(
+			paragraph(
+				'[dv.array(1).length, dv.array([1, 2]).length, dv.array().length, dv.isArray([]), dv.isArray(1)].join(",")',
+			),
+		).toBe("1,2,0,true,false");
+	});
+
+	test("dv.date and dv.duration accept only text or a date", () => {
+		expect(paragraph('[dv.date(5) === null, dv.date(dv.date("2026-08-05")).day].join(",")')).toBe(
+			"true,5",
+		);
+		expect(paragraph('dv.duration("1 day 3 hours")')).toBe("1 day, 3 hours");
+		expect(paragraph("dv.duration(3) === null")).toBe("true");
+	});
+
+	test("dv.sectionLink and dv.blockLink build subpath links with an optional display", () => {
+		expect(paragraph('dv.sectionLink("Home", "Home", false, "Shown")')).toBe(
+			'<a href="/Home#home">Shown</a>',
+		);
+		expect(paragraph('dv.sectionLink("Home", "Home")')).toBe(
+			'<a href="/Home#home">Home &gt; Home</a>',
+		);
+		// The fixture has no `^b1` block, so the link renders unresolved with its label.
+		expect(paragraph('dv.blockLink("N/Alpha", "b1", false, "Blk")')).toBe(
+			'<span class="internal-link is-unresolved">Blk</span>',
+		);
+		expect(paragraph('dv.blockLink("N/Alpha", "b1")')).toBe(
+			'<span class="internal-link is-unresolved">Alpha &gt; b1</span>',
+		);
+	});
+
+	test("dv.compare and dv.equal use Dataview's value order", () => {
+		expect(
+			paragraph(
+				'[dv.compare(1, 2), dv.compare("b", "a"), dv.equal([1], [1]), dv.equal(1, "1")].join(",")',
+			),
+		).toBe("-1,1,true,false");
 	});
 });
 

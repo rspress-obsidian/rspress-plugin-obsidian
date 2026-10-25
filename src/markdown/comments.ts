@@ -17,9 +17,9 @@
 
 import type { Root } from "mdast";
 import type { Parent } from "unist";
-import { visit } from "unist-util-visit";
 import { slugifyHeading, stripMarkdownFormatting } from "../shared/slug.js";
 import { getContentLineFlags } from "./content-index.js";
+import { visit } from "./visit.js";
 
 const DELIMITER = "%%";
 
@@ -87,6 +87,8 @@ function codeSpans(runs: BacktickRun[]): { start: number; end: number }[] {
 
 /** Every comment range in `source`, in document order and non-overlapping. */
 export function findCommentRanges(source: string): CommentRange[] {
+	// Most notes have no `%%`; skip classifying every line of them.
+	if (!source.includes(DELIMITER)) return [];
 	const lines = source.split("\n");
 	const isContent = getContentLineFlags(lines);
 	const ranges: CommentRange[] = [];
@@ -152,7 +154,7 @@ function rangeContaining(
 }
 
 /** Whether a single source offset falls inside a comment. */
-export function isOffsetInComment(offset: number, ranges: CommentRange[]): boolean {
+function isOffsetInComment(offset: number, ranges: CommentRange[]): boolean {
 	return ranges.some((range) => offset >= range.start && offset < range.end);
 }
 

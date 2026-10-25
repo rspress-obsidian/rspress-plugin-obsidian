@@ -33,7 +33,7 @@ export interface GraphBuildDiagnostics {
 }
 
 /** Virtual module id → module source. */
-export type GraphModules = Record<string, string>;
+type GraphModules = Record<string, string>;
 
 export interface GraphBuildResult {
 	graphData: GraphData;

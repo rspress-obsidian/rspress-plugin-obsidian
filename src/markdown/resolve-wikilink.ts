@@ -438,7 +438,7 @@ function headingKey(text: string): string {
  * `A#B` is a path: `B` must sit under an `A` (intermediate levels may be
  * skipped, as in Obsidian).
  */
-export function findHeading(page: ContentPage, anchor: string): HeadingEntry | undefined {
+function findHeading(page: ContentPage, anchor: string): HeadingEntry | undefined {
 	const parts = anchor
 		.split("#")
 		.map((part) => part.trim())

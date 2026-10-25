@@ -58,7 +58,7 @@ mock.module("react-force-graph-2d", () => ({
 	},
 }));
 
-const { default: GraphPanel } = await import("../GraphPanel");
+const { default: GraphPanel, SEARCH_DEBOUNCE_MS } = await import("../GraphPanel");
 const { LOCAL_STORAGE_KEY_DISPLAY, LOCAL_STORAGE_KEY_FILTERS, LOCAL_STORAGE_KEY_FORCES } =
 	await import("../graph-panel-storage");
 
@@ -86,6 +86,19 @@ function visibleNodeIds(): string[] {
 	const data = capturedGraphProps?.graphData as { nodes: Array<{ id: string }> } | undefined;
 	if (!data) throw new Error("GraphView never handed props to the force graph");
 	return data.nodes.map((node) => node.id).sort();
+}
+
+/** Type a query into the search box and let the typing pause apply it. */
+function typeQuery(input: HTMLInputElement, value: string) {
+	vi.useFakeTimers();
+	try {
+		fireEvent.change(input, { target: { value } });
+		act(() => {
+			vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS);
+		});
+	} finally {
+		vi.useRealTimers();
+	}
 }
 
 /** The graph region's accessible summary, which reports the derived counts. */
@@ -143,8 +156,26 @@ describe("GraphPanel filters", () => {
 		const { input } = await openPanelWithFilters();
 		expect(visibleNodeIds()).toEqual(["/api", "/guide", "/tags/project"]);
 
-		fireEvent.change(input, { target: { value: "API" } });
+		typeQuery(input, "API");
 		expect(visibleNodeIds()).toEqual(["/api", "/guide"]);
+	});
+
+	test("the query reaches the graph once typing pauses", async () => {
+		const { input } = await openPanelWithFilters();
+		vi.useFakeTimers();
+		try {
+			fireEvent.change(input, { target: { value: "API" } });
+			act(() => {
+				vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS - 1);
+			});
+			expect(visibleNodeIds()).toEqual(["/api", "/guide", "/tags/project"]);
+			act(() => {
+				vi.advanceTimersByTime(1);
+			});
+			expect(visibleNodeIds()).toEqual(["/api", "/guide"]);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	test("the global scope shows the whole vault, the local scope its neighborhood", async () => {
@@ -223,7 +254,7 @@ describe("GraphPanel filters", () => {
 
 	test("content: searches note text, loaded on demand", async () => {
 		const { input } = await openPanelWithFilters();
-		fireEvent.change(input, { target: { value: "content:rate" } });
+		typeQuery(input, "content:rate");
 		await act(async () => {
 			await import("virtual-graph-search-data");
 			await Promise.resolve();
@@ -252,7 +283,7 @@ describe("GraphPanel filters", () => {
 	test("hiding orphans drops nodes the search stranded", async () => {
 		const { container, input } = await openPanelWithFilters();
 		fireEvent.click(container.querySelector("button[aria-label='Increase depth']") as HTMLElement);
-		fireEvent.change(input, { target: { value: "leaf" } });
+		typeQuery(input, "leaf");
 
 		// /leaf matches but its only link went with the filtered-out /api, so
 		// the stranded node shows by default and disappears when orphans hide.

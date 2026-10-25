@@ -736,10 +736,7 @@ function metadataDate(value: unknown): Date | undefined {
 const frontmatterCache = new WeakMap<ContentIndex, Map<string, Promise<Record<string, unknown>>>>();
 
 /** A note's frontmatter, read once per index generation. */
-export function noteFrontmatter(
-	page: ContentPage,
-	index: ContentIndex,
-): Promise<Record<string, unknown>> {
+function noteFrontmatter(page: ContentPage, index: ContentIndex): Promise<Record<string, unknown>> {
 	let cache = frontmatterCache.get(index);
 	if (!cache) {
 		cache = new Map();

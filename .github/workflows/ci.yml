@@ -92,25 +92,10 @@ jobs:
           test -f dist/styles.css
           bun run test:publish
 
-      # The exports map and the declaration files it points at are exactly what
-      # these check: `publint` for exports/`files`/types-form mismatches, and
-      # `attw --pack` for what Node16, bundler and `nodenext` consumers actually
-      # resolve through the packed tarball. Declarations that only typecheck
-      # inside this repo (extensionless relative specifiers, `.ts` suffixes)
-      # are what these two exist to catch.
-      #
-      # Two attw rules are ignored, deliberately:
-      #   - `no-resolution`: `node10` (legacy TS `moduleResolution: "node"`)
-      #     has no way to reach a subpath without root-level proxy files, and
-      #     attw resolves the `.css` subpaths as if they were TypeScript
-      #     modules. Neither is a supported consumption path.
-      #   - `cjs-resolves-to-esm`: the two graph runtime components are
-      #     browser-only and ship ESM alone; the `default` condition keeps
-      #     `require.resolve` working (see test/publish/dist.test.ts), and
-      #     `require(esm)` loads them on every Node version we support
-      #     (engines: node >=22.14.0).
-      # `-f ascii` because the table/auto formatters crash on this machine's
-      # hoisted `ansi-regex` v6 (`ansiRegex is not a function`).
+      # `publint` checks the exports map, `files` and the types-condition form
+      # against what the package ships. attw is not used: it drives the
+      # TypeScript compiler API in-process, which TypeScript 7 does not expose,
+      # and the repo builds with TypeScript 7 only.
       - name: Public API checks
         shell: bash
         run: bun run test:types

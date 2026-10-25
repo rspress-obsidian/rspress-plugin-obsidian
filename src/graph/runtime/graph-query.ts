@@ -23,7 +23,7 @@ type Matcher = { kind: "text"; value: string } | { kind: "regex"; regex: RegExp 
 /** Where a term looks: `any` is name, path and text; the rest name one field. */
 type TermField = "any" | "path" | "file" | "tag" | "content";
 
-export type GraphQueryExpr =
+type GraphQueryExpr =
 	| { type: "and"; items: GraphQueryExpr[] }
 	| { type: "or"; items: GraphQueryExpr[] }
 	| { type: "not"; item: GraphQueryExpr }

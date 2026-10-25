@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import fc from "fast-check";
+import { normalizeFsPath } from "../shared/route-path.js";
 import { normalizeUnicode } from "../shared/slug.js";
 import {
 	isPathInsideRoot,
 	isRealPathInsideRoot,
 	normalizeFilePathKey,
 	normalizeRealPath,
+	pathUnderRoot,
 } from "./utils.ts";
 
 /** The remark pass reports forward-slash paths while `vaultRoot` comes from
@@ -43,6 +48,29 @@ describe("isPathInsideRoot", () => {
  * containment test fails in both directions. Only Windows can produce a real
  * one; these are synthetic strings, and the Windows CI leg covers the real case.
  */
+describe("pathUnderRoot", () => {
+	test("spells a path under the root's real path with the root as configured", () => {
+		const real = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "path-under-root-")));
+		const link = `${real}-link`;
+		fs.symlinkSync(real, link, "dir");
+		try {
+			expect(pathUnderRoot(`${link}/a/Note.md`, link)).toBe(`${link}/a/Note.md`);
+			// Rewritten paths use `/` separators, the spelling the content index keys by.
+			expect(pathUnderRoot(`${real}/a/Note.md`, link)).toBe(normalizeFsPath(`${link}/a/Note.md`));
+			expect(pathUnderRoot(`${real}-other/Note.md`, link)).toBeUndefined();
+			expect(pathUnderRoot("/elsewhere/Note.md", link)).toBeUndefined();
+		} finally {
+			fs.rmSync(link, { force: true });
+			fs.rmSync(real, { recursive: true, force: true });
+		}
+	});
+
+	test("is undefined outside a root that does not exist", () => {
+		expect(pathUnderRoot("/elsewhere/Note.md", "/no/such/root")).toBeUndefined();
+		expect(pathUnderRoot("/no/such/root/Note.md", "/no/such/root")).toBe("/no/such/root/Note.md");
+	});
+});
+
 describe("normalizeRealPath", () => {
 	test("strips the extended-length drive prefix", () => {
 		expect(normalizeRealPath("\\\\?\\C:\\vault\\note.md")).toBe("C:\\vault\\note.md");

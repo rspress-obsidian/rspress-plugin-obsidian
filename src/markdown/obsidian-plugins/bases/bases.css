@@ -10,17 +10,16 @@
 
 html.dark .bases-container {
 	--bases-border: var(--rp-c-divider, #303642);
-	--bases-surface: var(--rp-c-bg-soft, #171a21);
-	--bases-muted: var(--rp-c-text-2, #a0a7b4);
 }
 
+/* The danger token clears WCAG AA as text; #e5484d was 3.9:1 on white. */
 .bases-error,
 .bases-warning {
 	margin: 0.5rem 0;
 	padding: 0.5rem 0.75rem;
-	border-left: 3px solid #e5484d;
+	border-left: 3px solid var(--obsidian-c-danger, #c62828);
 	border-radius: 4px;
-	background: color-mix(in srgb, #e5484d 8%, transparent);
+	background: color-mix(in srgb, var(--obsidian-c-danger, #c62828) 8%, transparent);
 	white-space: pre-wrap;
 }
 
@@ -30,7 +29,7 @@ html.dark .bases-container {
 }
 
 .bases-error-value {
-	color: #e5484d;
+	color: var(--obsidian-c-danger, #c62828);
 	font-size: 0.85em;
 }
 
@@ -154,11 +153,6 @@ html.dark .bases-container {
 	color: var(--rp-c-text-1, #1f2937);
 }
 
-html.dark .bases-view-tab:hover,
-html.dark .bases-view-tab-input:checked ~ .bases-view-tabs > .bases-view-tab {
-	color: var(--rp-c-text-1, #e5e7eb);
-}
-
 .bases-toolbar {
 	display: flex;
 	align-items: baseline;
@@ -176,6 +170,12 @@ html.dark .bases-view-tab-input:checked ~ .bases-view-tabs > .bases-view-tab {
 /* Table */
 .bases-table-container {
 	overflow-x: auto;
+}
+
+/* Rspress's scroll wrapper brought 1.5rem margins: a band between the
+ * toolbar and the table. */
+.bases-table-container > .rp-table-scroll-container {
+	margin: 0;
 }
 
 /* Rspress gives a table its rounded frame (`border-radius`, `overflow:
@@ -334,8 +334,15 @@ svg.bases-icon {
 	letter-spacing: 0.02em;
 }
 
+/* Not Rspress's padded, hover-greyed <details>: only the summary toggles. */
 details.bases-group {
 	margin-bottom: 0.75rem;
+	padding: 0;
+	cursor: auto;
+}
+
+details.bases-group:hover {
+	background-color: transparent;
 }
 
 details.bases-group > summary {
@@ -387,11 +394,6 @@ details.bases-group > summary {
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
-}
-
-html.dark .bases-cards-item,
-html.dark .bases-kanban-card {
-	background: var(--rp-c-bg, #0f1115);
 }
 
 /* Map: the table of located files, drawn as a MapLibre map in the browser

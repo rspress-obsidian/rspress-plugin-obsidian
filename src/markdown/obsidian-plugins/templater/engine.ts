@@ -104,7 +104,7 @@ export interface ExpandOptions {
 }
 
 /** A template split into the chunks a program is compiled from. */
-export function templateChunks(source: string, { keepDynamic }: ExpandOptions): TemplateChunk[] {
+function templateChunks(source: string, { keepDynamic }: ExpandOptions): TemplateChunk[] {
 	const { commands, unclosed } = scanCommands(source);
 	if (unclosed !== undefined) {
 		const line = source.slice(0, unclosed).split("\n").length;

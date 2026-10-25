@@ -163,7 +163,7 @@ function renderLinkedText(text: string, rc: RenderContext): string {
 }
 
 /** `[key:: value]` shows key and value; `(key:: value)` shows only the value, as in Dataview. */
-export function inlineFieldHtml(key: string, valueHtml: string, wrapping: "[" | "("): string {
+function inlineFieldHtml(key: string, valueHtml: string, wrapping: "[" | "("): string {
 	return wrapping === "["
 		? `<span class="dataview inline-field"><span class="dataview inline-field-key">${escapeHtmlText(key)}</span><span class="dataview inline-field-value">${valueHtml}</span></span>`
 		: `<span class="dataview inline-field"><span class="dataview inline-field-standalone-value">${valueHtml}</span></span>`;

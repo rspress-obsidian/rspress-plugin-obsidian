@@ -3,7 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test, vi } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { graphDataModule } from "./graph-fixture";
 
@@ -41,13 +41,25 @@ mock.module("../GraphPanel", () => ({
 const { default: LazyGraphPanel } = await import("../LazyGraphPanel");
 
 /** Let the lazy import and React effects settle. */
-async function settle(ms = 0): Promise<void> {
+async function settle(): Promise<void> {
 	const { promise, resolve } = Promise.withResolvers<void>();
-	setTimeout(resolve, ms);
+	setTimeout(resolve, 0);
 
 	await act(async () => {
 		await promise;
 	});
+}
+
+/**
+ * Fire every timer due within `ms` of the `vi.useFakeTimers()` call that
+ * started the test, then settle whatever they loaded on real timers.
+ */
+async function elapse(ms: number): Promise<void> {
+	act(() => {
+		vi.advanceTimersByTime(ms);
+	});
+	vi.useRealTimers();
+	await settle();
 }
 
 function fab(container: HTMLElement): HTMLButtonElement {
@@ -60,6 +72,9 @@ describe("LazyGraphPanel loading", () => {
 		mountCount = 0;
 		lastDefaultOpen = undefined;
 		lastReaderRequested = undefined;
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		localStorage.clear();
 	});
 
 	afterAll(() => {
@@ -67,13 +82,14 @@ describe("LazyGraphPanel loading", () => {
 	});
 
 	test("offers a FAB and loads nothing while the panel is closed", async () => {
+		vi.useFakeTimers();
 		const { container } = render(<LazyGraphPanel />);
 
 		expect(fab(container)).toBeTruthy();
 
 		// The panel used to auto-load 100ms after mount, downloading the whole
 		// graph on every page view.
-		await settle(200);
+		await elapse(200);
 		expect(mountCount).toBe(0);
 	});
 
@@ -100,6 +116,46 @@ describe("LazyGraphPanel loading", () => {
 		expect(lastReaderRequested).toBe(false);
 	});
 
+	test("does not load a defaultOpen panel the reader closed before", async () => {
+		localStorage.setItem("rspress-graph-view-open", "false");
+		const { container } = render(<LazyGraphPanel defaultOpen />);
+
+		await settle();
+
+		// GraphPanel would mount closed, showing only its FAB: the wrapper's does.
+		expect(mountCount).toBe(0);
+		expect(fab(container)).toBeTruthy();
+
+		fireEvent.click(fab(container));
+		await settle();
+		expect(mountCount).toBe(1);
+		expect(lastReaderRequested).toBe(true);
+	});
+
+	test("does not load a defaultOpen panel on a phone", async () => {
+		vi.spyOn(window, "matchMedia").mockImplementation(
+			(query: string) => ({ matches: query === "(max-width: 639px)" }) as MediaQueryList,
+		);
+		const { container } = render(<LazyGraphPanel defaultOpen />);
+
+		await settle();
+
+		expect(mountCount).toBe(0);
+		expect(fab(container)).toBeTruthy();
+	});
+
+	test("a stored choice to keep the panel open wins on a phone", async () => {
+		localStorage.setItem("rspress-graph-view-open", "true");
+		vi.spyOn(window, "matchMedia").mockImplementation(
+			(query: string) => ({ matches: query === "(max-width: 639px)" }) as MediaQueryList,
+		);
+		render(<LazyGraphPanel defaultOpen />);
+
+		await settle();
+
+		expect(mountCount).toBe(1);
+	});
+
 	test("loads the panel on the g shortcut", async () => {
 		render(<LazyGraphPanel />);
 
@@ -111,6 +167,7 @@ describe("LazyGraphPanel loading", () => {
 	});
 
 	test("keeps the g shortcut out of text inputs", async () => {
+		vi.useFakeTimers();
 		render(<LazyGraphPanel />);
 
 		const input = document.createElement("input");
@@ -118,7 +175,7 @@ describe("LazyGraphPanel loading", () => {
 		input.focus();
 
 		fireEvent.keyDown(input, { key: "g" });
-		await settle(200);
+		await elapse(200);
 
 		expect(mountCount).toBe(0);
 		input.remove();

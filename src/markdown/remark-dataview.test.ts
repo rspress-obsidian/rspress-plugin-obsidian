@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Root } from "mdast";
@@ -9,8 +9,10 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { VFile } from "vfile";
+import { stripFrontmatter } from "../shared/frontmatter";
 import { buildContentIndex } from "./content-index";
 import { normalizeDailyNoteConfig } from "./daily-notes";
+import { markdown } from "./index";
 import { processDailyNoteNodes, processDataviewNodes } from "./remark-dataview";
 import type { ContentIndex, ContentPage } from "./types";
 
@@ -184,5 +186,54 @@ describe("daily notes", () => {
 		expect(await daily("daily/2026-08-21.md", FILES["daily/2026-08-21.md"] ?? "")).toContain(
 			"<p>Written {{date}} by hand.</p>",
 		);
+	});
+});
+
+describe("a vault reached through a symlink", () => {
+	// Rspack resolves every module to its real path, so Rspress compiles a note
+	// of a symlinked vault (or one under macOS's `/tmp`, itself a link to
+	// `/private/tmp`) at a path other than the `vaultRoot` the site configured.
+	test("a query on the note itself sees the vault, as its transclusion does", async () => {
+		const real = mkdtempSync(path.join(os.tmpdir(), "obsidian-dataview-real-"));
+		const link = `${real}-link`;
+		try {
+			const files: Record<string, string> = {
+				"notes/Alpha.md": "---\nstatus: open\n---\n# Alpha\n",
+				"Query.md": '---\nrating: 9\n---\n```dataview\nLIST FROM "notes"\n```\n\n`= this.rating`\n',
+				"Host.md": "![[Query]]\n",
+			};
+			for (const [name, content] of Object.entries(files)) {
+				mkdirSync(path.dirname(path.join(real, name)), { recursive: true });
+				writeFileSync(path.join(real, name), content);
+			}
+			symlinkSync(real, link, "dir");
+			const plugin = markdown({ vaultRoot: link, enableDataview: true, enableTransclusion: true });
+			const tuple = plugin.markdown?.remarkPlugins?.[0] as [never, never];
+			const render = async (name: string) =>
+				String(
+					await unified()
+						.use(remarkParse)
+						.use(remarkGfm)
+						.use(tuple[0], tuple[1])
+						.use(remarkRehype, { allowDangerousHtml: true })
+						.use(rehypeStringify, { allowDangerousHtml: true })
+						.process(
+							new VFile({
+								value: stripFrontmatter(files[name] ?? ""),
+								path: path.join(realpathSync(real), name),
+							}),
+						),
+				);
+
+			const embedded = await render("Host.md");
+			expect(embedded).toContain(">Alpha</a>");
+			expect(embedded).toContain('<span class="dataview-inline">9</span>');
+			const direct = await render("Query.md");
+			expect(direct).toContain(">Alpha</a>");
+			expect(direct).toContain('<span class="dataview-inline">9</span>');
+		} finally {
+			rmSync(link, { force: true });
+			rmSync(real, { recursive: true, force: true });
+		}
 	});
 });

@@ -1,8 +1,9 @@
 import type { Element, Root } from "hast";
 import rehypeRaw from "rehype-raw";
-import { EXIT, visit } from "unist-util-visit";
+import { EXIT } from "unist-util-visit";
 import type { VFile } from "vfile";
 import { withSiteBase } from "./media.js";
+import { visit } from "./visit.js";
 
 // The MDX node types `hast-util-raw` must pass through untouched — the list
 // `@mdx-js/mdx` exports as `nodeTypes`, which Rspress hands to its own

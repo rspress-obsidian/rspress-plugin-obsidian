@@ -97,6 +97,19 @@ const styles = walk(path.join(out, "static", "css"))
 	.join("\n");
 check(styles.includes(".callout"), "default markdown styles were not bundled");
 check(styles.includes(".kanban-plugin__board"), "the plugin features' styles were not bundled");
+// KaTeX's stylesheet is published as a file and linked from the head of the
+// pages that show math, not merged into the stylesheet every page loads.
+const headOf = (html) => html.slice(0, html.indexOf("</head>"));
+const katexHref = /<link rel="stylesheet" href="(\/obsidian-katex\/[^"]+\/katex\.min\.css)"/.exec(
+	headOf(welcome),
+)?.[1];
+check(katexHref, "Welcome: KaTeX's stylesheet is not linked from the head of a page with math");
+check(katexHref && existsSync(path.join(out, katexHref)), "KaTeX's stylesheet was not published");
+check(!styles.includes(".katex"), "KaTeX's stylesheet was merged into the global one");
+check(
+	!headOf(read("index.html")).includes("obsidian-katex"),
+	"index.html links KaTeX's stylesheet without showing math",
+);
 
 // The reproduced Obsidian plugins, rendered at build time from the tarball.
 const tasks = read("vault/Tasks.html");

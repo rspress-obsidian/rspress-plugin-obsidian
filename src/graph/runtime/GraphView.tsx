@@ -35,6 +35,7 @@ import {
 	labelZoomFor,
 	MAX_CENTER_PULL,
 } from "./graph-settings.js";
+import { createLinkHitAreaPainter } from "./link-hit-areas.js";
 import {
 	type CanvasColors,
 	DARK_COLORS,
@@ -44,7 +45,6 @@ import {
 	mergeColors,
 } from "./palette/colors.js";
 
-export type { GraphViewFilters } from "./deriveGraphViewData.js";
 export type { GraphViewColors } from "./palette/colors.js";
 
 const indexByPayload = new WeakMap<GraphPayload, GraphIndex>();
@@ -140,10 +140,7 @@ function useTheme(): boolean {
  * attachment ids are already the encoded file URL. Both get the site base,
  * which plain `<a href>`s and document loads need and the router adds itself.
  */
-export function nodeHref(
-	node: Pick<GraphNode, "id" | "kind">,
-	base = graphPayload.base || "/",
-): string {
+function nodeHref(node: Pick<GraphNode, "id" | "kind">, base = graphPayload.base || "/"): string {
 	const path = node.kind === "attachment" ? node.id : encodeRoutePath(node.id);
 	return `${base.replace(/\/+$/, "")}${path}`;
 }
@@ -167,7 +164,7 @@ export class GraphErrorBoundary extends Component<
 }
 
 /** Shown when the site was built without the optional `react-force-graph-2d` peer. */
-export const GRAPH_RENDERER_MISSING_MESSAGE = "Install react-force-graph-2d to draw the graph";
+const GRAPH_RENDERER_MISSING_MESSAGE = "Install react-force-graph-2d to draw the graph";
 
 /**
  * Whether `value` can be rendered as a React component: a function, or one of
@@ -255,13 +252,13 @@ const LARGE_GRAPH_BASE_RADIUS = 4;
  * pointer-area painter and the arrow placement use the same value so the hit
  * region and arrowheads line up with the drawn dot.
  */
-export function nodeRadius(degree: number, isLargeGraph: boolean, nodeSize: number): number {
+function nodeRadius(degree: number, isLargeGraph: boolean, nodeSize: number): number {
 	const base = isLargeGraph ? LARGE_GRAPH_BASE_RADIUS : BASE_RADIUS;
 	return base * nodeSize * (1 + 0.25 * Math.log2(1 + degree));
 }
 
 /** Label opacity at a zoom level: fades in over the 30% of zoom below the threshold. */
-export function labelOpacity(globalScale: number, textFadeThreshold: number): number {
+function labelOpacity(globalScale: number, textFadeThreshold: number): number {
 	const fullAt = labelZoomFor(textFadeThreshold);
 	const startAt = fullAt * 0.7;
 	return Math.min(1, Math.max(0, (globalScale - startAt) / (fullAt - startAt)));
@@ -726,6 +723,24 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		},
 		[isLargeGraph, isLinkHighlighted, display.linkThickness, hoverVersion],
 	);
+	const linkWidthRef = useRef(linkWidth);
+	linkWidthRef.current = linkWidth;
+
+	// Every link's hit area in one call (see `link-hit-areas.ts`); force-graph
+	// calls this once per link. It reads the width through a ref so a hover does
+	// not hand force-graph a new painter, which would repaint the hit areas
+	// immediately rather than on force-graph's own schedule.
+	const paintLinkHitAreas = useMemo(() => createLinkHitAreaPainter(), []);
+	useEffect(() => () => paintLinkHitAreas.dispose(), [paintLinkHitAreas]);
+	const linkPointerAreaPaint = useCallback(
+		(link: object, _paintColor: string, ctx: CanvasRenderingContext2D, globalScale: number) => {
+			const { links } = forceGraphData;
+			if (link === links[0]) {
+				paintLinkHitAreas(ctx, links, globalScale, (each) => linkWidthRef.current(each));
+			}
+		},
+		[forceGraphData, paintLinkHitAreas],
+	);
 
 	const listedNodes = useMemo(
 		() =>
@@ -751,48 +766,52 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 
 	// A keyboard and screen-reader alternative to the canvas: every navigable
 	// node in the view as a link. Hidden until it holds focus, then shown over
-	// the graph so a sighted keyboard user sees where focus is.
-	const nodeList =
-		listedNodes.length > 0 ? (
-			<nav
-				aria-label="Pages in this graph"
-				onFocus={() => setListFocused(true)}
-				onBlur={(event) => {
-					if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-						setListFocused(false);
+	// the graph so a sighted keyboard user sees where focus is. Memoised because
+	// every hover re-renders this component, and a large view lists ~1,000 links.
+	const nodeList = useMemo(
+		() =>
+			listedNodes.length > 0 ? (
+				<nav
+					aria-label="Pages in this graph"
+					onFocus={() => setListFocused(true)}
+					onBlur={(event) => {
+						if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+							setListFocused(false);
+						}
+					}}
+					style={
+						listFocused
+							? {
+									position: "absolute",
+									inset: 0,
+									overflow: "auto",
+									zIndex: 3,
+									padding: 8,
+									background: "var(--rp-c-bg, #ffffff)",
+									fontFamily: FONT_STACK,
+									fontSize: 12,
+								}
+							: VISUALLY_HIDDEN
 					}
-				}}
-				style={
-					listFocused
-						? {
-								position: "absolute",
-								inset: 0,
-								overflow: "auto",
-								zIndex: 3,
-								padding: 8,
-								background: "var(--rp-c-bg, #ffffff)",
-								fontFamily: FONT_STACK,
-								fontSize: 12,
-							}
-						: VISUALLY_HIDDEN
-				}
-			>
-				<ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
-					{listedNodes.map((node) => (
-						<li key={node.id}>
-							<a
-								href={nodeHref(node)}
-								aria-current={node.isCurrent ? "page" : undefined}
-								onClick={(event) => handleListClick(event, node)}
-								style={{ color: "var(--rp-c-text-1, #1a1a1a)" }}
-							>
-								{node.label}
-							</a>
-						</li>
-					))}
-				</ul>
-			</nav>
-		) : null;
+				>
+					<ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+						{listedNodes.map((node) => (
+							<li key={node.id}>
+								<a
+									href={nodeHref(node)}
+									aria-current={node.isCurrent ? "page" : undefined}
+									onClick={(event) => handleListClick(event, node)}
+									style={{ color: "var(--rp-c-text-1, #1a1a1a)" }}
+								>
+									{node.label}
+								</a>
+							</li>
+						))}
+					</ul>
+				</nav>
+			) : null,
+		[listedNodes, listFocused, handleListClick],
+	);
 
 	if (forceGraphError) {
 		return (
@@ -895,6 +914,7 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 							globalScale: number,
 						) => void
 					}
+					linkPointerAreaPaint={linkPointerAreaPaint}
 					onNodeHover={handleNodeHover as (node: unknown, prevNode: unknown) => void}
 					onLinkHover={handleLinkHover as (link: unknown, prevLink: unknown) => void}
 					linkColor={linkColor}

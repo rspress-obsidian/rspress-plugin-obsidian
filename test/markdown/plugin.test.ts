@@ -1,15 +1,17 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { PageIndexInfo } from "@rspress/shared";
+import type { Root, RootContent } from "mdast";
 import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
+import { VFile } from "vfile";
 import { buildContentIndex, getCachedContentIndex } from "../../src/markdown/content-index";
 import { formatDailyNoteDate, parseDailyNoteDate } from "../../src/markdown/daily-notes";
 import { markdown as markdownPlugin } from "../../src/markdown/index";
@@ -17,7 +19,12 @@ import { resolveMediaSrc } from "../../src/markdown/media";
 import { findWikilinkMatches, parseWikiLink } from "../../src/markdown/parse-wikilink";
 import { remarkWikilink } from "../../src/markdown/remark-wikilink";
 import { resolveWikiLink } from "../../src/markdown/resolve-wikilink";
-import type { ContentIndex, NormalizedPluginOptions } from "../../src/markdown/types";
+import type {
+	ContentIndex,
+	NormalizedPluginOptions,
+	RemarkWikiLinkPluginOptions,
+	RspressPluginMarkdownOptions,
+} from "../../src/markdown/types";
 import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../src/shared/media-exts.js";
 import { toHastMathHandlers, toMarkdownMathHandlers } from "./math-element";
 
@@ -1533,6 +1540,38 @@ describe("vault route prefix", () => {
 		expect(output).not.toContain('href="/notes/Sibling"');
 		expect(output).not.toContain("](/notes/Sibling)");
 	});
+
+	test("gives a missing attachment the URL it will be published at, under the prefix", async () => {
+		const plugin = markdownPlugin({
+			vaultRoot: vaultRoutePrefixFixtureRoot,
+			vaultRoutePrefix: "/vault",
+			enableMediaEmbeds: true,
+			onBrokenLink: "warn",
+		});
+		const [remarkPlugin, pluginOptions] = (plugin.markdown?.remarkPlugins?.[0] ?? []) as [
+			typeof remarkWikilink,
+			Parameters<typeof remarkWikilink>[0],
+		];
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const file = await unified()
+				.use(remarkParse)
+				.use(remarkPlugin, pluginOptions)
+				.use(remarkStringify)
+				.process({
+					value: "![[media/missing.png]] ![](media/missing.mp3)",
+					path: path.resolve(vaultRoutePrefixFixtureRoot, "Home.md"),
+				});
+
+			// Once the file lands it is served here, so the embed starts working
+			// without an edit; without the prefix it would 404 forever.
+			const output = String(file);
+			expect(output).toContain('<img src="/vault/media/missing.png"');
+			expect(output).toContain('<audio controls src="/vault/media/missing.mp3">');
+		} finally {
+			warn.mockRestore();
+		}
+	});
 });
 
 describe("tag linking", () => {
@@ -2700,6 +2739,105 @@ describe("media embeds", () => {
 		);
 		expect(output).not.toContain("#height=");
 	});
+
+	test("reads a PDF page and height joined by &, in either order", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: "![[Document.pdf#page=3&height=400]]\n\n![[Document.pdf#height=250&page=2]]",
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/Document.pdf#page=3" title="Document.pdf" width="100%" height="400px"',
+		);
+		expect(output).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/Document.pdf#page=2" title="Document.pdf" width="100%" height="250px"',
+		);
+		expect(output).not.toContain("height=4");
+		expect(output).not.toContain("height=2");
+	});
+
+	test("embeds audio, video and PDFs written as markdown images", async () => {
+		// With "Use [[Wikilinks]]" off, Obsidian writes every embed this way.
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: "![](tone.3gp) ![320](clip.ogv) ![](Document.pdf#page=2&height=300)",
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain('<audio controls src="/tone.3gp"></audio>');
+		expect(output).toContain('<video controls src="/clip.ogv" width="320"></video>');
+		expect(output).toContain(
+			'<iframe class="obsidian-pdf-frame" src="/Document.pdf#page=2" title="Document.pdf" width="100%" height="300px"',
+		);
+		expect(output).not.toContain("![");
+	});
+
+	test("frames YouTube videos and posts on X written as markdown images", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: [
+				"![](https://www.youtube.com/watch?v=NnTvZWp5Q7o)",
+				"![A talk](https://youtu.be/NnTvZWp5Q7o?t=1m5s)",
+				"![560x315](https://www.youtube.com/shorts/NnTvZWp5Q7o)",
+				"![](https://twitter.com/obsdmd/status/1580548874246443010)",
+				"![](https://x.com/obsdmd/status/1580548874246443010)",
+			].join("\n\n"),
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain(
+			'<iframe class="obsidian-web-embed obsidian-web-embed-youtube" src="https://www.youtube.com/embed/NnTvZWp5Q7o" title="YouTube video"',
+		);
+		expect(output).toContain(
+			'src="https://www.youtube.com/embed/NnTvZWp5Q7o?start=65" title="A talk"',
+		);
+		expect(output).toContain(
+			'src="https://www.youtube.com/embed/NnTvZWp5Q7o" title="YouTube video" width="560" height="315"',
+		);
+		expect(
+			output.match(
+				/src="https:\/\/platform\.twitter\.com\/embed\/Tweet\.html\?dnt=true&amp;width=550px&amp;id=1580548874246443010"/g,
+			),
+		).toHaveLength(2);
+	});
+
+	test("leaves other external images, and urls that only look like a video, as images", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: true });
+		const file = await processor.process({
+			value: [
+				"![](https://example.com/photo.jpg)",
+				"![](https://www.youtube.com/@obsidianmd)",
+				"![](https://www.youtube.com/watch?v=%22%3E%3Cscript%3E)",
+				"![](https://x.com/obsdmd)",
+			].join("\n\n"),
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).not.toContain("<iframe");
+		expect(output).toContain("![](https://example.com/photo.jpg)");
+		expect(output).toContain("![](https://x.com/obsdmd)");
+	});
+
+	test("links markdown-syntax media to the file when media embeds are off", async () => {
+		const processor = makeProcessor(assetsFixtureRoot, { enableMediaEmbeds: false });
+		const file = await processor.process({
+			value: "![](tone.3gp) ![](Document.pdf#page=2&height=300) ![](https://youtu.be/NnTvZWp5Q7o)",
+			path: path.resolve(assetsFixtureRoot, "index.md"),
+		});
+
+		const output = String(file);
+		expect(output).toContain("[tone](/tone.3gp)");
+		// The link opens the file at its page; the frame height has no meaning there.
+		expect(output).toContain("[Document](/Document.pdf#page=2)");
+		expect(output).toContain("<https://youtu.be/NnTvZWp5Q7o>");
+		expect(output).not.toContain("<audio");
+		expect(output).not.toContain("<iframe");
+	});
 	test("preserves order and sibling nodes for multiple inline media embeds", async () => {
 		const processor = makeProcessor(assetsFixtureRoot, {
 			enableMediaEmbeds: true,
@@ -3624,6 +3762,7 @@ describe("external vault publishing", () => {
 				index: docs,
 				enableCaseInsensitiveLookup: true,
 				siteBase: "/",
+				embedMedia: true,
 			});
 			expect(media).toMatchObject({ url: "/vault/media/pic.png", found: true });
 		} finally {
@@ -3722,15 +3861,16 @@ describe("bundled stylesheet", () => {
 		// `todo` gets Obsidian's blue card and its own title glyph.
 		expect(sourceStyles).toMatch(/\.callout-todo\s*\{[^}]*--callout-color:\s*#086ddd/);
 		expect(sourceStyles).toMatch(
-			/\.callout-todo \.callout-title::before[^{]*\{[^}]*content:\s*"☑"/,
+			/\.callout-todo > \.callout-title::before[^{]*\{[^}]*content:\s*"☑"/,
 		);
 		// Custom (unrecognised) types fall back to the note glyph and blue card.
-		expect(sourceStyles).toMatch(/\.callout \.callout-title::before[^{]*\{[^}]*content:\s*"✎"/);
+		expect(sourceStyles).toMatch(/\.callout > \.callout-title::before[^{]*\{[^}]*content:\s*"✎"/);
 		expect(sourceStyles).toMatch(/\.callout,\s*\.rp-callout\s*\{[^}]*--callout-color:\s*#448aff/);
 		// The generic fallback rule must precede the per-type rules: they tie on
-		// specificity, so document order decides which glyph wins.
-		expect(sourceStyles.indexOf(".callout .callout-title::before")).toBeLessThan(
-			sourceStyles.indexOf(".callout-note .callout-title::before"),
+		// specificity, so document order decides which glyph wins. Child
+		// combinators keep an outer callout's glyph off a nested callout's title.
+		expect(sourceStyles.indexOf(".callout > .callout-title::before")).toBeLessThan(
+			sourceStyles.indexOf(".callout-note > .callout-title::before"),
 		);
 	});
 
@@ -4781,6 +4921,100 @@ describe("math rendering", () => {
 	});
 });
 
+describe("KaTeX stylesheet per page", () => {
+	const HREF = "/site/obsidian-katex/0.0.0/katex.min.css";
+	let root = "";
+
+	beforeAll(async () => {
+		root = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-katex-"));
+		const files: Record<string, string> = {
+			"Formula.md": "# Formula\n\nEnergy is $E = mc^2$.\n",
+			"Plain.md": "# Plain\n\nIt costs $5 and $10.\n",
+			"Embeds.md": "# Embeds\n\n![[Formula]]\n",
+			"Board.md":
+				"---\nkanban-plugin: board\n---\n\n## Doing\n\n- [ ] Check $\\Delta E < 2$ contrast\n",
+		};
+		for (const [name, content] of Object.entries(files)) {
+			await fsp.writeFile(path.join(root, name), content);
+		}
+	});
+
+	afterAll(async () => {
+		await fsp.rm(root, { recursive: true, force: true });
+	});
+
+	/** Compile one note of `root` the way Rspress runs the pass; the tree's top-level nodes. */
+	async function compile(
+		name: string,
+		overrides: Partial<NormalizedPluginOptions> = {},
+		href: string | null = HREF,
+	): Promise<{ links: unknown[]; imports: number; styles: number }> {
+		const processor = unified()
+			.use(remarkParse)
+			.use(remarkGfm)
+			// Rspress puts an import of each global component at the top of every
+			// page before any plugin runs.
+			.use(() => (tree: Root) => {
+				tree.children.unshift({
+					type: "mdxjsEsm",
+					value: 'import KatexStylesheet from "/components/KatexStylesheet"',
+				} as unknown as RootContent);
+			})
+			.use(remarkWikilink, {
+				getDocsRoot: () => root,
+				options: { ...DEFAULT_OPTIONS, enableMath: true, ...overrides },
+				...(href && { getKatexStylesheetHref: () => href }),
+			});
+		const filePath = path.join(root, name);
+		const file = new VFile({ path: filePath, value: await fsp.readFile(filePath, "utf8") });
+		const tree = (await processor.run(processor.parse(file), file)) as Root;
+		const children = tree.children as unknown as Array<{
+			type: string;
+			name?: string;
+			value?: string;
+			attributes?: Array<{ name: string; value: unknown }>;
+		}>;
+		return {
+			links: children
+				.filter((node) => node.type === "mdxJsxFlowElement" && node.name === "KatexStylesheet")
+				.map((node) => node.attributes?.find((attribute) => attribute.name === "href")?.value),
+			imports: children.filter((node) => node.type === "mdxjsEsm").length,
+			styles: children.filter((node) => node.type === "html" && node.value?.startsWith("<style>"))
+				.length,
+		};
+	}
+
+	test("a page with a formula links the stylesheet once", async () => {
+		expect((await compile("Formula.md")).links).toEqual([HREF]);
+	});
+
+	test("a page without math links nothing", async () => {
+		expect((await compile("Plain.md")).links).toEqual([]);
+	});
+
+	test("a page whose only math is an embed's links it too", async () => {
+		expect((await compile("Embeds.md", { enableTransclusion: true })).links).toEqual([HREF]);
+	});
+
+	test("a board a plugin renders whole keeps Rspress's imports and links it for its cards", async () => {
+		const board = await compile("Board.md", { enableKanban: true });
+		// Without the import, the page fails to render: `KatexStylesheet` is undefined.
+		expect(board.imports).toBe(1);
+		expect(board.links).toEqual([HREF]);
+	});
+
+	test("without a stylesheet URL (a hand-built pipeline) the pass links nothing", async () => {
+		expect((await compile("Formula.md", {}, null)).links).toEqual([]);
+	});
+
+	test("MathJax pages carry its generated stylesheet inline instead", async () => {
+		const formula = await compile("Formula.md", { mathEngine: "mathjax" });
+		expect(formula.links).toEqual([]);
+		expect(formula.styles).toBe(1);
+		expect((await compile("Plain.md", { mathEngine: "mathjax" })).styles).toBe(0);
+	});
+});
+
 describe("mermaid rendering", () => {
 	const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
 	const diagram = "graph TD\n  A[Start] --> B[End]";
@@ -4917,34 +5151,67 @@ describe("unsupported fenced blocks", () => {
 });
 
 describe("math and mermaid plugin wiring", () => {
-	test("loads KaTeX's stylesheet when math is on", async () => {
-		const { markdown } = await import("../../src/markdown/index");
-		const plugin = markdown({ enableMath: true });
+	/** What `markdown()` registers for KaTeX: stylesheets, page components, Rsbuild plugins, the link URL. */
+	function katexWiring(options: RspressPluginMarkdownOptions) {
+		const plugin = markdownPlugin(options);
+		const tuple = plugin.markdown?.remarkPlugins?.[0];
+		if (!Array.isArray(tuple)) throw new Error("expected the remark tuple");
+		// The tuple `markdown()` builds: `[remarkWikilink, its options]`.
+		const remarkOptions = tuple[1] as RemarkWikiLinkPluginOptions;
+		return {
+			plugin,
+			remarkOptions,
+			globalStyles: plugin.globalStyles,
+			components: (plugin.markdown?.globalComponents ?? []).filter((component) =>
+				/KatexStylesheet\.(tsx|js)$/.test(component),
+			),
+			builderPlugins: ((plugin.builderConfig?.plugins ?? []) as Array<{ name?: string }>)
+				.map((builderPlugin) => builderPlugin.name)
+				.filter((name) => name?.includes("katex")),
+			href: remarkOptions.getKatexStylesheetHref?.(),
+		};
+	}
 
-		expect(plugin.globalStyles).toBeDefined();
-		expect(String(plugin.globalStyles)).toMatch(/katex\.css$/);
+	test("KaTeX math puts no stylesheet in the global one: pages link it themselves", async () => {
+		const wiring = katexWiring({ enableMath: true });
+
+		expect(wiring.globalStyles).toBeUndefined();
+		expect(wiring.components).toHaveLength(1);
+		expect(fs.existsSync(wiring.components[0] ?? "")).toBe(true);
+		expect(wiring.builderPlugins).toEqual(["rspress-plugin-obsidian:katex-stylesheet"]);
+		expect(wiring.href).toMatch(/^\/obsidian-katex\/\d+\.\d+\.\d+[^/]*\/katex\.min\.css$/);
 	});
 
-	test("prefers the combined stylesheet when both are on", async () => {
-		const { markdown } = await import("../../src/markdown/index");
-		const plugin = markdown({ enableMath: true, enableDefaultStyles: true });
+	test("the stylesheet URL carries the site base", async () => {
+		const { plugin, remarkOptions } = katexWiring({ enableMath: true });
+		await plugin.config?.({ base: "/docs/" }, {} as never, true);
 
-		expect(String(plugin.globalStyles)).toMatch(/math\.css$/);
+		expect(remarkOptions.getKatexStylesheetHref?.()).toMatch(/^\/docs\/obsidian-katex\//);
 	});
 
-	test("skips KaTeX's stylesheet when MathJax renders the math", async () => {
-		const { markdown } = await import("../../src/markdown/index");
-		const plugin = markdown({ enableMath: true, mathEngine: "mathjax" });
+	test("the plugin's own stylesheet stays global, without KaTeX's", async () => {
+		const wiring = katexWiring({ enableMath: true, enableDefaultStyles: true });
 
-		// MathJax emits its own generated stylesheet with the page instead.
-		expect(String(plugin.globalStyles)).not.toMatch(/katex\.css$/);
+		expect(String(wiring.globalStyles)).toMatch(/(markdown|styles)\.css$/);
+		expect(wiring.components).toHaveLength(1);
 	});
 
-	test("defaults the math engine to KaTeX", async () => {
-		const { markdown } = await import("../../src/markdown/index");
-		const plugin = markdown({ enableMath: true });
+	test("MathJax registers nothing for KaTeX", async () => {
+		// MathJax emits its own generated stylesheet with each page that has math.
+		const wiring = katexWiring({ enableMath: true, mathEngine: "mathjax" });
 
-		expect(String(plugin.globalStyles)).toMatch(/katex\.css$/);
+		expect(wiring.globalStyles).toBeUndefined();
+		expect(wiring.components).toEqual([]);
+		expect(wiring.builderPlugins).toEqual([]);
+		expect(wiring.href).toBeUndefined();
+	});
+
+	test("math off registers nothing for KaTeX", async () => {
+		const wiring = katexWiring({});
+
+		expect(wiring.components).toEqual([]);
+		expect(wiring.builderPlugins).toEqual([]);
+		expect(wiring.href).toBeUndefined();
 	});
 
 	test("registers the mermaid component by path", async () => {

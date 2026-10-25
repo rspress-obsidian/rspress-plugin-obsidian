@@ -151,7 +151,7 @@ const CROP_REFERENCE = /^(group=|area=|frame=|clippedframe=)?(.*?)(?:,padding=(\
  * The part of a drawing a block reference selects, as the plugin's
  * `getTemplate` / `getSVG` select it; a message when it names no element.
  */
-export function selectCrop(
+function selectCrop(
 	scene: Scene,
 	elements: ExcalidrawElement[],
 	subpath: WikiSubpath | undefined,
@@ -215,7 +215,7 @@ export function selectCrop(
 }
 
 /** The markdown a `![[Note#…]]` names: the whole note, a heading's section, or a block. */
-export function noteSection(content: string, subpath: WikiSubpath | undefined): string | undefined {
+function noteSection(content: string, subpath: WikiSubpath | undefined): string | undefined {
 	const body = stripFrontmatter(content).replace(/\r\n?/g, "\n");
 	if (!subpath) return body.trim();
 	const lines = body.split("\n");

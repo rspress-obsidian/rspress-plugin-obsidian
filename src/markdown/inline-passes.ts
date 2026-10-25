@@ -9,7 +9,6 @@ import type { Program } from "estree";
 import type { Heading, Html, ListItem, PhrasingContent, Root, Text } from "mdast";
 import type { MdxJsxFlowElement, MdxJsxTextElement } from "mdast-util-mdx-jsx";
 import type { Parent } from "unist";
-import { visit } from "unist-util-visit";
 import { type MathEngine, renderMathHtml } from "../math.js";
 import { escapeHtmlAttribute } from "../shared/escape.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch, tagRoutePath } from "../shared/paths.js";
@@ -17,6 +16,7 @@ import { HeadingIdAllocator, headingSourceText, parseHeadingText } from "./headi
 import { findWikilinkMatches } from "./parse-wikilink.js";
 import { createTextNode, SKIP_PARENT_TYPES } from "./remark-diagnostics.js";
 import { plainText } from "./syntax.js";
+import { visit } from "./visit.js";
 
 type PhrasingParent = Parent & { children: PhrasingContent[] };
 

@@ -133,15 +133,28 @@ describe("WikiPicker navigation", () => {
 		const assign = mock((_href: string) => {});
 		const original = navigation.assign;
 		navigation.assign = assign;
+		// The component must leave a modified click alone, so the browser's own
+		// default runs — and happy-dom's default for a link click navigates the
+		// one window every test file shares, replacing it mid-run. Record what
+		// the component did, then cancel the click at the window, last.
+		const click: { leftAlone?: boolean } = {};
+		const recordThenCancel = (event: Event) => {
+			click.leftAlone = !event.defaultPrevented;
+			event.preventDefault();
+		};
+		window.addEventListener("click", recordThenCancel);
 		try {
 			const { container } = render(<WikiPicker candidates={CANDIDATES} query="Setup" />);
 			fireEvent.click(container.querySelector("button.rp-wiki-picker-trigger") as HTMLElement);
 			const link = container.querySelector(".rp-wiki-picker-list a") as HTMLElement;
-			expect(fireEvent.click(link, { button: 0, metaKey: true })).toBe(true);
+			fireEvent.click(link, { button: 0, metaKey: true });
+			expect(click.leftAlone).toBe(true);
 			expect(assign).not.toHaveBeenCalled();
 			fireEvent.click(link, { button: 0 });
+			expect(click.leftAlone).toBe(false);
 			expect(assign).toHaveBeenCalledWith("/one/setup#setup-guide");
 		} finally {
+			window.removeEventListener("click", recordThenCancel);
 			navigation.assign = original;
 		}
 	});

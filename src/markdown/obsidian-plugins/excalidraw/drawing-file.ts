@@ -37,7 +37,7 @@ import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { normalizeScene, type Scene, SceneError } from "./scene.js";
 
 /** A file a drawing's `## Embedded Files` section names. */
-export type EmbeddedFileRef =
+type EmbeddedFileRef =
 	| { kind: "link"; fileId: string; target: string }
 	| { kind: "url"; fileId: string; url: string }
 	| { kind: "latex"; fileId: string; tex: string };

@@ -13,7 +13,7 @@ import type { DocsRouteLocales } from "./route-path.js";
  * feature's `ContentIndexOptions`, declared here because `src/shared` must
  * not depend on a feature.
  */
-export interface PublishedIndexOptions {
+interface PublishedIndexOptions {
 	routePrefix?: string;
 	locales?: DocsRouteLocales;
 	unlinkedMentions?: boolean;

@@ -121,12 +121,6 @@
 	font-size: 0.85em;
 }
 
-html.dark .tasks-urgency,
-html.dark .plugin-tasks-query-explanation,
-html.dark .plugin-tasks-query-error pre {
-	background-color: var(--rp-c-bg-soft, #202127);
-}
-
 /* `view columns by …`: one column per top-level group, each task a card. */
 .tasks-columns {
 	display: flex;

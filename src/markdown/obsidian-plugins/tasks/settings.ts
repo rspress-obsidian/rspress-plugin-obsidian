@@ -9,7 +9,7 @@ import { type Day, dayOfLocalDate, resolveToday } from "./dates.js";
 import type { TasksStatusType } from "./options.js";
 
 /** The upstream plugin id, which names its settings folder. */
-export const TASKS_PLUGIN_ID = "obsidian-tasks-plugin";
+const TASKS_PLUGIN_ID = "obsidian-tasks-plugin";
 
 /** Every status type, with the prefix Tasks sorts and groups them by. */
 export const STATUS_TYPE_ORDER: Record<TasksStatusType | "EMPTY", number> = {
