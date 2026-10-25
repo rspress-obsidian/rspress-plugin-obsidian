@@ -1,5 +1,6 @@
 ---
-description: Live examples of all rspress-plugin-obsidian features. See callouts, wikilinks, tags, highlights, footnotes, and transclusion in action.
+title: Live Examples
+description: Callouts, wikilinks, math, Mermaid, highlights, comments, footnotes, Dataview and transclusion, rendered live by rspress-plugin-obsidian on this page.
 tags:
   - examples
   - demo
@@ -7,11 +8,17 @@ tags:
 
 # Live Examples
 
-This page demonstrates every feature of the plugin. Since the plugin is enabled on this documentation site, everything you see below is rendered live.
+Everything on this page is rendered by the plugin while this site builds;
+nothing is a screenshot. This site turns on callouts, transclusion, media
+embeds, backlinks, tag links and pages, daily notes, Dataview, math, Mermaid
+and the default styles, so you can compare each source snippet in the guides
+with its result here. Media formats have their own page:
+[Media Embeds](/markdown/guide/media-embeds).
 
 ## Callouts
 
-Static callouts with different types:
+Each type has its own colour and icon. The [Callouts](./callouts.md) guide
+lists the types and their aliases.
 
 > [!success] Success Callout
 > This is a success callout. Use it for positive outcomes.
@@ -37,13 +44,13 @@ Static callouts with different types:
 > [!check] Check Callout
 > This is a check callout (alias of `success`; also: `done`).
 
-Callout titles are inline markdown — **bold**, *italics*, `code`, and
-[[markdown/guide/advanced|wikilinks]] all render inside the title:
+A callout title is inline Markdown, so **bold**, *italics*, `code` and
+[[markdown/guide/advanced|wikilinks]] all render inside it:
 
 > [!example] A **bold** title linking to [[markdown/guide/advanced|Advanced Configuration]]
-> The title above renders markdown and resolved wikilinks, matching Obsidian.
+> The title above renders Markdown and a resolved wikilink, as Obsidian does.
 
-Foldable callouts:
+`-` after the type collapses a callout by default, and `+` expands it:
 
 > [!success]- Collapsed by Default
 > This content is hidden until the user expands the callout.
@@ -55,7 +62,7 @@ Foldable callouts:
 > [!example]+ Expanded by Default
 > This content is visible immediately, but the user can collapse it.
 
-Nested callouts (a callout inside another callout):
+A callout can hold another callout:
 
 > [!example] Outer Callout
 > This is the outer callout containing a nested question.
@@ -63,26 +70,22 @@ Nested callouts (a callout inside another callout):
 > > [!question] Nested Question
 > > This inner callout is fully processed and styled.
 >
-> Back to the outer callout content. Everything renders correctly thanks to post-order processing.
+> Back to the outer callout content.
 
-Triple nesting also works:
+Three levels deep:
 
 > [!abstract] Level 1
 > > [!question] Level 2
 > > > [!failure] Level 3
 > > > Deepest content here.
 
-> [!question] What about `note`, `tip`, `warning`, `danger`, and `info`?
-> Rspress ships its own GitHub-style alert transform that claims those types
-> (plus `caution` and `details`) *before* plugin remark plugins run, and its
-> conversion leaks Obsidian's fold suffix and drops the first paragraph of
-> multi-paragraph alerts. This plugin detects those already-converted nodes,
-> verifies them against the original source, restores the original
-> blockquotes, and renders them with full Obsidian semantics — automatically,
-> whenever `enableCallouts` is on. Standard `:::note` directive containers
-> keep Rspress's native styling.
+### The types Rspress also claims
 
-The types Rspress claims internally, restored and rendered by the plugin:
+Rspress converts `note`, `tip`, `warning`, `danger`, `info`, `caution` and
+`details` blockquotes into its own alerts before plugins run. That conversion
+loses Obsidian's fold marker and the first paragraph of a multi-paragraph
+callout. With `enableCallouts` on, the plugin restores the original blockquote
+from the source and renders it as an Obsidian callout:
 
 > [!note] Note Callout
 > This is a standard note callout. Use it for general information.
@@ -99,8 +102,7 @@ The types Rspress claims internally, restored and rendered by the plugin:
 > [!info] Info Callout
 > This is an info callout. Use it for supplementary details.
 
-Foldable variants of the restored types — the fold suffix and first paragraph
-survive the round trip through Rspress's transform:
+The fold marker and the first paragraph survive:
 
 > [!note]- Collapsed by Default
 > This content is hidden until the user expands the callout.
@@ -112,7 +114,7 @@ survive the round trip through Rspress's transform:
 > [!tip]+ Expanded by Default
 > This content is visible immediately, but the user can collapse it.
 
-Nested callouts using restored types:
+Nesting works for these types too:
 
 > [!note] Outer Callout
 > This is the outer note callout containing a nested tip.
@@ -120,7 +122,7 @@ Nested callouts using restored types:
 > > [!tip] Nested Tip
 > > This inner callout is fully processed and styled.
 >
-> Back to the outer callout content. Everything renders correctly thanks to post-order processing.
+> Back to the outer callout content.
 
 ## Text Highlighting
 
@@ -137,13 +139,15 @@ $$
 \int_0^1 x^2 \, dx = \frac{1}{3}
 $$
 
-KaTeX renders both, so the raw `$…$` is never shown. Prices such as $5 and $10
-stay prose — inline math requires no space inside the delimiters.
+KaTeX renders both at build time. Prices such as $5 and $10 stay prose, because
+inline math cannot have a space just inside its delimiters. This page links
+KaTeX's stylesheet because it has math; pages without math do not. See
+[Math](./advanced.md#math).
 
 ## Mermaid Diagrams
 
-A ` ```mermaid ` fence becomes a diagram, drawn in the browser with the same
-renderer the canvas feature uses:
+A ` ```mermaid ` block becomes a diagram, drawn in the browser by the same
+renderer that Canvas uses:
 
 ```mermaid
 graph TD
@@ -154,23 +158,23 @@ graph TD
 
 ## Unresolved Links
 
-A wikilink to a page that does not exist keeps the label a reader expects and
+A wikilink to a note that does not exist keeps the text a reader expects, and
 is marked as unresolved instead of becoming a link:
 
 ```md
 [[not-a-real-page|Missing page]]
 ```
 
-renders `Missing page` as `<span class="obsidian-unresolved">`, with the reason
-in its tooltip, and the build reports the link through `onBrokenLink`. That
-report is why this page shows the syntax instead of a live example: it would
-warn on every build of this site.
+This renders `Missing page` as `<span class="obsidian-unresolved">`, with the
+reason as a tooltip, and the build reports the link through `onBrokenLink`. A
+live example here would fail this site's build, so the page shows the source
+instead.
 
 ## Private Notes
 
-A comment hides everything between its delimiters — paragraphs, lists and
-headings included. A commented-out heading is dropped from the page outline and
-the search index as well, so it is not published anywhere.
+A comment hides everything between its delimiters, including paragraphs, lists
+and headings. A heading inside a comment is also left out of the page outline
+and the search index.
 
 Visible text. %%
 
@@ -184,49 +188,50 @@ Still visible.
 
 ## Wikilinks
 
-Link to other pages in your documentation:
+Links to other pages of these docs:
 
-- [[markdown/guide/getting-started|Getting Started Guide]] — the main installation and setup guide
-- [[markdown/guide/advanced|Advanced Configuration]] — detailed options and behavior
-- [[markdown/guide/api|API Reference]] — programmatic usage and types
+- [[markdown/guide/getting-started|Getting Started Guide]]: install and first build
+- [[markdown/guide/advanced|Advanced Configuration]]: vaults, math, diagrams and diagnostics
+- [[markdown/guide/api|API Reference]]: every option and export
 
-Standard markdown links to vault pages resolve through the same rules — Obsidian accepts both syntaxes:
+Markdown links to notes resolve by the same rules, because Obsidian accepts
+both syntaxes:
 
-- [Markdown link to the guide](getting-started.md) — the `.md` destination is resolved like a wikilink
-- [Markdown link to the vault root](/markdown/) — resolves the section root page, not a relative path. The trailing slash is what makes an index page resolve: Rspress rewrites a slash-less route to `/markdown.html`, and the file it published is `markdown/index.html`
-- [Markdown link with an anchor](getting-started.md#Install) — `#anchor` destinations resolve to heading slugs
+- [Markdown link to the guide](getting-started.md): the `.md` destination resolves like a wikilink
+- [Markdown link to the vault root](/markdown/): resolves the section's index page. The trailing slash matters: Rspress rewrites a route without one to `/markdown.html`, while the published file is `markdown/index.html`
+- [Markdown link with an anchor](getting-started.md#Install): the `#anchor` resolves to the heading's slug
 
-A block link reaches one paragraph, list item or table of another note:
+A block link points to one paragraph, list item or table in another note:
 
-- [[intro#^anchor-demo|A block in the vault's intro]] — hovering it previews only that paragraph
+- [[intro#^anchor-demo|A block in the vault's intro]]: hover it to preview only that paragraph
 
-Current page anchor links:
+Links to headings on this page:
 
-- [[#Callouts]] — jump to the callouts section
-- [[#Footnotes]] — jump to the footnotes section
+- [[#Callouts]]: jump to the callouts section
+- [[#Footnotes]]: jump to the footnotes section
 
 ## Reference-Style Links
 
-A reference-style definition is a link like any other, and it counts as a
-backlink to whatever it names — the graph view and the backlinks panel read
-the same set, so they cannot disagree about the same vault:
+A reference-style definition is a link like any other, and counts as a
+backlink to the page it names. The graph view and the backlinks panel read the
+same set of links, so they always agree:
 
 - [the getting started guide by reference][gs]
 - [a section of it by reference][gs-install]
-- [[markdown/guide/advanced]] — the same target the wikilink above resolves to
+- [[markdown/guide/advanced]]: the same target the wikilink above resolves to
 
-The demo vault's `create a link.md` page does the same, which is why this page
-appears in its backlinks panel.
+The demo vault's `create a link.md` note does the same, which is why it lists
+this page in its backlinks panel.
 
-A footnote or citation definition *looks* like one of these but addresses
-nothing, so neither becomes a backlink: a note[^ref-not-a-link] and a
+A footnote or citation definition *looks* like a reference definition but
+names no page, so neither becomes a backlink: a note[^ref-not-a-link] and a
 citation[~cite] stay out.
 
 ## Dataview Inline Queries
 
 With `enableDataview` on, inline code that starts with `=` is a Dataview
-inline query, evaluated with `this` as the current page — Dataview's own
-syntax. This page's own name resolves:
+inline query, evaluated with `this` as the current page, as in Dataview. This
+page's own name resolves:
 
 The file name is `= this.file.name`, and its folder is `= this.file.folder`.
 
@@ -237,11 +242,12 @@ Plain prose is never evaluated, so the sentence below reads exactly as written:
 
 The speed = value.
 
+See [Dataview](./dataview.md) for query blocks.
+
 ## Canvas Cards
 
-The demo board shows the canvas-specific behaviours, including the two a card
-used to get wrong: `==highlights==` render inside a card, and
-`![[Note#Heading]]` embeds one section instead of the whole note. See
+The demo board shows how Markdown renders inside canvas cards: `==highlights==`
+render in a card, and `![[Note#Heading]]` embeds only that section. See
 [Canvas](/canvas/guide/getting-started).
 
 [gs]: markdown/guide/getting-started.md
@@ -252,7 +258,9 @@ used to get wrong: `==highlights==` render inside a card, and
 
 ## Tags
 
-This page has the tags #examples and #demo in its frontmatter. When `enableTagLinking` and `enableTagPages` are on, inline tags become links and auto-generated tag pages list all matching pages.
+This page has the tags #examples and #demo in its frontmatter. With
+`enableTagLinking` on, inline tags like these become links, and with
+`enableTagPages` on, each tag has a page listing every note that carries it.
 
 ## Footnotes
 
@@ -274,18 +282,23 @@ and will not be published.
 
 ## Media Embeds
 
-Every image, audio, video and PDF format Obsidian accepts, each a real file in
-the demo vault, lives on its own page: [Media Embeds](/markdown/guide/media-embeds).
+Every image, audio, video and PDF format that Obsidian accepts has a live
+example on its own page: [Media Embeds](/markdown/guide/media-embeds).
 
 ## Transclusion Demo
 
-The section below is transcluded from the Getting Started page. It demonstrates how `![[Page#Heading]]` embeds content from another file.
+The section below is the "What you get" section of the
+[Getting Started](/markdown/guide/getting-started) page, embedded with a
+heading transclusion (`![[Note#Heading]]`, see
+[Transclusion](/markdown/guide/transclusion)). Edit that section, and this page
+changes with it.
 
-![[markdown/guide/getting-started#Embed & Transclusion Syntax]]
+![[markdown/guide/getting-started#What you get]]
 
 ## Backlinks
 
-Scroll to the bottom of this page to see the backlinks panel — it lists all pages that link to this one.
+Scroll to the bottom of this page to see the backlinks panel, which lists the
+pages that link here.
 
 [^1]: This is a labeled footnote definition. It appears at the end of the page.
 [^2]: Another labeled footnote. The plugin handles duplicates gracefully.

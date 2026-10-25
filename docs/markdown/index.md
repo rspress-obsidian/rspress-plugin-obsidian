@@ -1,41 +1,58 @@
 ---
-pageType: home
-description: Static Obsidian-flavored Markdown for fast, searchable Rspress sites.
-hero:
-  name: Obsidian → Rspress
-  text: Static Obsidian docs, shipped fast
-  tagline: Write in Obsidian. Publish a fast, searchable Rspress site with wikilinks, embeds, callouts, tags, and backlinks intact.
-  actions:
-    - theme: brand
-      text: Get Started
-      link: /markdown/guide/getting-started
-    - theme: alt
-      text: Live Examples
-      link: /markdown/guide/examples
-    - theme: alt
-      text: View on GitHub
-      link: https://github.com/rspress-obsidian/rspress-plugin-obsidian
-features:
-  - title: Wikilinks
-    details: 'Link pages with [[Page]], add aliases with [[Page\|Label]], jump to headings with [[Page#Heading]], and reference blocks with [[Page#^block]].'
-    icon: 🔗
-  - title: Transclusion
-    details: 'Inline content from other pages: ![[Page]], sections with ![[Page#Heading]], and blocks with ![[Page#^block]].'
-    icon: 📄
-  - title: Media Embeds
-    details: Embed images, videos, audio, and PDFs with optional size parameters like ![[image.png|300x200]].
-    icon: 🖼️
-  - title: Callouts
-    details: 'Transform > [!note] syntax into styled callouts with type accents, aliases, and foldable states (+ expanded, - collapsed).'
-    icon: 💡
-  - title: Tags & Backlinks
-    details: 'Convert #tags into links, auto-generate /tags/{name} index pages, and append backlinks panels to every page.'
-    icon: 🏷️
-  - title: Static Obsidian Markdown
-    details: 'Comments (%%), highlights (==text==), footnotes [^1], selected frontmatter, and publish: false drafts.'
-    icon: ✨
-  - title: Community plugins
-    details: 'Tasks queries, Kanban boards, Excalidraw drawings, Bases views and Templater templates, rendered at build time from your vault and its plugin settings.'
-    icon: 🧩
+title: Markdown
+description: What the Markdown feature of rspress-plugin-obsidian renders, which syntax is always on, which features you turn on, and where each one is documented.
 ---
 
+# Markdown
+
+The Markdown feature, `markdown()`, renders Obsidian notes as Rspress pages.
+It covers the pages in your `docs/` folder and, with `vaultRoot`, a whole
+Obsidian vault. Wikilinks, embeds, highlights, comments, footnotes and
+frontmatter work as soon as you add the plugin. Every other feature is off
+until you set its option, so a site renders only what you ask for.
+
+New to the plugin? Start with [Getting Started](./guide/getting-started.md),
+then browse the [Live Examples](./guide/examples.md).
+
+## Always on
+
+| Guide | What it covers |
+|-------|----------------|
+| [Wikilinks](./guide/link-resolution.md) | `[[links]]`, heading and block links, Markdown links to notes, how a link finds its note |
+| [Note Syntax](./guide/note-syntax.md) | `%%comments%%`, `==highlights==`, footnotes, frontmatter, `publish: false` drafts |
+
+## Features you turn on
+
+| Guide | What it covers | Option |
+|-------|----------------|--------|
+| [Callouts](./guide/callouts.md) | `> [!note]` boxes, foldable and nested | `enableCallouts` |
+| [Transclusion](./guide/transclusion.md) | Embedding a note, section or block with `![[Note]]` | `enableTransclusion` |
+| [Media Embeds](./guide/media-embeds.md) | Images, audio, video, PDFs, YouTube and X | `enableMediaEmbeds` |
+| [Backlinks](./guide/backlinks.md) | A panel of the notes that link to each page, and unlinked mentions | `enableBacklinks` |
+| [Tags & Daily Notes](./guide/tags-and-daily-notes.md) | Tag links, generated tag pages, daily-note navigation, templates and calendar | `enableTagLinking`, `enableTagPages`, `enableDailyNotes` |
+| [Math](./guide/advanced.md#math) | `$…$` and `$$…$$` with KaTeX or MathJax | `enableMath` |
+| [Mermaid](./guide/advanced.md#mermaid-diagrams) | ` ```mermaid ` diagrams | `enableMermaid` |
+
+Most of these emit HTML classes only. Set `enableDefaultStyles: true` to load
+the stylesheet that styles them.
+
+## Obsidian plugins {#obsidian-plugins}
+
+The plugin also renders the output of popular Obsidian plugins at build time,
+using your vault's plugin settings where it can.
+
+| Guide | What it covers | Option |
+|-------|----------------|--------|
+| [Dataview](./guide/dataview.md) | Inline fields, `TABLE`/`LIST`/`TASK`/`CALENDAR` queries, inline queries, DataviewJS | `enableDataview` |
+| [Tasks](./guide/tasks.md) | ` ```tasks ` queries over every task on the site | `enableTasks` |
+| [Kanban](./guide/kanban.md) | Kanban boards as read-only pages | `enableKanban` |
+| [Excalidraw](./guide/excalidraw.md) | Drawings as static SVG, as pages and embeds | `enableExcalidraw` |
+| [Bases](./guide/bases.md) | `.base` files and ` ```base ` blocks as tables, cards and maps | `enableBases` |
+| [Templater](./guide/templater.md) | Templates applied to new notes, and `<% %>` commands | `enableTemplater` |
+
+## Reference
+
+- [Advanced](./guide/advanced.md): publishing a vault, math and diagrams,
+  styles, diagnostics, security and troubleshooting.
+- [API Reference](./guide/api.md): every option with its type and default,
+  and the exported helpers.

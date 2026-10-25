@@ -1,111 +1,63 @@
 ---
-description: Embed content from other pages using transclusion syntax.
+title: Transclusion
+description: Embed a whole note, one section or one block in another page with ![[Note]], and how embeds handle ids, cycles and missing targets.
 ---
 
 # Transclusion
 
-Transclusion lets you embed content from other pages directly into the current page, creating a single source of truth.
-
-## Basic Syntax
-
-```markdown
-![[Page]]                    — Embed full page
-![[Page#Heading]]            — Embed specific section
-![[Page#^block]]             — Embed specific block
-```
-
-## How It Works
-
-When `enableTransclusion` is on, the plugin:
-1. Resolves the target page
-2. Extracts the requested content (full page, heading, or block)
-3. Inlines it at the wikilink location
-4. Processes the inlined content through the full pipeline
-
-## Full Page Transclusion
-
-```markdown
-![[Getting Started]]
-```
-
-Embeds the entire content of the Getting Started page.
-
-## Heading Transclusion
-
-```markdown
-![[Getting Started#Install]]
-```
-
-Embeds only the content under the `Install` heading. A nested path, `![[Getting Started#Setup#Linux]]`, picks the `Linux` under `Setup`, and the second of two same-named headings is reached by its id (`#install-1`). A note can embed one of its own sections: `![[#Install]]`.
-
-## Block Transclusion
-
-```markdown
-![[Notes#^important-point]]
-```
-
-Embeds only the block with the ID `important-point` — the whole paragraph (or list item, with its nested items) carrying it, not just its last line.
-
-## Ids inside an embed
-
-Every id an embedded note emits — its headings, footnotes and block anchors — is prefixed per embed (`embed-1-install`, `embed-1-fn-1`), so the host page never carries a duplicate id and its own `#install` and `#fn-1` links keep pointing at the host's headings and footnotes.
-
-## Circular Detection
-
-The plugin detects circular transclusions — keyed on page *and* section, so only an embed already being rendered is refused — and breaks the cycle with a link to the page plus a warning:
-
-```
-Page A → Page B → Page A (refused: rendered as a link to Page A)
-Note#Part embeds ![[#Part]] (refused: the section embeds itself)
-```
-
-## Depth Limit
-
-Transclusion is cycle-safe and capped at five nested levels to protect the build from recursive or excessively deep embeds.
-
-## Configuration
+Transclusion inserts the content of one note into another, so you can write a
+passage once and show it in several places. Turn it on with
+[`enableTransclusion`](./api.md#features):
 
 ```ts
 markdown({
   enableTransclusion: true,
-  enableDefaultStyles: true,
+  enableDefaultStyles: true, // frames the embedded content
 });
 ```
 
-## External vault example
+With the option off, `![[Note]]` renders as a link to the note. Images, audio,
+video and PDFs are a separate option; see [Media Embeds](./media-embeds.md).
 
-When `vaultRoot` is configured, transclusion resolves against the vault index:
+## Syntax
 
-```ts
-markdown({
-  vaultRoot: "./Obsidian Vault",
-  vaultRoutePrefix: "/vault",
-  enableTransclusion: true,
-  enableMediaEmbeds: true,
-});
-```
+| You write | Embeds |
+|-----------|--------|
+| `![[Setup]]` | The whole note, without its frontmatter |
+| `![[Setup#Install]]` | The `Install` heading and the content under it |
+| `![[Setup#Linux#Install]]` | The `Install` heading under `Linux` |
+| `![[Setup#^step-1]]` | The paragraph, list item (with its nested items) or table with the id `^step-1` |
+| `![[#Install]]` | A section of the current note |
+| `![alt](Setup.md)` | The same as `![[Setup]]`, written as a Markdown embed |
 
-```md
-![[guide/Setup Guide]]
-![[guide/Setup Guide#Installation]]
-![[guide/Setup Guide#^setup-checklist]]
-![[assets/diagram.png|800x450]]
-```
+Targets resolve the same way as [wikilinks](./link-resolution.md#how-a-link-resolves),
+and heading and block subpaths match the same way. Wikilinks, callouts, math
+and every other feature work inside embedded content, so it renders as it does
+on its own page.
 
-Missing headings and block IDs produce a diagnostic and fall back to a link instead of silently embedding the full page.
-
-## Styling
-
-Transcluded content is wrapped in:
+The embedded content is wrapped in a container that names its source:
 
 ```html
-<div class="obsidian-transclusion">
-  <!-- Transcluded content here -->
+<div class="obsidian-transclusion" data-src="/Setup">
+  …the embedded content…
 </div>
 ```
 
-## Next Steps
+## Ids inside an embed
 
-- Learn about [Wikilinks](/markdown/guide/link-resolution) for linking syntax
-- See [[callouts|Callouts]] for styled content blocks
-- Explore [[backlinks|Backlinks]] for automatic link discovery
+An embedded note keeps its headings, footnotes and block anchors, so their ids
+are prefixed per embed: `embed-1-install`, `embed-1-fn-1`. The host page never
+ends up with duplicate ids, and its own `#install` and `#fn-1` links still
+reach its own heading and footnote.
+
+## Edge cases
+
+- **Missing section.** If the heading or block does not exist, the embed
+  renders as a link to the note and the build reports it through
+  `onBrokenLink`. The plugin never falls back to embedding the whole note.
+- **Cycles.** An embed whose note and section are already being rendered
+  higher up, such as A embeds B and B embeds A, or a section that embeds
+  itself, renders as a link to the page with a warning.
+- **Depth.** Embeds nest at most five levels deep.
+- **Unpublished notes.** A note with `publish: false` cannot be embedded. The
+  embed is reported as a broken link.

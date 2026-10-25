@@ -1,11 +1,15 @@
 ---
 title: Getting Started
-description: Install and configure rspress-plugin-obsidian in your Rspress site.
+description: Publish the .canvas files in your Obsidian vault as interactive pages — install, a minimal config, and what you get.
 ---
 
 # Getting Started
 
-Render Obsidian vault `.canvas` files as interactive pages in your Rspress documentation site.
+This guide publishes the `.canvas` files in your Obsidian vault as interactive
+board pages, next to the notes the [Markdown](/markdown/) section publishes. If
+your vault is not on the site yet, start with
+[Markdown → Getting Started](/markdown/guide/getting-started); this guide adds
+`canvas()` to that setup.
 
 ## Install
 
@@ -13,51 +17,50 @@ Render Obsidian vault `.canvas` files as interactive pages in your Rspress docum
 bun add rspress-plugin-obsidian
 ```
 
-Add the required peer dependencies if you don't have them:
+Your Rspress site already has the other packages Canvas needs (`@rspress/core`,
+`react` and `react-dom`). To draw Mermaid diagrams inside cards, also install
+the optional `mermaid` package; without it a diagram shows its source.
 
-```bash
-bun add @rspress/core react react-dom
-```
+## Configure
 
-## Basic Setup
-
-Add the plugin to your `rspress.config.ts`:
+Give `canvas()` the same `vaultRoot` as `markdown()`, and set `fileRoutePrefix`
+to the markdown plugin's `vaultRoutePrefix`:
 
 ```ts
-import { defineConfig } from '@rspress/core';
-import { canvas } from 'rspress-plugin-obsidian';
+import path from "node:path";
+import { defineConfig } from "@rspress/core";
+import { canvas, markdown } from "rspress-plugin-obsidian";
+
+const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
 
 export default defineConfig({
+  root: "docs",
   plugins: [
-    canvas({
-      vaultRoot: './Obsidian Vault',
-      routePrefix: '/canvas',
-    }),
+    markdown({ vaultRoot, vaultRoutePrefix: "/vault" }),
+    canvas({ vaultRoot, routePrefix: "/canvas", fileRoutePrefix: "/vault" }),
   ],
 });
 ```
 
-The bundled stylesheet is injected automatically (`enableDefaultStyles` defaults to `true`). To opt out and import it yourself — for example to control load order from a theme entry point or a global layout file — set `enableDefaultStyles: false`:
+`fileRoutePrefix` must match `vaultRoutePrefix`. A file card for `Welcome.md`
+then links to `/vault/Welcome`, the page the markdown plugin publishes. Without
+it the card links to `/Welcome`, which no page serves, and the build logs a
+warning.
 
-```ts
-canvas({ enableDefaultStyles: false }),
-```
+The canvas stylesheet is injected for you. Every other option is described in
+[Configuration](./configuration.md).
 
-```ts
-import 'rspress-plugin-obsidian/canvas/styles.css';
-```
+### Boards in your docs folder
 
-## How It Works
+If your boards sit next to your docs pages rather than in a vault, `canvas()`
+needs no options: it scans the Rspress content root (`docs/` by default) and
+publishes each board at `/canvas/<name>`.
 
-1. **Build time** — The plugin scans your vault directory for `.canvas` files
-2. Each file is parsed and validated against the JSON Canvas 1.0 spec; its card links are resolved with the markdown plugin's resolver, and the board JSON and the attachments it references are written to the plugin's own output directory (see [`outDir`](./configuration#outdir))
-3. **Runtime** — A `CanvasViewer` component on each board's page fetches that JSON and renders an interactive React canvas
-4. Nodes are positioned absolutely on a pannable/zoomable viewport with SVG bezier edges
-5. A board reopens where you left it: the last pan/zoom is kept in `localStorage` per board, the way Obsidian restores a canvas viewport. A first visit frames the nodes instead, and **Fit to View** (or the `F` key) re-frames a board you have moved.
+## Try it
 
-## Your First Canvas
-
-Place a `.canvas` file in your vault directory:
+Any board you made in Obsidian works. To try one without Obsidian, save this as
+`Hello.canvas` in the vault root. It has a text card, a file card for a note
+called `Welcome.md`, and an arrow between them:
 
 ```json
 {
@@ -69,15 +72,15 @@ Place a `.canvas` file in your vault directory:
       "y": 0,
       "width": 300,
       "height": 150,
-      "text": "# Hello Canvas\n\nThis is a **text node** with Markdown."
+      "text": "# Hello Canvas\n\nThis is a **text card** with Markdown."
     },
     {
       "id": "n2",
       "type": "file",
       "x": 400,
       "y": 0,
-      "width": 200,
-      "height": 100,
+      "width": 300,
+      "height": 150,
       "file": "Welcome.md"
     }
   ],
@@ -94,39 +97,34 @@ Place a `.canvas` file in your vault directory:
 }
 ```
 
-Run `rspress dev` and visit `/canvas/<filename>` to see it rendered.
+Run `bunx rspress dev` and open `/canvas/hello`.
 
-## Canvas, vault notes, and Graph View together
+## What you get
 
-Use the same `vaultRoot` for Markdown notes and Canvas files:
+- **A page per board.** `Hello.canvas` becomes `/canvas/hello`, and
+  `Projects/Road Map.canvas` becomes `/canvas/projects/road-map`.
+- **A board you can explore.** Drag to pan, scroll or pinch to zoom, and use the
+  arrow keys, `+`, `-`, `0` (1:1) and `F` (fit). A board reopens where you left
+  it: the last pan and zoom are kept in the browser per board. On a first visit
+  the board is fitted to the view.
+- **Cards that look like Obsidian's.** Text cards render Obsidian Markdown,
+  including wikilinks, callouts, math and Mermaid. File cards show the note's
+  content, an image, a player or a PDF. Link cards show the website. See
+  [Canvas Format](./canvas-format.md).
+- **Links that work.** Links in cards resolve to the same pages as links in
+  notes. A link to a missing or `publish: false` note is shown as plain text.
+- **Boards in your notes.** `![[Hello.canvas]]` in a note embeds the board, and
+  `[[Hello.canvas]]` links to its page. See [Embedding](./embed.mdx).
+- **Graph View.** With `graphview()` enabled, each board is a node in the graph,
+  linked to the notes on it.
 
-```ts
-const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
+The [live demo](/canvas/demo) shows all of this on the repository's
+`Obsidian Vault/Demo.canvas`.
 
-plugins: [
-  markdown({
-    vaultRoot,
-    vaultRoutePrefix: "/vault",
-    enableTransclusion: true,
-    enableMediaEmbeds: true,
-  }),
-  canvas({ vaultRoot, routePrefix: "/canvas", fileRoutePrefix: "/vault" }),
-  graphview({ defaultOpen: true }),
-]
-```
+## Next steps
 
-`fileRoutePrefix` must match the markdown plugin's `vaultRoutePrefix`. A Canvas file node such as `{ "file": "Welcome.md" }` links to `/vault/Welcome`; without the prefix it would link to `/Welcome`, which no route serves. Wikilinks and Markdown links inside text nodes also contribute edges to the Graph View.
-
-Text cards render attachments with the same renderer as notes, from the same table of Obsidian's accepted formats (`src/shared/media-exts.ts`) — so a `![[photo.bmp]]` embeds identically in a note and in a card, `|300x200` sizes either one, and a PDF takes the same subpath knobs (`![[doc.pdf#page=3]]`, `![[doc.pdf#height=400]]`) in both. A PDF with no height of its own is drawn in a 600px frame, the same default a note uses.
-
-## Live demo
-
-Open the [interactive Canvas demo](/canvas/demo) to try the published Obsidian Canvas fixture. It includes text, file, link, and group nodes, Markdown rendering, Mermaid, footnotes, pan/zoom, edge highlighting, and keyboard controls.
-
-The demo is generated from the repository fixture at `Obsidian Vault/Demo.canvas` and is available after `bun run docs:build` or while running `bun run docs:dev`.
-
-## Next Steps
-
-- [Configure plugin options](/canvas/guide/configuration) for vault paths and route prefixes
-- [Learn about the canvas format](/canvas/guide/canvas-format) and supported features
-- [Customize the appearance](/canvas/guide/styling) with CSS overrides
+- [Configuration](./configuration.md): routes, scan patterns, link previews and
+  the in-browser editor.
+- [Canvas Format](./canvas-format.md): what each card type and edge renders.
+- [Embedding](./embed.mdx): put a board inside any page.
+- [Styling](./styling.md): CSS classes and variables.

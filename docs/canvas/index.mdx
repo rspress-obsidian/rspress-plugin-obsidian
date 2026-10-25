@@ -1,32 +1,24 @@
 ---
-pageType: home
-title: Rspress × Obsidian Canvas
-description: Render Obsidian vault .canvas files as interactive pages in your Rspress site.
-hero:
-  name: Rspress × Obsidian Canvas
-  text: Interactive Canvas Pages for Your Docs
-  tagline: Embed Obsidian canvases directly into your Rspress documentation site with full pan/zoom, bezier edges, and Markdown rendering.
-  actions:
-    - theme: brand
-      text: Get Started
-      link: /canvas/guide/getting-started
-    - theme: alt
-      text: Open Live Demo
-      link: /canvas/demo
-    - theme: alt
-      text: Graph Features
-      link: /graph/guide/graph-view
-features:
-  - title: Pan & Zoom
-    details: Drag to pan, scroll to zoom — smooth canvas navigation that feels like Obsidian.
-  - title: All Node Types
-    details: Text, file, link, and group nodes rendered faithfully with Markdown support.
-  - title: Bezier Edges
-    details: Cubic bezier curves with arrow markers, side-aware routing, and hover highlighting.
-  - title: Markdown Rendering
-    details: Headings, lists, code blocks, images, wiki-links, and more inside text nodes.
-  - title: File Linking
-    details: File nodes resolve to Rspress routes automatically — click to navigate between docs.
-  - title: Customizable
-    details: Override CSS classes or configure route prefixes, vault paths, and link previews.
+title: Canvas
+description: Publish Obsidian .canvas boards as interactive pages, and embed them in any page or note.
 ---
+
+# Canvas
+
+The Canvas section of `rspress-plugin-obsidian` publishes each `.canvas` file in
+your vault as its own page, drawn the way Obsidian draws it: cards, groups,
+arrows and colours, on a board you can pan and zoom. Text cards render
+Markdown, file cards show your notes and attachments, and links in cards lead to
+the same pages as links in your notes. You
+can also embed a board in any page, and turn on an editor that exports the
+changed board as a `.canvas` file.
+
+Open the [live demo](/canvas/demo) to try a board before you set anything up.
+
+| Guide | Read it to |
+|-------|------------|
+| [Getting Started](./guide/getting-started.md) | Add `canvas()` to your site and publish your first board. |
+| [Configuration](./guide/configuration.md) | Look up every option: vault location, routes, link previews and the editor. |
+| [Canvas Format](./guide/canvas-format.md) | See what each card type, edge and colour renders, and the board's controls. |
+| [Embedding](./guide/embed.mdx) | Show a board inside a page with `<CanvasEmbed>` or `![[Board.canvas]]`. |
+| [Styling](./guide/styling.md) | Restyle boards with CSS variables and classes. |

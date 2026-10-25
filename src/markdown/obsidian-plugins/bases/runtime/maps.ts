@@ -46,6 +46,14 @@ interface MapMarker {
 	row: HTMLTableRowElement;
 }
 
+/**
+ * Set by the Bases feature's builder config (`mapLibraryBuilderConfig`): whether
+ * the installed MapLibre runs its worker from a module file of its own, which
+ * the site's bundler must emit (MapLibre 6), rather than from a copy inlined in
+ * its main bundle (MapLibre 5).
+ */
+declare const __RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__: boolean | undefined;
+
 function defaultImport(): Promise<unknown> {
 	// Optional peer, loaded only when a map view is on the page: a static
 	// import would put MapLibre (~800 kB) in the chunk every page loads.
@@ -57,7 +65,22 @@ function defaultImport(): Promise<unknown> {
 		// stylesheet, lazy ones included, into the global one every page loads.
 		// @ts-expect-error -- a stylesheet: the site's bundler injects it; it has no module type.
 		import("maplibre-gl/dist/maplibre-gl.css"),
-	]).then(([library]) => library);
+	]).then(([module]) => {
+		// MapLibre 6 finds its worker next to its own module URL, which a bundle
+		// no longer has; `new URL(…, import.meta.url)` makes the bundler emit the
+		// worker and points MapLibre at it. The define is a build-time constant,
+		// so with MapLibre 5, which has no such file, the bundler drops this
+		// branch without resolving it.
+		if (
+			typeof __RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__ === "boolean" &&
+			__RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__
+		) {
+			mapLibraryFromModule(module)?.setWorkerUrl(
+				new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href,
+			);
+		}
+		return module;
+	});
 }
 
 let importLibrary: () => Promise<unknown> = defaultImport;

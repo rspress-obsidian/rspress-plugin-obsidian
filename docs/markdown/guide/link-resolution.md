@@ -1,186 +1,147 @@
 ---
-description: Complete guide to wikilink syntax, aliases, headings, and block references.
+title: Wikilinks
+description: Wikilink and Markdown-link syntax, how a link finds its note, heading and block links, vault search, and what happens when a link does not resolve.
 ---
 
 # Wikilinks
 
-Wikilinks are the core of Obsidian-style linking. They let you connect pages using simple `[[...]]` syntax instead of traditional markdown links.
+Wikilinks connect notes with `[[…]]` instead of URLs. They work with no options
+set, and so do Markdown links to `.md` files. This guide shows the syntax, the
+order the plugin tries when it looks for a target, and what happens when a link
+finds nothing. The options that change resolution are listed under
+[Link resolution](./api.md#link-resolution).
 
-## Basic Syntax
+## Syntax
 
-| Syntax | Description | Example |
-|--------|-------------|---------|
-| `[[Page]]` | Link to another page | `[[Getting Started]]` |
-| `[[Page\|Alias]]` | Link with custom display text | `[[Getting Started\|Start Here]]` |
-| `[[Page#Heading]]` | Link to a specific heading | `[[Getting Started#Install]]` |
-| `[[Page#Heading\|Alias]]` | Link to heading with alias | `[[Getting Started#Install\|Installation Guide]]` |
-| `[[#Heading]]` | Link to heading in current page | `[[#Basic Syntax]]` |
-| `[[Page#^block]]` | Block reference | `[[Notes#^important-point]]` |
+| You write | Renders as |
+|-----------|------------|
+| `[[Setup]]` | A link to the note `Setup`, with the text "Setup" |
+| `[[Setup\|Start here]]` | The same link, with the text "Start here" |
+| `[[Setup#Install]]` | A link to the `Install` heading, with the text "Setup > Install" |
+| `[[Setup#Install\|Install it]]` | The heading link, with the text "Install it" |
+| `[[#Install]]` | A link to a heading on the current page, with the text "Install" |
+| `[[Setup#^step-1]]` | A link to a block, with the text "Setup > ^step-1" |
+| `[[Setup#Linux#Install]]` | A link to the `Install` heading under `Linux` |
+| `[Start here](Setup.md)` | A Markdown link, resolved the same way |
 
-## How Resolution Works
+Without an alias, the link text is the target exactly as you typed it, as in
+Obsidian. `[[2024-01-15]]` reads `2024-01-15`, and `[[my_note]]` reads
+`my_note`.
 
-When you write `[[Page]]`, the plugin resolves it in this order:
+## How a link resolves
 
-1. **Exact path match** — `docs/Page.md` exists
-2. **Base name match** — `Page` matches a file's basename; `[[sub/Page]]` matches
-   any `…/sub/Page.md` (a path suffix), no fuzzy matching needed
-3. **Title match** — `Page` matches a page's frontmatter `title`
-4. **Alias match** — `Page` matches a page's frontmatter `aliases`
-5. **Case-insensitive** — Case-insensitive path resolution (on by default)
-6. **Fuzzy match** — Shortest suffix path fallback (if enabled)
+For `[[target]]`, the plugin tries these steps in order and stops at the first
+match:
 
-When several files match a step, the link resolves the way Obsidian picks: the
-file in the linking note's own folder, else the shortest vault path, else the
-alphabetically first. The choice and the alternatives are reported through
-`onAmbiguousLink` (default `"warn"`).
+1. **A relative path.** `[[./Plan]]` or `[[../shared/Concept]]` resolves from
+   the linking note's folder. A relative link never falls back to the other
+   steps.
+2. **An exact path** from the vault root, such as `[[guide/Setup]]`. Notes and
+   attachments both count, as do published canvas boards.
+3. **A file name.** `[[Setup]]` matches any `Setup.md`, and `[[guide/Setup]]`
+   matches any `…/guide/Setup.md`.
+4. **A frontmatter `title` or alias.** `[[Start Here]]` matches a note with
+   `aliases: [Start Here]`.
+5. **A case-insensitive path or file name.** This step is on by default
+   (`enableCaseInsensitiveLookup`).
+6. **A path ending**, ignoring case. This step is off by default
+   (`enableFuzzyMatching`).
 
-With `vaultRoot` set, a docs page whose own tree has no match tries the vault,
-and a vault note tries the docs root, so the two can link each other and the
-backlinks follow.
+With `vaultRoot` set, the docs and the vault are indexed separately. A vault
+note tries steps 2–6 in the vault first, then in `docs/`. A docs page does the
+reverse. This way, links work in both directions, and backlinks follow them.
 
-If no match is found, the link is marked as broken (behavior controlled by `onBrokenLink`).
+When several files match at one step, the link resolves the way Obsidian picks:
+the file in the linking note's folder, then the one with the shortest path,
+then the first alphabetically. The build reports the choice and the
+alternatives through `onAmbiguousLink` (default `"warn"`). To choose a file
+yourself, write a longer path: `[[guide/Setup]]` instead of `[[Setup]]`.
 
-## Link Text
-
-The link shows what Obsidian shows: the alias when there is one, otherwise the
-target exactly as typed — `[[2024-01-15]]` reads `2024-01-15`, `[[my_note]]`
-reads `my_note`. A subpath is shown as `Note > Heading` or `Note > ^block`, and a
-same-page `[[#Heading]]` as just `Heading`.
+If the vault folder is a symlink, or sits under one, links still resolve.
+Rspress compiles each note at its real path, and the plugin maps that path back
+to the `vaultRoot` you configured. Symlinks inside the vault are not followed,
+so files reached only through one are not published.
 
 ## Headings
 
-`[[Note#Heading]]` matches a heading exactly — its text, its id, or Obsidian's
-link form of it (where `:` and the other characters a link cannot hold read as
-spaces). A prefix or a word of a heading does not match: a renamed heading is
-reported through `onBrokenLink` rather than sent to a different one.
-`[[Note#Chapter#Details]]` picks the `Details` heading under `Chapter`.
+`[[Note#Heading]]` matches a heading by its text, its id, or the form Obsidian
+writes when it links a heading. Characters that a link cannot hold, such as `:`,
+become spaces: `## Step 1: Setup` is linked as `[[Note#Step 1 Setup]]`. The
+match ignores case but is otherwise exact. A prefix or a single word of a
+heading does not match, so a renamed heading is reported as broken instead of
+landing on a different one. If a page has two headings with the same text,
+reach the second by its id (`#install-1`).
 
-## Aliases
-
-Aliases let you link to pages using alternative names:
-
-```yaml
----
-title: Getting Started
-aliases:
-  - Start Here
-  - Quick Start
-  - Beginner Guide
----
-```
-
-Now all of these work:
-```markdown
-[[Getting Started]]
-[[Start Here]]
-[[Quick Start]]
-[[Beginner Guide]]
-```
-
-## Heading Links
-
-Link to specific sections using `#`:
-
-```markdown
-[[Getting Started#Install]]
-[[Getting Started#Install|Installation Guide]]
-```
-
-The heading slug is auto-generated from the heading text. Custom IDs are also supported:
+The plugin indexes ATX headings (`# Heading`, with or without closing `#`s and
+up to three leading spaces) and setext headings (`Heading` underlined with `===`
+or `---`). Anchors use the same GitHub-style slugs as Rspress, and keep Unicode
+letters. A custom id wins over the slug:
 
 ```markdown
 ## Install {#custom-id}
 
-[[Getting Started#custom-id]]
+[[Setup#custom-id]]
 ```
 
-## Block References
+## Blocks
 
-Block references target specific paragraphs or list items:
+A block id names one paragraph, list item or table. Write it at the end of the
+block, or on its own line after it:
 
 ```markdown
-Add a block ID: This is important. ^important-point
+This paragraph carries an id. ^key-point
 
-Reference it: [[Notes#^important-point]]
+| A | B |
+|---|---|
+| 1 | 2 |
+
+^the-table
 ```
 
-## Markdown Link Resolution
+`[[Note#^key-point]]` links to the block, and `![[Note#^key-point]]` embeds it
+(see [Transclusion](./transclusion.md)). A standalone id can be separated from
+its block by a blank line and still names the block above it.
 
-Standard markdown links to `.md` files are also resolved as wikilinks:
+## Markdown links
+
+With [`enableMarkdownLinks`](./api.md#link-resolution) (on by default), a
+Markdown link to a `.md` or `.mdx` file goes through the same steps as a
+wikilink. Obsidian accepts both forms, so a vault can mix them:
 
 ```markdown
-[Getting Started](getting-started.md)
-[Install](getting-started.md#install)
+[Setup](Setup.md)
+[Install](Setup.md#install)
+[Concept](../shared/Concept.md)
 ```
 
-This means you can use either syntax — both work identically.
+External URLs, `#anchor`-only links and extensionless routes are left alone.
 
-## Vault search and the picker
+Rspress normally checks every relative `.md` link itself, before the plugin
+runs, and would fail on a vault-style `[x](Setup.md)` that names a note
+elsewhere in the vault. The plugin therefore exempts exactly the `.md`
+destinations it resolves from Rspress's `markdown.link.checkDeadLinks`, unless
+your config sets that option itself. A broken `[x](missing.md)` is still
+reported, by the plugin through `onBrokenLink`. A broken `/typo-route` is still
+reported by Rspress.
 
-`[[##query]]` searches the whole vault's headings, `[[^^query]]` its block ids.
-A query that matches exactly one target links straight to it, the way
-`[[Page#Heading]]` would.
+## Vault search
 
-When several targets match — two pages with a `## Setup Guide` heading, say —
-the link renders as an inline picker: a button that opens a filterable list of
-the matches, with the page each one lives in shown beside it. That is the
-equivalent of the picker Obsidian opens for an ambiguous vault search, on a page
-that can only ship static files. Pick a row to navigate; nothing is resolved in
-the browser, so the list keeps working with JavaScript-free export, hydration
-included.
+`[[##query]]` searches the headings of the whole vault, and `[[^^query]]`
+searches its block ids. A query that matches exactly one target becomes a
+normal link to it.
 
-A query that matches nothing stays marked as an unresolved link, so the gap is
-visible rather than silent.
+When several targets match, the link renders as a picker: a button that opens a
+filterable list of the matches, with the page each one belongs to. This is the
+static counterpart of the list Obsidian opens. The list is built at build time,
+so it works without client-side resolution. A query that matches nothing is
+shown as an unresolved link.
 
-## Configuration
+## When a link does not resolve
 
-```ts
-markdown({
-  onBrokenLink: "error",        // "error" | "warn"
-  onAmbiguousLink: "warn",      // "warn" (default) | "error"
-  enableFuzzyMatching: false,   // Enable shortest-suffix fallback
-  enableCaseInsensitiveLookup: true,  // Case-insensitive resolution
-  enableMarkdownLinks: true,    // Resolve .md links as wikilinks
-});
-```
+By default (`onBrokenLink: "error"`), a link whose note, heading or block does
+not exist fails the build. The error names the page and the target. For a
+missing heading or block, it also lists the headings or blocks that exist.
 
-## Publishing an external Obsidian vault
-
-Point the plugin at an existing vault when your notes live outside the Rspress `docs/` directory:
-
-```ts
-markdown({
-  vaultRoot: "./Obsidian Vault",
-  vaultRoutePrefix: "/vault",
-  enableTransclusion: true,
-  enableMediaEmbeds: true,
-  enableBacklinks: true,
-});
-```
-
-For a vault containing:
-
-```text
-Obsidian Vault/
-├── Welcome.md
-├── guide/Setup Guide.md
-└── assets/diagram.png
-```
-
-These references resolve inside the vault:
-
-```md
-[[Welcome]]
-[[guide/Setup Guide|Setup guide]]
-[[guide/Setup Guide#Installation]]
-![[guide/Setup Guide]]
-![[assets/diagram.png|640]]
-```
-
-The generated routes are `/vault/Welcome`, `/vault/guide/Setup%20Guide`, and `/vault/assets/diagram.png`. Vault pages use the vault index, so similarly named files in the normal docs tree do not shadow vault targets.
-
-## Next Steps
-
-- Learn about [[callouts|Callouts]] for styled content blocks
-- See [[backlinks|Backlinks]] for automatic link discovery
-- Explore [[transclusion|Transclusion]] for embedding content
+With `onBrokenLink: "warn"`, the build continues and the link renders as its
+text inside `<span class="obsidian-unresolved">`, with the reason as a tooltip.
+[Diagnostics](./advanced.md#diagnostics) covers the full set of reports.

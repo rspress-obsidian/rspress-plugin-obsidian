@@ -54,12 +54,13 @@ bun add react-force-graph-2d
 
 More optional peers are needed only by the features that use them. Without
 one, the site still builds, the feature falls back as described, and the build
-says which package to install.
+says which package to install. The one exception is `mathjax-full`: if you
+choose that engine, the build stops until the package is installed.
 
 | Peer | Used for | Without it |
 | --- | --- | --- |
 | `mermaid` | `enableMermaid` diagrams, Mermaid in canvas cards and Excalidraw drawings | diagrams stay on the page as source |
-| `mathjax-full` | `mathEngine: "mathjax"` | — (KaTeX is the default engine) |
+| `mathjax-full` | `mathEngine: "mathjax"` | the build stops with the install command (the default KaTeX engine needs nothing) |
 | `@excalidraw/excalidraw` | Excalidraw's own fonts, and exact text measurement, in `enableExcalidraw` drawings | a fallback font stack and estimated text wrapping |
 | `maplibre-gl` | interactive Bases map views | a table of the located notes |
 | `lucide-static` | the icons Bases' `icon()` draws | the icon's name |

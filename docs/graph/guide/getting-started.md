@@ -1,49 +1,36 @@
 ---
 title: Getting Started
-description: Install the graph view plugin, add it to rspress.config.ts, and see how the build-time graph extraction and runtime panel fit together.
+description: Install the Graph View with its react-force-graph-2d peer, add graphview() to rspress.config.ts, load the stylesheet, and see how the graph is built.
 ---
 
 # Getting Started
 
-Welcome to **Rspress Graph View** — an interactive graph visualization plugin for [Rspress](https://rspress.dev/) documentation sites.
+This page adds the Graph View to an Rspress site: a floating panel that draws your pages and the links between them, as Obsidian's graph view does. It takes one plugin and one extra package.
 
-Think of it as [Obsidian's graph view](https://obsidian.md) for your docs. The plugin turns the links between your pages into a navigable force-directed graph, helping readers discover connections across your knowledge base.
+## Install
 
-## Prerequisites
-
-- [Rspress](https://rspress.dev/) `^2.0.21` or later
-- `react-force-graph-2d` — **required** to draw the graph. It is an optional
-  peer dependency, so your package manager will not install it for you. Without
-  it the site still builds: the plugin aliases the import to an empty module and
-  warns at build time, and the panel lists the pages with an install hint
-  instead of drawing the graph.
-- React `^18 || ^19` — an optional peer, required only to render the panel
-
-## Installation
-
-Install the plugin alongside your existing Rspress setup:
+Install the plugin and `react-force-graph-2d`, the library the panel draws with:
 
 ```bash
-bun add rspress-plugin-obsidian
+npm install rspress-plugin-obsidian react-force-graph-2d
 # or
-npm install rspress-plugin-obsidian
+bun add rspress-plugin-obsidian react-force-graph-2d
 # or
-pnpm add rspress-plugin-obsidian
+pnpm add rspress-plugin-obsidian react-force-graph-2d
 ```
 
-Then install the peer the panel renders with:
+`react-force-graph-2d` is an optional peer dependency, so your package manager does not install it for you. Without it the site still builds: the build prints a warning with the install command, and the panel shows an install hint and lists the pages as links instead of drawing the graph.
 
-```bash
-bun add react-force-graph-2d
-# or
-npm install react-force-graph-2d
-```
+| Package | Version | |
+|---------|---------|---|
+| `@rspress/core` | `^2.0.21` | Required |
+| `react-force-graph-2d` | `^1.29.1` | Optional peer, needed to draw the graph |
+| `react`, `react-dom` | `^18 \|\| ^19` | Optional peers; an Rspress site already has them |
 
-## Quick Start
-
-Add the plugin to your `rspress.config.ts`:
+## Add the plugin
 
 ```ts
+// rspress.config.ts
 import { defineConfig } from "@rspress/core";
 import { graphview } from "rspress-plugin-obsidian";
 
@@ -53,42 +40,41 @@ export default defineConfig({
 });
 ```
 
-That's it. Start your dev server and you'll see a floating action button in the bottom-right corner. Click it to open the graph view.
+Start the dev server (`npx rspress dev`). A round button appears in the bottom-right corner of every page; click it, or press `g`, to open the graph.
 
-## How It Works
+The graph works on its own, but it is built for the [Markdown](/markdown/) plugin: with `markdown()` installed, every wikilink, embed and tag a note renders becomes an edge, and vault notes are in the graph next to your docs pages. A [Canvas](/canvas/) board links to the notes on its cards.
 
-The plugin operates in two phases:
+## Add the stylesheet
 
-**Build time**: once Rspress has its final route list (after every plugin has run, so `publish: false` pages are already gone), the plugin:
-1. Reads each note's links and tags from the markdown plugin's content index, or indexes the docs root itself when `markdown()` is not installed
-2. Reads each `.canvas` board's cards from the `.canvas` file
-3. Resolves every link with the markdown plugin's resolver, the one the rendered page uses
-4. Builds the graph (notes, tags, attachments, unresolved links) and publishes it as a compact virtual module, with the note text for search as a separate module
+The panel styles itself, but the graph stylesheet styles the [hover-preview](./graph-view.md#hover-previews) popover and switches the panel's animations off for readers who prefer reduced motion. Load it one of two ways.
 
-Under `rspress dev`, editing a note rebuilds the graph and updates the open page.
+Let the plugin add it:
 
-**Runtime** — The client:
-1. Loads `react-force-graph-2d` dynamically (lazy-loaded)
-2. Renders an interactive force-directed graph
-3. Highlights the current page and its neighbors
-4. Lets readers click nodes to open pages, or use the keyboard list of the same pages
+```ts
+graphview({ enableDefaultStyles: true });
+```
 
-## Features
+Or `@import` it from a CSS file your site already loads, for example the file you pass to Rspress `globalStyles`:
 
-- [Interactive force-directed graph](./graph-view.md) with custom canvas rendering
-- [Click-to-navigate](./graph-view.md#navigation) — click any node to jump to that page
-- [Dark mode](./graph-view.md#dark-mode) — seamlessly adapts to light and dark themes
-- [Obsidian's graph settings](./graph-view.md#settings): filters, display and forces, saved per visitor
-- [Fast rebuilds and live dev updates](./configuration.md#link-resolution-rebuilds-and-rspress-dev)
-- [Large graph optimization](./graph-view.md#large-graphs) — automatically reduces visual cost for 80+ node graphs
-- [Color customization](./configuration.md#custom-colors) — override the default palette to match your brand
+```css
+@import "rspress-plugin-obsidian/graph/styles.css";
+```
 
+`rspress-plugin-obsidian/styles.css` contains the Markdown, Canvas and Graph View stylesheets together. Use one way, not both. Do not import a `.css` file from `rspress.config.ts`: Rspress loads the config with Node, which cannot import CSS.
 
-## Unified Obsidian content
+## How the graph is built
 
-The graph plugin works with the Markdown and Canvas plugins in the same Rspress site. Its edges are the links each page renders: wikilinks, embeds, Markdown links, `obsidian://` links and frontmatter property links. Tags, attachments and links to notes that do not exist yet can be shown as nodes, and a canvas board links to its cards. Headings and block IDs stay fragments of their page.
+At build time, once Rspress knows its final list of pages (so `publish: false` notes are already gone), the plugin:
 
-See [Graph View: Obsidian content support](./graph-view.md#obsidian-content-support) for the complete integration table.
-See also:
-- [Configuration](./configuration.md)
-- [API Reference](../api.md)
+1. reads each page's links and tags from the Markdown plugin's index, or indexes the docs root itself when `markdown()` is not installed;
+2. reads each `.canvas` board's cards;
+3. resolves every link with the same resolver the rendered page uses, so an edge in the graph is exactly a link on the page and a backlink on its target;
+4. ships the graph as a small module, and the note text for search as a separate one that loads only when a search needs it.
+
+In the browser, the panel's code and the graph data download only when the panel opens; a reader who never opens it loads only the button. Under `rspress dev`, editing a note rebuilds the graph and updates the open page.
+
+## Next steps
+
+- [Using the Graph View](./graph-view.md): what readers can do in the panel, and which Obsidian content becomes nodes and edges.
+- [Configure the Graph View](./configuration.md): open the panel by default, colour groups, your own colours, hover previews, broken-link reports.
+- [API Reference](../api.md): every option and colour key.

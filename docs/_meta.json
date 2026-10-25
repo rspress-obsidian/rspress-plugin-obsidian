@@ -1,5 +1,9 @@
 [
-  "getting-started",
+  {
+    "type": "file",
+    "name": "getting-started",
+    "label": "Getting Started"
+  },
   {
     "type": "dir",
     "name": "markdown",
@@ -18,5 +22,9 @@
     "label": "Graph View",
     "collapsed": true
   },
-  "obsidian-compatibility"
+  {
+    "type": "file",
+    "name": "obsidian-compatibility",
+    "label": "Compatibility"
+  }
 ]

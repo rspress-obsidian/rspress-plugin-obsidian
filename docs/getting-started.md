@@ -1,47 +1,166 @@
 ---
 title: Getting Started
-description: End-to-end setup for the suite — publish an Obsidian vault, its Canvas files, generated tag pages, daily notes, and the combined graph view.
+description: Publish an Obsidian vault with Rspress — requirements, install, a minimal config, the routes you get, and how to turn on Canvas, the graph view and every other feature.
 ---
 
 # Getting Started
 
-## Unified graph view
+This page takes you from an Rspress site to a published Obsidian vault, then shows how to turn on the rest. Read it top to bottom the first time; come back to [Turn on more](#turn-on-more) when you want another feature.
 
-The graph view connects the full Obsidian publishing surface: wikilinks, Markdown links, generated tag pages, daily notes, and Markdown references embedded in Canvas files. Open the [Graph Features](/graph/guide/graph-view) guide for the combined configuration and extraction rules.
+## Requirements
 
-## Complete publishing example
+- **Node.js 22.14** or later.
+- An **Rspress 2** site (`@rspress/core` `^2.0.21`). No site yet? `npm create rspress@latest` makes one.
+- An **Obsidian vault**: the folder Obsidian opens. It can sit anywhere on disk, inside the site's repository or reached through a symlink.
 
-This configuration publishes the local Obsidian vault, renders Canvas files from the same vault, generates tag pages and daily-note navigation, and enables the Graph View over the combined content:
+## Install
 
 ```bash
-bun add rspress-plugin-obsidian react-force-graph-2d
+npm install rspress-plugin-obsidian
+# or: bun add rspress-plugin-obsidian
+# or: pnpm add rspress-plugin-obsidian
 ```
 
-`react-force-graph-2d` is an optional peer of the package, so install it yourself
-if you use `graphview()`. Without it the site still builds, with a warning, and
-the graph panel lists the pages instead of drawing the graph.
+That is all most features need. A few draw with a package you install only if you use them; without it, the build names the package and the feature falls back:
+
+| Package | Needed for | Without it |
+| --- | --- | --- |
+| `react-force-graph-2d` | the [graph view](/graph/) | a list of pages instead of the graph |
+| `mermaid` | Mermaid diagrams | diagrams stay as source |
+| `@excalidraw/excalidraw` | Excalidraw fonts and text wrapping | fallback fonts, estimated wrapping |
+| `maplibre-gl` | Bases map views | a table of the located notes |
+| `lucide-static` | Bases `icon()` | the icon's name |
+| `mathjax-full` | `mathEngine: "mathjax"` | the build fails; KaTeX, the default engine, needs nothing |
+
+## Publish your vault
+
+Add the plugin to `rspress.config.ts` and point `vaultRoot` at your vault:
 
 ```ts
 import path from "node:path";
 import { defineConfig } from "@rspress/core";
 import { pluginObsidian } from "rspress-plugin-obsidian";
 
-const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
+export default defineConfig({
+  root: path.join(import.meta.dirname, "docs"),
+  plugins: pluginObsidian((markdown) => [
+    markdown({
+      // Your vault's folder.
+      vaultRoot: path.join(import.meta.dirname, "My Vault"),
+      // Styles for callouts, backlinks, tags and the rest.
+      enableDefaultStyles: true,
+    }),
+  ]),
+});
+```
+
+Start the dev server and open the local URL it prints:
+
+```bash
+npx rspress dev
+```
+
+Your docs pages stay where they were, and every note in the vault becomes a page under `/vault` (change it with `vaultRoutePrefix`):
+
+| In the vault | Published page |
+| --- | --- |
+| `My Vault/Welcome.md` | `/vault/Welcome` |
+| `My Vault/guide/intro.md` | `/vault/guide/intro` |
+| `[[Welcome]]` in any note or docs page | a link to `/vault/Welcome` |
+| A note with `publish: false` in its frontmatter | no page, and links to it are reported as broken |
+
+Without any other option you get [wikilinks](/markdown/guide/link-resolution) with heading and block anchors, Markdown links between notes, and [Obsidian's note syntax](/markdown/guide/note-syntax): `==highlights==`, `%%comments%%`, footnotes and its line breaks. Docs pages and vault notes link to each other in both directions.
+
+### If the first build fails
+
+Links are checked strictly by default: a wikilink or note link that resolves to nothing is reported with the page it is on, and the build fails (`onBrokenLink: "error"`). Fix the links the report names, or publish while you work through them:
+
+```ts
+markdown({
+  vaultRoot: path.join(import.meta.dirname, "My Vault"),
+  enableDefaultStyles: true,
+  onBrokenLink: "warn",
+}),
+```
+
+The [compatibility page](/obsidian-compatibility#how-to-check-your-own-vault) lists the other checks and what each one reports.
+
+## Turn on more
+
+Everything beyond the basics is off until you turn it on. Add the option to `markdown({ … })`, or add a feature to the `pluginObsidian` list:
+
+| Feature | Turn it on | Guide |
+| --- | --- | --- |
+| Callouts | `enableCallouts` | [Callouts](/markdown/guide/callouts) |
+| Note embeds (transclusion) | `enableTransclusion` | [Transclusion](/markdown/guide/transclusion) |
+| Image, audio, video and PDF embeds | `enableMediaEmbeds` | [Media embeds](/markdown/guide/media-embeds) |
+| Backlinks panel | `enableBacklinks` | [Backlinks](/markdown/guide/backlinks) |
+| Tag links, tag pages, daily notes | `enableTagLinking`, `enableTagPages`, `enableDailyNotes` | [Tags & daily notes](/markdown/guide/tags-and-daily-notes) |
+| Dataview queries | `enableDataview` | [Dataview](/markdown/guide/dataview) |
+| Math and Mermaid | `enableMath`, `enableMermaid` | [Advanced](/markdown/guide/advanced) |
+| Tasks queries | `enableTasks` | [Tasks](/markdown/guide/tasks) |
+| Kanban boards | `enableKanban` | [Kanban](/markdown/guide/kanban) |
+| Excalidraw drawings | `enableExcalidraw` | [Excalidraw](/markdown/guide/excalidraw) |
+| Bases | `enableBases` | [Bases](/markdown/guide/bases) |
+| Templater templates | `enableTemplater` | [Templater](/markdown/guide/templater) |
+| `.canvas` boards as pages | add `canvas()` | [Canvas](/canvas/) |
+| Graph view, hover previews | add `graphview()`; `enableHoverPreviews` | [Graph View](/graph/) |
+
+Every Markdown option, with its default, is in the [Markdown API reference](/markdown/guide/api).
+
+### Canvas and the graph view
+
+Canvas and the graph view are separate features in the same list. This adds both:
+
+```ts
+import path from "node:path";
+import { defineConfig } from "@rspress/core";
+import { pluginObsidian } from "rspress-plugin-obsidian";
+
+const vaultRoot = path.join(import.meta.dirname, "My Vault");
 
 export default defineConfig({
-  root: "docs",
-  // Each feature injects its own stylesheet; the aggregate is for a site that
-  // composes them by hand. It cannot be `import`ed from this file — Rspress
-  // loads the config with Node, not the bundler — so prefer the option.
+  root: path.join(import.meta.dirname, "docs"),
+  plugins: pluginObsidian((markdown, canvas, graphview) => [
+    markdown({ vaultRoot, enableDefaultStyles: true }),
+    canvas({
+      vaultRoot,
+      routePrefix: "/canvas",
+      // The markdown feature's vaultRoutePrefix.
+      fileRoutePrefix: "/vault",
+    }),
+    graphview(),
+  ]),
+});
+```
+
+- **Canvas** publishes each `.canvas` file in the vault as a page under `/canvas`, its path lowercased with spaces as dashes, so `My Vault/Demo.canvas` becomes [`/canvas/demo`](/canvas/demo). A card that shows a note links to that note's page only when `fileRoutePrefix` names the same prefix as the markdown feature; without it the card links to `/Welcome`, which is never published.
+- **Graph view** adds a button to every page that opens a floating graph panel (or press `g`). While the panel is closed its code is not downloaded; it loads when a reader opens it, or with the page when you set `defaultOpen: true`. Install `react-force-graph-2d` to draw the graph.
+
+The graph is built from everything the site publishes: wikilinks, Markdown links, tags (linked to their tag pages when `enableTagPages` is on), daily notes, and the notes and links inside canvas boards. Its edges are the links the markdown feature resolves, so the graph and the backlinks panel always agree. The [Graph View guide](/graph/guide/graph-view) explains the panel, its filters and search.
+
+## Full example
+
+This publishes a vault with callouts, embeds, backlinks, tags, daily notes and Dataview, renders its canvas boards, and adds the graph view with hover previews:
+
+```ts
+import path from "node:path";
+import { defineConfig } from "@rspress/core";
+import { pluginObsidian } from "rspress-plugin-obsidian";
+
+const vaultRoot = path.join(import.meta.dirname, "My Vault");
+
+export default defineConfig({
+  root: path.join(import.meta.dirname, "docs"),
   plugins: pluginObsidian((markdown, canvas, graphview) => [
     markdown({
       vaultRoot,
       vaultRoutePrefix: "/vault",
       enableDefaultStyles: true,
       enableCallouts: true,
-      enableBacklinks: true,
       enableTransclusion: true,
       enableMediaEmbeds: true,
+      enableBacklinks: true,
       enableTagLinking: true,
       enableTagPages: true,
       enableDailyNotes: true,
@@ -50,6 +169,7 @@ export default defineConfig({
         dateFormat: "YYYY-MM-DD",
         navigation: true,
       },
+      enableDataview: true,
       onBrokenLink: "error",
       onAmbiguousLink: "warn",
     }),
@@ -57,7 +177,6 @@ export default defineConfig({
       vaultRoot,
       routePrefix: "/canvas",
       fileRoutePrefix: "/vault",
-      include: ["**/*.canvas"],
     }),
     graphview({
       defaultOpen: false,
@@ -67,24 +186,20 @@ export default defineConfig({
 });
 ```
 
-`fileRoutePrefix` must match the markdown plugin's `vaultRoutePrefix`: a Canvas file node such as `{ "file": "Welcome.md" }` links to `/vault/Welcome` only when both name the same prefix. Without it the card links to `/Welcome`, which the vault build never publishes.
-
-> The individual factories (`markdown`, `canvas`, `graphview`) are also exported if you only need one — in that case pass them directly to your `plugins` array.
-
-The resulting site separates normal docs, vault notes, Canvas routes, generated tag pages, and the combined interactive graph:
+With this config the site has:
 
 | Content | Example route |
-|---|---|
+| --- | --- |
 | Vault note | `/vault/Welcome` |
-| Vault wikilink target | `/vault/guide/intro` |
-| Canvas | [`/canvas/demo`](/canvas/demo) |
-| Generated tag page | `/tags/tutorial` |
-| Graph View | Floating panel on every page |
+| Daily note `daily/2024-01-15.md` | `/vault/daily/2024-01-15` |
+| Generated tag page for `#tutorial` | `/tags/tutorial` |
+| Canvas board `Demo.canvas` | [`/canvas/demo`](/canvas/demo) |
+| Graph view | a floating panel on every page |
 
-## Section guides
+`markdown`, `canvas` and `graphview` are also exported on their own. To use one without the others, import it and put its plugin straight into `plugins`: `plugins: [markdown({ vaultRoot })]`.
 
-- [Markdown plugin](/markdown/guide/getting-started) — install, syntax, the full option reference, and worked examples.
-- [Wikilinks & Markdown](/markdown/) — feature tour: wikilinks, callouts, backlinks, transclusion.
-- [Tags & Daily Notes](/markdown/guide/tags-and-daily-notes) — tag pages, daily-note navigation, Dataview queries.
-- [Canvas](/canvas/) — configure Canvas pages, style them, and open the [live demo](/canvas/demo).
-- [Graph Features](/graph/) — the interactive graph view, hover previews, and combined configuration.
+## Next steps
+
+- [Live examples](/markdown/guide/examples): every Markdown feature, rendered by this plugin.
+- [Markdown](/markdown/), [Canvas](/canvas/) and [Graph View](/graph/): each section's guides and option reference.
+- [Compatibility](/obsidian-compatibility): what is supported from Obsidian, what is partial, and what is left out.

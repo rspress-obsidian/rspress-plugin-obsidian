@@ -1,18 +1,30 @@
 ---
-description: Live media embeds — every image, audio, video and PDF format Obsidian accepts in both embed syntaxes, with sizing, PDF page and height subpaths, YouTube and X embeds, and the same renderer inside canvas text cards.
+title: Media Embeds
+description: Embed images, audio, video, PDFs, YouTube videos and posts on X with ![[file]] or a Markdown image, with sizes, PDF page and height, and how attachments are found and published.
 ---
 
 # Media Embeds
 
-Every embed on this page is a real file in the demo vault, rendered by the
-plugin. Nothing here is a screenshot of a plugin, and nothing is a code sample
-in a fence: if a format is listed here, a browser on this page is playing it.
+With [`enableMediaEmbeds`](./api.md#features), `![[file]]` renders every
+image, audio, video and PDF format that Obsidian accepts as a native element,
+sized with the same pipe syntax:
 
-Enable with `enableMediaEmbeds: true`.
+```ts
+markdown({
+  enableMediaEmbeds: true,
+  enableDefaultStyles: true, // styles the PDF frame
+});
+```
+
+Every embed on this page is a real file in this site's demo vault, rendered by
+the plugin. With the option off, `![[file]]` renders as a link to the file, and
+a Markdown-image embed of audio, video, a PDF or a web page renders as a
+link. Markdown images of image files work either way.
 
 ## Images
 
-An image embed is a lazy `<img>`, sized with the pipe Obsidian documents:
+An image embed renders as a lazy-loaded `<img>`. A number after the pipe sets
+the width, and `WxH` sets the width and the height:
 
 ![[media/gradient.png|420]]
 
@@ -20,18 +32,21 @@ An image embed is a lazy `<img>`, sized with the pipe Obsidian documents:
 
 ![[media/gradient.png|300x180]]
 
-A pipe that is not a bare dimension is caption text, not a size:
+Text after the pipe that is not a size is a caption, used as the image's `alt`
+text. `![[image.png|A caption|300]]` gives both:
 
 ![[media/gradient.png|A gradient, unsized]]
 
-Vector images work the same way, since `svg` is on Obsidian's list:
+SVG is an image format too:
 
 ![[media/diagram.svg|320]]
 
-## Sizing a Markdown Image
+### Markdown images
 
-Obsidian lets a markdown image carry the same size, either as the alt on its own
-or after a caption. Both are honoured:
+`![](image.png)` is core Markdown, so the plugin resolves it in every
+configuration, the same way it resolves an embed. Paths with spaces work as
+`![](<my image.png>)` or `![](my%20image.png)`. Obsidian also lets the alt text
+carry a size, alone or after a caption:
 
 ![300](/vault/media/gradient.png)
 
@@ -39,10 +54,12 @@ or after a caption. Both are honoured:
 
 ![A caption, then a size|300](/vault/media/gradient.png)
 
+Alt text that is not a bare size, such as `![A caption|wide](image.png)`,
+stays caption text.
+
 ## Audio
 
-Each of these is a different encoding of the same one-second tone. The controls
-are the browser's own:
+Each player below plays the same one-second tone in a different encoding:
 
 ![[media/tone.mp3]]
 
@@ -56,38 +73,45 @@ are the browser's own:
 
 ## Video
 
+A width after the pipe sizes the player:
+
 ![[media/clip.mp4]]
 
 ![[media/clip.webm|320]]
 
 ## PDF
 
-A PDF is embedded in a frame with a bar naming the file and an **Open** link that
-opens the document on its own — the way out for a browser that cannot display a
-PDF in place, and the way to a full-screen view when it can. The subpath is read
-for two knobs. The page reaches the frame, so the browser opens there, and the bar
-says which page it is on:
+A PDF renders as a frame with a bar above it. The bar names the file and has an
+**Open** link, which a reader can use to view the PDF full screen or on a
+browser that cannot show PDFs in place, such as iOS webviews or Firefox.
+
+`#page=N` opens the frame at that page, and the bar shows which page:
 
 ![[media/sample.pdf#page=2]]
 
-The height is a property of the embed rather than a location the file is asked
-for, so it becomes the frame's height and never travels into the URL:
+`#height=N` sets the frame's height in pixels. The height never becomes part of
+the file's URL:
 
 ![[media/sample.pdf#height=240]]
 
-A PDF with neither is drawn in a 600px frame:
+Without either, the frame is 600px tall:
 
 ![[media/sample.pdf]]
 
-Both knobs together, joined by `&` as Obsidian documents — page 2, in a 320px
-frame:
+Join both with `&`, as Obsidian does:
 
 ![[media/sample.pdf#page=2&height=320]]
 
-## Markdown Syntax
+The frame is not sandboxed, because Chromium's PDF viewer needs scripts and
+shows a broken document inside a sandboxed frame. The file is served from your
+site's own origin. If you would rather link to PDFs than embed them, leave
+`enableMediaEmbeds` off. The frame's look comes from the `.obsidian-pdf` rules in
+`rspress-plugin-obsidian/markdown/styles.css`.
 
-With **`Use [[Wikilinks]]`** off, Obsidian writes every embed as a markdown image.
-Each format embeds the same way in that form — a player, not an image:
+## Markdown-image embeds
+
+When **`Use [[Wikilinks]]`** is off in Obsidian, every embed is written as a
+Markdown image. Audio, video and PDFs embed the same way in that form:
 
 ![](/vault/media/tone.mp3)
 
@@ -95,86 +119,86 @@ Each format embeds the same way in that form — a player, not an image:
 
 ![](/vault/media/sample.pdf#page=2&height=320)
 
-## Web Pages
+## YouTube and X
 
-Obsidian embeds a YouTube video or a post on X from a markdown image of its URL.
-The plugin frames the site's own embed page; the size syntax sizes the frame:
+A Markdown image of a YouTube video or a post on X becomes an embedded frame,
+as in Obsidian:
 
 ![](https://www.youtube.com/watch?v=NnTvZWp5Q7o)
 
-Short links (`youtu.be/…`), Shorts and a `t=` start time work too, as do
-`twitter.com` and `x.com` post URLs. A post is a fixed-height card: X sizes it to
-fit only through its own script, which the site does not load, so a long post
-scrolls inside the frame. Any other external URL is an image, and an `<iframe>`
-a note writes itself is kept as written.
+`watch?v=`, `youtu.be/`, `/shorts/` and `/embed/` links all work, as does a
+`t=` start time, and so do `x.com` and `twitter.com` status links. The plugin
+validates the id and builds the frame URL from it, and the frame is sandboxed
+to what the player needs. `![560x315](…)` sets the size. Otherwise a video is
+16:9 at full width, and a post is a 550 × 700 px card that scrolls when the post
+is longer. Any other external URL is treated as an image. An `<iframe>` that you
+write yourself is kept as written.
 
-## In a Canvas Card
+## In a canvas card
 
-A canvas text card renders attachments with the same renderer, from the same
-table of formats — including both PDF knobs. Pan and zoom the board below; the
-cards are ordinary text nodes.
+A text card on a canvas renders attachments with the same renderer and the
+same list of formats, including both PDF options. Pan and zoom the board below:
 
 ![[Media.canvas]]
 
 ## Syntax
 
-| Syntax | Result |
-|--------|--------|
-| `![[image.png]]` | Image, unsized |
-| `![[image.png\|300]]` | Image at 300px wide |
-| `![[image.png\|300x180]]` | Image at 300×180 |
-| `![[image.png\|A caption]]` | Caption, no size |
-| `![[image.png\|A caption\|300]]` | Caption, then width |
-| `![](image.png)` | Markdown image, resolved like an embed (next to the note, from the root, or by unique name) |
-| `![](<my image.png>)`, `![](my%20image.png)` | Markdown image with spaces in its name |
-| `![300](image.png)` | Markdown image, width 300 |
-| `![300x180](image.png)` | Markdown image, width and height |
-| `![A caption\|300](image.png)` | Markdown image, caption then width |
+| You write | Result |
+|-----------|--------|
+| `![[image.png]]`, `![](image.png)` | Image |
+| `![[image.png\|300]]`, `![300](image.png)` | Image 300px wide |
+| `![[image.png\|300x180]]`, `![300x180](image.png)` | Image 300 × 180 |
+| `![[image.png\|A caption]]` | Image with alt text, unsized |
+| `![[image.png\|A caption\|300]]`, `![A caption\|300](image.png)` | Alt text and width |
 | `![[audio.mp3]]`, `![](audio.mp3)` | `<audio controls>` |
 | `![[video.mp4]]`, `![](video.mp4)` | `<video controls>` |
-| `![[video.mp4\|320]]`, `![320](video.mp4)` | Video at 320px wide |
+| `![[video.mp4\|320]]`, `![320](video.mp4)` | Video 320px wide |
 | `![[doc.pdf]]`, `![](doc.pdf)` | PDF in a 600px frame |
 | `![[doc.pdf#page=3]]` | PDF opened at page 3 |
 | `![[doc.pdf#height=400]]` | PDF in a 400px frame |
 | `![[doc.pdf#page=3&height=400]]` | Both |
-| `![](https://www.youtube.com/watch?v=…)`, `![](https://youtu.be/…)` | YouTube video, 16:9 |
+| `![](https://youtu.be/…)` | YouTube video, 16:9 |
 | `![](https://x.com/user/status/…)` | Post on X |
-| `![560x315](https://youtu.be/…)` | Web embed at 560×315 |
+| `![560x315](https://youtu.be/…)` | Web embed at 560 × 315 |
 
 ## Formats
 
-The formats are Obsidian's accepted list, kept in one table that both renderers
-read (`src/shared/media-exts.ts`), so a format embeds in a note and in a card
-or in neither.
+These are the formats Obsidian accepts. Notes and canvas cards read them from
+one shared list, so a format embeds in both or in neither.
 
-| Kind | Extensions |
-|------|------------|
-| Image | `avif`, `bmp`, `gif`, `jpeg`, `jpg`, `png`, `svg`, `webp` |
-| Audio | `3gp`, `flac`, `m4a`, `mp3`, `ogg`, `wav` |
-| Video | `mkv`, `mov`, `mp4`, `ogv`, `webm` |
-| Document | `pdf` |
+| Kind | Extensions | Element |
+|------|------------|---------|
+| Image | `avif`, `bmp`, `gif`, `jpeg`, `jpg`, `png`, `svg`, `webp` | `<img loading="lazy">` |
+| Audio | `3gp`, `flac`, `m4a`, `mp3`, `ogg`, `wav` | `<audio controls>` |
+| Video | `mkv`, `mov`, `mp4`, `ogv`, `webm` | `<video controls>` |
+| Document | `pdf` | `<iframe>` in a `<figure class="obsidian-pdf">` |
 
-Two of those are worth a note. Obsidian lists `.webm` under both audio and
-video; it is rendered as video, so an audio-only `.webm` plays through a video
-element that has no picture to show. And whether a browser can decode a format —
-`3gp` audio most of all — is the same codec question it is in Obsidian.
+Obsidian lists `.webm` as both audio and video. The plugin renders it as video,
+so an audio-only `.webm` plays in a video element with no picture. Whether a
+browser can decode a format, `3gp` in particular, depends on the browser, as it
+does in Obsidian.
 
-## Where the Files Live
+## How a file is found
 
-An embed is a URL the site has to serve, so where the file sits decides whether
-it works. Rspress copies `public/` to the site root and nothing else, so a file
-in the docs tree can resolve to a URL that no route serves. Two placements both
-work:
+The plugin looks for an embedded file, or a Markdown image, in this order:
 
-- The **demo vault** (`Obsidian Vault/media/`), which is what this page uses. The
-  plugin publishes vault attachments under `/vault/`, so `![[media/gradient.png]]`
-  resolves to `/vault/media/gradient.png`. Only attachments a published page
-  references are published — never dotfiles, never a file only a
-  `publish: false` note uses — and they are served from
-  `node_modules/.rspress-plugin-obsidian/`, not written into `docs/public/`.
-- A **vault-relative path** resolved through the content index, the same lookup
-  that resolves `[[Some Note]]`.
+1. Next to the note, relative to its folder.
+2. At that path in the index, which covers attachments in the vault.
+3. Relative to the docs root.
+4. At that path from the root in the index.
+5. By file name anywhere in the index, if exactly one file has that name
+   (first matching case, then ignoring case). This is what makes a bare
+   `![[photo.png]]` work.
 
-A file that is missing logs a warning and gets the URL it will be published at
-(`/vault/media/x.png` for a vault note), so an embed starts working once the file
-lands and needs no rewrite.
+An embed whose file is found nowhere logs a warning and gets the URL it would
+be published at, such as `/vault/media/x.png` for a vault note, so it starts
+working once the file exists. A Markdown image that is found nowhere is
+reported through `onBrokenLink`.
+
+Vault attachments are published only when a published note uses them, at
+`<vaultRoutePrefix>/<path in the vault>`. Rspress turns a relative image into a
+bundler import before plugins run. The plugin points that import at the file
+it found, so the image is bundled like any other Rspress image. The plugin
+also exempts relative images from Rspress's own dead-image check
+(`markdown.image.checkDeadImages`, unless your config sets it). Audio, video and
+PDF URLs include the site `base`.

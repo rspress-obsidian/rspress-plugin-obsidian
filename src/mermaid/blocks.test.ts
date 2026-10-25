@@ -232,6 +232,9 @@ test("keeps the theme observer alive for another consumer's diagram after a rele
 	// The observer resets every tracked block it still owns, dropping the rendered
 	// class before the re-render completes.
 	expect(page.block.classList.contains(MERMAID_RENDERED_CLASS)).toBe(false);
+	// Let that re-render finish: mermaid draws into a container on `<body>`, which
+	// the teardown would otherwise empty under it.
+	await waitForSettled(page.block);
 });
 
 test("keeps the observer while a second holder still claims it", async () => {
@@ -251,6 +254,7 @@ test("keeps the observer while a second holder still claims it", async () => {
 	expect(first.block.classList.contains(MERMAID_RENDERED_CLASS)).toBe(true);
 
 	disposeMermaid();
+	await waitForSettled(second.block);
 });
 
 describe("without the optional mermaid peer", () => {

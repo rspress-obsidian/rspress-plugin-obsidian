@@ -1,64 +1,29 @@
 ---
-title: Configuration
-description: Every graph view option — defaultOpen, colors, groups, hover previews, styles, plus build reuse, dev refresh, diagnostics, and peer requirements.
+title: Configure the Graph View
+description: How to open the panel by default, colour nodes with groups, change the palette, turn on hover previews, embed the graph in a custom layout, handle unresolved links and profile the graph build.
 ---
 
-# Configuration
+# Configure the Graph View
 
-Configure the graph view plugin in your `rspress.config.ts`:
+This page shows how to do the common configuration tasks with `graphview()`. Each option's type and default is in the [API Reference](../api.md).
 
-```ts
-import { defineConfig } from "@rspress/core";
-import { graphview } from "rspress-plugin-obsidian";
+## Open the panel by default
 
-export default defineConfig({
-  root: "docs",
-  plugins: [
-    graphview({
-      defaultOpen: false,
-      profileBuild: false,
-    }),
-  ],
-});
-```
-
-## Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `defaultOpen` | `boolean` | `false` | Open the graph panel by default when the site loads (not on screens narrower than 640px) |
-| `profileBuild` | `boolean` | `false` | Log graph build counts, timings and module reuse |
-| `colors` | `GraphViewColors` | Light/dark palette | Override the graph palette — see [Custom Colors](#custom-colors) |
-| `enableHoverPreviews` | `boolean` | `false` | Show Obsidian's Page preview when a link in the article is hovered: the linked note rendered in a scrollable popover, sliced to the section or block a `#heading` or `#^block` link names |
-| `enableDefaultStyles` | `boolean` | `false` | Inject the bundled graph-panel stylesheet; unnecessary if you import `rspress-plugin-obsidian/styles.css` instead |
-| `groups` | `GraphViewGroup[]` | `[]` | Colour groups: nodes matching the group's query paint in its colour — see [`groups`](#groups) |
-| `onUnresolvedLink` | `"warn" \| "error" \| "ignore"` | `"warn"` | What to do about a link that resolves to nothing — see [Broken Link Diagnostics](#broken-link-diagnostics) |
-
-You can also enable build profiling ad hoc with the `RSPRESS_GRAPH_VIEW_PROFILE=1` environment variable — useful for debugging slow builds without changing config.
-
-### `defaultOpen`
-
-When `true`, the graph panel opens automatically on page load instead of requiring the user to click the FAB button. Useful for documentation sites where the graph is a primary navigation tool. The visitor's own toggle (remembered in `localStorage`) takes precedence after the first visit. On screens narrower than 640px the panel would cover about half the article, so it starts closed there; a reader who opens it keeps it open.
+The panel starts closed. To open it when a page loads:
 
 ```ts
-graphview({ defaultOpen: true })
+graphview({ defaultOpen: true });
 ```
 
-### `profileBuild`
+On screens narrower than 640 px the panel would cover about half the article, so it still starts closed there. Once a reader opens or closes the panel, their choice is stored in `localStorage` and wins over `defaultOpen` on every later visit.
 
-When enabled, the plugin logs what each graph build did:
+The panel's code downloads only when it opens. A panel that starts closed, because of `defaultOpen: false`, a phone-sized screen, or a reader who closed it, downloads nothing until the reader clicks the button or presses `g`.
 
-```
-[rspress-plugin-obsidian:graph] graph build | routes=42 | nodes=51 | links=87 | resolvedLinks=93 | filesRead=1 | reusedModule=false | total=6.3ms
-```
+The scope (local or global), depth, filters, display and forces are reader settings, kept per visitor in `localStorage`. No option sets their defaults, and the plugin does not read `.obsidian/graph.json`. See [Using the Graph View](./graph-view.md#settings).
 
-- `resolvedLinks` — outlinks run through the markdown resolver in this build
-- `filesRead` — files the graph read itself (canvas boards, pages no content index covers, and notes whose text changed since the last build); the content index's own reads are not counted
-- `reusedModule=true` — nothing changed, so the previous modules were reused without resolving or reading anything
+## Colour nodes with groups
 
-### `groups`
-
-Colour groups tint graph nodes that match a query, the way Obsidian's colour groups work. Each group pairs a query in the panel's search language with a CSS colour:
+Colour groups tint the nodes that match a query, like Obsidian's colour groups. Each group pairs a query in the panel's search syntax with a CSS colour:
 
 ```ts
 graphview({
@@ -70,11 +35,16 @@ graphview({
 });
 ```
 
-The query language is the same one the panel's search box accepts (see [Graph View: Filters and search](./graph-view.md#filters-and-search)), so type the query into the search first to see exactly which nodes a group would colour. A group that uses `content:`, `line:`, `section:` or plain words matches note text once the panel has loaded it. Groups are checked in order and the first match wins; the current page always keeps its dedicated colour, and a colour `CSS.supports` rejects falls back to the palette rather than corrupting the canvas.
+- Groups are checked in order, and the first match wins.
+- The current page always keeps its own colour.
+- A colour the browser rejects falls back to the palette.
+- A group whose query reads note text (`content:`, `line:`, `section:` or plain words) makes the panel load the note text as soon as it opens; its nodes take the colour when the text arrives.
 
-## Custom Colors
+To see which nodes a group will colour, type its query into the panel's search box first. The syntax is in [Using the Graph View: Search](./graph-view.md#search).
 
-You can override the default color palette to match your brand or theme. Pass it to the plugin — the colors reach the panel the plugin registers automatically:
+## Change the colours
+
+`colors` overrides any key of the built-in palette; the keys you leave out keep their defaults:
 
 ```ts
 graphview({
@@ -86,56 +56,39 @@ graphview({
 });
 ```
 
-To embed a graph in a custom theme or layout slot, use the runtime components directly and pass `colors` to them. Prefer `GraphSidebar` for embedded layouts: the floating `GraphPanel` is always registered by the plugin, so a second manual `<GraphPanel>` would show a duplicate FAB and panel.
+The panel switches between a light and a dark palette with the site theme, and your overrides apply on top of both, so pick colours that read on both backgrounds. The [colour key table](../api.md#colors) lists every key with its light and dark default.
 
-```tsx
-// In your custom theme or Layout wrapper
-import { Layout } from "@rspress/core/theme-original";
-import GraphSidebar from "rspress-plugin-obsidian/graph/runtime/GraphSidebar";
+Without a group, nodes are coloured by kind: notes `node`, tags `tagNode`, attachments `attachmentNode`, links to missing notes `unresolvedNode`.
 
-export default function CustomLayout(props) {
-  return (
-    <Layout {...props}>
-      <GraphSidebar
-        colors={{
-          currentNode: "#0ea5e9",
-          nodeHover: "#38bdf8",
-          linkHighlight: "rgba(14, 165, 233, 0.6)",
-        }}
-      />
-    </Layout>
-  );
-}
+## Turn on hover previews
+
+```ts
+graphview({ enableHoverPreviews: true });
 ```
 
-Available color keys: `currentNode`, `currentLabel`, `node`, `nodeHover`, `nodeDimmed`, `tagNode`, `attachmentNode`, `unresolvedNode`, `label`, `labelHover`, `labelShadow`, `link`, `linkHighlight`, `fallbackLinkDim`, `loaderBorder`, `loaderTop`.
+A reader who rests the mouse on a link in the article sees the linked note in a popover, as with Obsidian's Page preview. The popover renders the target page's own module, which Rspress already fetches when the pointer enters a link, so the option adds nothing to the build. Load the [graph stylesheet](./getting-started.md#add-the-stylesheet) to style the popover. What readers see is described in [Hover previews](./graph-view.md#hover-previews).
 
-Any unspecified key falls back to the default light or dark palette.
+## Embed the graph in your layout
 
-## Link resolution, rebuilds and `rspress dev`
+The plugin mounts the floating panel on every page. To show a graph inside your own layout as well, for example under the sidebar, render `GraphSidebar` from a custom theme:
 
-The graph does not parse pages itself. It reads each note's links from the
-markdown plugin's content index and resolves them with the markdown plugin's
-resolver, the same index and options the rendered page and its Backlinks pane
-use. With `markdown()` installed it reuses that plugin's cached index; without
-it, the graph indexes the Rspress `root` itself with the default options.
+```tsx
+// theme/index.tsx
+import { Layout as BaseLayout } from "@rspress/core/theme-original";
+import GraphSidebar from "rspress-plugin-obsidian/graph/runtime/GraphSidebar";
 
-- **Unchanged site**: the previous modules are reused. No link is resolved and no
-  file is read.
-- **One note edited**: the index re-parses that note, the graph resolves the
-  site's links again (a few milliseconds for a thousand notes), and only that
-  note's text is read again for previews and search.
-- **`rspress dev`**: the graph watches the docs root and the vault and pushes new
-  graph and preview data to the browser after an edit. A note added or removed
-  under the vault still needs a dev-server restart, because Rspress fixes its
-  route list when it starts.
+export function Layout() {
+  return <BaseLayout afterSidebar={<GraphSidebar colors={{ currentNode: "#0ea5e9" }} />} />;
+}
 
-Nothing is cached on disk. Earlier versions kept a `cacheDir` parse cache; that
-option is gone.
+export * from "@rspress/core/theme-original";
+```
 
-## Broken Link Diagnostics
+`GraphSidebar` draws the current page's neighbourhood from the same graph data as the panel. Do not render a second `GraphPanel`: the plugin already mounts one, and a second shows a duplicate button and panel.
 
-During the build, the plugin resolves every internal link a page makes. Links that resolve to nothing (typos, moved files, notes not written yet) are reported to the console:
+## Handle unresolved links
+
+The build reports every link that resolves to nothing, such as a typo, a moved file or a note not written yet:
 
 ```
 [rspress-plugin-obsidian:graph] 2 page(s) reference 3 unresolved internal link(s):
@@ -144,45 +97,63 @@ During the build, the plugin resolves every internal link a page makes. Links th
   /api -> Not Yet Written
 ```
 
-This is a build-time warning, and the build still succeeds. Links to attachments (`![[diagram.png]]`, `[spec](assets/spec.pdf)`) resolve to attachment nodes, and root-absolute site URLs such as `/downloads/app.zip` are not page links, so neither is reported.
+Links to attachments (`![[diagram.png]]`, `[spec](assets/spec.pdf)`) become attachment nodes, and site URLs such as `/downloads/app.zip` are not page links, so neither is reported.
 
-`onUnresolvedLink` decides what happens instead:
+`onUnresolvedLink` decides what the build does:
 
 | Value | Effect |
 |-------|--------|
-| `"warn"` (default) | Report as above; the build still succeeds |
-| `"error"` | Fail the build with the same report |
-| `"ignore"` | Say nothing |
+| `"warn"` (default) | Print the report; the build succeeds |
+| `"error"` | Fail the build with the report |
+| `"ignore"` | Print nothing |
 
-Two cases reach for `"ignore"`. A site that documents unresolved links *on
-purpose* — showing readers what a broken wikilink looks like — would otherwise
-report its own example on every build. And a site running the markdown plugin
-already hears about every unresolved wikilink through its own
-[`onBrokenLink`](/markdown/guide/api) setting, so the graph's copy is a second
-report of the same fact:
+If you use the Markdown plugin, it already reports every unresolved wikilink through its own [`onBrokenLink`](/markdown/guide/api) option, so the graph's report repeats it. Turn one of them off:
 
 ```ts
 graphview({ onUnresolvedLink: "ignore" });
 ```
 
-The graph itself does not change either way. An unresolved link appears as an
-unresolved node, which the panel hides while **Existing files only** is on (the
-default).
+The setting changes only the report. An unresolved link is still in the graph as an unresolved node, which the panel shows when a reader turns **Existing files only** off.
 
-## Peer Dependencies
+## Keep the graph current in `rspress dev`
 
-| Package | Version | Required |
-|---------|---------|----------|
-| `@rspress/core` | `^2.0.21` | Yes |
-| `react` | `^18 \|\| ^19` | Optional peer (required to render the panel) |
-| `react-dom` | `^18 \|\| ^19` | Optional peer (required to render the panel) |
-| `react-force-graph-2d` | `^1.29.1` | Optional peer (lazy-loaded by the runtime; without it the panel lists the pages) |
+The graph does not parse pages itself. It reads each note's links from the Markdown plugin's index and resolves them with the Markdown plugin's resolver, the same ones the rendered page and its Backlinks pane use. Without `markdown()`, the graph indexes the Rspress `root` itself with the default options.
 
-These are the versions the package declares; `react`, `react-dom`, and
-`react-force-graph-2d` are marked optional peers so a site that only uses the
-markdown plugin is not forced to install them.
+- **Nothing changed**: the previous graph is reused; no link is resolved and no file is read.
+- **One note edited**: that note is parsed again, every link is resolved again (a few milliseconds for a thousand notes), and only that note's text is read again for search.
+- **`rspress dev`**: the plugin watches the docs root and the vault and pushes the new graph to the browser after each edit. Adding or removing a vault note still needs a dev-server restart, because Rspress fixes its list of pages when it starts.
 
-See also:
-- [Getting Started](./getting-started.md)
-- [Graph View](./graph-view.md)
-- [API Reference](../api.md)
+Nothing is cached on disk.
+
+## Profile the graph build
+
+To see what each graph build did, turn on `profileBuild`, or set `RSPRESS_GRAPH_VIEW_PROFILE=1` for one run without changing the config:
+
+```ts
+graphview({ profileBuild: true });
+```
+
+```
+[rspress-plugin-obsidian:graph] graph build | routes=42 | nodes=51 | links=87 | resolvedLinks=93 | filesRead=1 | reusedModule=false | total=6.3ms
+```
+
+- `resolvedLinks`: links run through the resolver in this build.
+- `filesRead`: files the graph read itself (canvas boards, pages no index covers, and notes whose text changed since the last build). The index's own reads are not counted.
+- `reusedModule=true`: nothing changed, so the previous graph was reused.
+
+The repository includes a synthetic benchmark. On 750 pages with 6 links each:
+
+| Scenario | Wikilink vault | Markdown-link pages |
+|---|---|---|
+| Cold build (index, resolve, read every note) | ~28 ms | ~30 ms |
+| Rebuild with no changes | ~1.2 ms | ~1.2 ms |
+| Rebuild after one edit | ~7 ms | ~8 ms |
+
+Run it from a clone of the repository:
+
+```bash
+bun run bench:graph --pages=1000 --links=6 --iterations=5
+bun run bench:graph --pages=1000 --links=6 --style=markdown
+```
+
+It also accepts `--shape` (`sequential`, `ring`, `hub` or `clustered`), `--json` and `--csv`.

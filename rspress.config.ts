@@ -7,8 +7,9 @@ const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
 
 export default defineConfig({
 	root: docsRoot,
-	title: "Rspress x Obsidian",
-	description: "One Obsidian-publishing suite for Rspress: wikilinks, canvas, graph",
+	title: "rspress-plugin-obsidian",
+	description:
+		"Publish an Obsidian vault as an Rspress site: wikilinks, callouts, plugins, canvas and graph view",
 	globalStyles: path.join(docsRoot, "theme.css"),
 	themeDir: path.join(import.meta.dirname, "theme"),
 	plugins: pluginObsidian((markdown, canvas, graphview) => [

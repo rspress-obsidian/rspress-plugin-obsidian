@@ -15,7 +15,7 @@
     "activeMatch": "^/canvas(/|$)"
   },
   {
-    "text": "Graph Features",
+    "text": "Graph View",
     "link": "/graph/",
     "activeMatch": "^/graph(/|$)"
   },

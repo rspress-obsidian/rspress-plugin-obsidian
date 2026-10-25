@@ -6,6 +6,13 @@
 # batch. Commit prefixes follow Conventional Commits for semantic-release:
 # `fix(deps)` for runtime dependencies (a consumer gets them, so they ship a
 # patch release), `chore(deps-dev)` for tooling (no release).
+#
+# Peers: a package that is both a peer and a devDependency (mermaid,
+# maplibre-gl, react, …) has its *peer* range rewritten too, which would drop
+# support for older versions. `test/peer-range-floors.test.ts` fails such a PR;
+# restore the peer range on the PR branch (widen it, e.g. `^11 || ^12`, once the
+# new major is verified), or comment `@dependabot recreate` after widening it
+# on `dev`. `versioning-strategy` cannot prevent this: `bun` does not support it.
 version: 2
 updates:
   - package-ecosystem: bun

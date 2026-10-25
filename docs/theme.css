@@ -29,11 +29,50 @@ html {
 	-webkit-backdrop-filter: saturate(1.4) blur(12px);
 }
 
+/* The site title and five nav entries share one row from 768 px up. Keep the
+   title and each entry on one line, and below 1100 px show the search button
+   as its icon alone and tighten the spacing so the row fits. */
+.rp-nav__left {
+	flex-shrink: 0;
+}
+
+.rp-nav-menu__item__container {
+	white-space: nowrap;
+}
+
+@media (min-width: 768px) and (max-width: 1099px) {
+	.rp-nav .rp-nav__right {
+		gap: 12px;
+	}
+
+	.rp-nav .rp-search-button {
+		min-width: 0;
+	}
+
+	.rp-nav .rp-search-button__word,
+	.rp-nav .rp-search-button__hotkey {
+		display: none;
+	}
+
+	.rp-nav .rp-nav-menu__item__container {
+		padding-right: 8px;
+	}
+}
+
 /* Landing page backdrop — brand radial glows over the Rspress bg token. */
 .rp-home-background {
 	background:
 		radial-gradient(circle at 18% 12%, rgb(109 93 252 / 16%), transparent 34rem),
 		radial-gradient(circle at 84% 22%, rgb(59 130 246 / 12%), transparent 32rem), var(--rp-c-bg);
+}
+
+/* The home page's four `span: 6` feature cards sit two by two. Rspress's own
+   rule gives `span-6` a third of the row between 768 and 960 px (three plus an
+   orphan) and leaves a gap's width unused at the right edge. */
+@media (width >= 640px) {
+	.rp-home-feature .rp-home-feature__item--span-6 {
+		width: calc((100% - var(--rp-home-feature-gap)) / 2);
+	}
 }
 
 /* Feature cards: subtle lift, brand border on hover, token colors. */

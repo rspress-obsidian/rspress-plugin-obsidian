@@ -1,15 +1,29 @@
 ---
-title: Inline Canvas Embed
-description: Embed a .canvas file inside any MDX page with the CanvasEmbed component, including base-path handling for proxied sites.
+title: Embedding
+description: Show a published board inside any page or note, with the CanvasEmbed component or Obsidian's ![[Board.canvas]] syntax.
 ---
 
-# Inline Canvas Embed
+# Embedding
 
-You can embed a canvas directly into any MDX page.
+Besides its own page, a published board can appear inside any other page. Use
+this when a board illustrates a docs page or a note. The board must be one the
+Canvas plugin publishes: a `.canvas` file under its `vaultRoot`.
+
+## In an MDX page
+
+`<CanvasEmbed>` is available in every MDX page without an import. `src` is the
+board's path relative to `vaultRoot`:
+
+```mdx
+<CanvasEmbed src="Demo.canvas" />
+```
 
 <CanvasEmbed src="Demo.canvas" />
 
-If the vault contains the board, the Obsidian wikilink form works too — inside this site, `![[Demo.canvas]]` resolves to the component above (and `[[Demo.canvas]]` links to the board's page):
+## In a note
+
+In a note or docs page, Obsidian's embed syntax renders the same component, and
+a wikilink links to the board's page:
 
 ```md
 ![[Demo.canvas]]
@@ -18,17 +32,32 @@ If the vault contains the board, the Obsidian wikilink form works too — inside
 
 ![[Demo.canvas]]
 
-That live embed above came from `![[Demo.canvas]]`, and [[Demo.canvas|this link]] comes from `[[Demo.canvas]]` — both resolve through the canvas feature's published board, not the raw JSON attachment.
+The board above came from `![[Demo.canvas]]`, and [[Demo.canvas|this link]]
+comes from `[[Demo.canvas|this link]]`. If the Canvas plugin does not publish
+the board, both forms link to the raw `.canvas` file instead.
 
-The embed fetches the board from the site's Rspress `base` automatically. Pass
-`basePath` only to load a board published by a different site:
+## How an embed behaves
 
-```mdx
-<CanvasEmbed src="Demo.canvas" basePath="/docs" />
-```
+An embed has the same cards, edges and controls as the board's page, with two
+differences:
 
-The embed supports the same features as the full canvas page: pan, zoom, edge
-highlighting, and all node types. Inside a page, a plain scroll wheel keeps
-scrolling the page; the board zooms with `Ctrl`/`⌘`+wheel or a trackpad pinch,
-or with any wheel once you have clicked into it. Each board remembers its own
-viewport, so two boards on one page do not share one.
+- A plain scroll wheel keeps scrolling the page. The board zooms with
+  `Ctrl`/`⌘`+wheel or a trackpad pinch, or with any wheel once you have clicked
+  into it.
+- An embed is always read-only, even with `editable: true`.
+
+Each board remembers its own pan and zoom, so two boards on one page do not
+share them.
+
+## Props
+
+An embed does not read the `canvas()` options. Pass these props when you need
+them:
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `src` | `string` | required | The board's path relative to `vaultRoot`, e.g. `Projects/Board.canvas` |
+| `linkPreview` | `boolean` | `true` | Show link cards as website previews; see [`linkPreview`](./configuration.md#linkpreview-and-iframesandbox) |
+| `iframeSandbox` | `string` | `"allow-scripts allow-same-origin allow-popups"` | `sandbox` attribute of link-card previews |
+| `fileRoutePrefix` | `string` | none | Route prefix for file cards the build did not resolve; `![[Board.canvas]]` passes the markdown plugin's `vaultRoutePrefix` |
+| `basePath` | `string` | the site's `base` | Load a board published by a different site, e.g. `basePath="/docs"` |
