@@ -56,9 +56,7 @@ describe("pathUnderRoot", () => {
 		try {
 			expect(pathUnderRoot(`${link}/a/Note.md`, link)).toBe(`${link}/a/Note.md`);
 			// Rewritten paths use `/` separators, the spelling the content index keys by.
-			expect(pathUnderRoot(`${real}/a/Note.md`, link)).toBe(
-				normalizeFsPath(`${link}/a/Note.md`),
-			);
+			expect(pathUnderRoot(`${real}/a/Note.md`, link)).toBe(normalizeFsPath(`${link}/a/Note.md`));
 			expect(pathUnderRoot(`${real}-other/Note.md`, link)).toBeUndefined();
 			expect(pathUnderRoot("/elsewhere/Note.md", link)).toBeUndefined();
 		} finally {
