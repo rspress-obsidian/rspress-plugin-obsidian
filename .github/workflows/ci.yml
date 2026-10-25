@@ -6,7 +6,9 @@ on:
     # workflow at all and nothing is linted, built or tested until a PR to main.
     branches: [main, master, dev]
   pull_request:
-    branches: [main, master]
+    # `dev` too: Dependabot opens its upgrade PRs against `dev`, and each must
+    # pass this matrix before it is merged.
+    branches: [main, master, dev]
 
 # Every job here only reads the checkout; the release workflow carries the
 # write scopes it needs.
