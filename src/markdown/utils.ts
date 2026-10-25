@@ -71,21 +71,27 @@ export function isPathInsideRoot(
  * queries over the wrong tree, no backlinks), while the same note embedded
  * elsewhere rendered fine. The content index keeps the configured spelling,
  * so a path under the root's real path is rewritten to it.
+ *
+ * Both real spellings are tried: on Windows `realpathSync.native` expands 8.3
+ * short names (`RUNNER~1` → `runneradmin`) while `realpathSync` keeps them, and
+ * a compiled path may carry either.
  */
 export function pathUnderRoot(filePath: string, rootDir: string): string | undefined {
 	if (isPathInsideRoot(filePath, rootDir)) return filePath;
-	let realRoot: string;
-	try {
-		realRoot = normalizeFsPath(normalizeRealPath(fs.realpathSync.native(rootDir))).replace(
-			/\/+$/,
-			"",
-		);
-	} catch {
-		return undefined;
+	const realRoots = new Set<string>();
+	for (const realpath of [fs.realpathSync.native, fs.realpathSync]) {
+		try {
+			realRoots.add(normalizeFsPath(normalizeRealPath(realpath(rootDir))).replace(/\/+$/, ""));
+		} catch {
+			return undefined;
+		}
 	}
-	if (!isPathInsideRoot(filePath, realRoot)) return undefined;
-	const root = normalizeFsPath(rootDir).replace(/\/+$/, "");
-	return `${root}${normalizeFsPath(filePath).slice(realRoot.length)}`;
+	for (const realRoot of realRoots) {
+		if (isPathInsideRoot(filePath, realRoot)) {
+			return `${rootDir.replace(/[\\/]+$/, "")}${filePath.slice(realRoot.length)}`;
+		}
+	}
+	return undefined;
 }
 
 /**
