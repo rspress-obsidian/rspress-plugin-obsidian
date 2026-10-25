@@ -29,34 +29,28 @@ const ICON_MAP: Record<string, string> = {
 const START_MARKER = "/* ── CALL OUT ICONS (generated) ── */";
 const END_MARKER = "/* ── END CALL OUT ICONS ── */";
 
+// Only the glyph: the box, colour and type size live on the `::before` base
+// rules in styles.css.
 function glyphRule(selector: string, glyph: string): string[] {
-	return [
-		`${selector} {`,
-		`\tcontent: "${glyph}";`,
-		"\tbackground: none;",
-		"\tcolor: var(--callout-color, currentColor);",
-		"\tfont-size: 1rem;",
-		"\tfont-weight: 800;",
-		"\tline-height: 1.1rem;",
-		"\ttext-align: center;",
-		"\tmask: none;",
-		"\t-webkit-mask: none;",
-		"}",
-	];
+	return [`${selector} {`, `\tcontent: "${glyph}";`, "}"];
 }
 
 function buildBlock(): string {
 	const lines: string[] = [START_MARKER];
 	// Custom (unrecognised) types fall back to Obsidian's note glyph. This rule
 	// is emitted first: it ties on specificity with the per-type rules below,
-	// so document order lets each known type — and `todo` — win.
+	// so document order lets each known type — and `todo` — win. The child
+	// combinator keeps an outer callout's type off a nested callout's title.
 	lines.push(
-		...glyphRule(".callout .callout-title::before,\n.rp-callout .rp-callout__title::before", "✎"),
+		...glyphRule(
+			".callout > .callout-title::before,\n.rp-callout > .rp-callout__title::before",
+			"✎",
+		),
 	);
 	for (const [type, glyph] of Object.entries(ICON_MAP)) {
 		lines.push(
 			...glyphRule(
-				`.callout-${type} .callout-title::before,\n.rp-callout--${type} .rp-callout__title::before`,
+				`.callout-${type} > .callout-title::before,\n.rp-callout--${type} > .rp-callout__title::before`,
 				glyph,
 			),
 		);

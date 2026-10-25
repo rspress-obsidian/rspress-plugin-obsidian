@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
+import { KATEX_STYLESHEET_PATH } from "../katex-stylesheet.js";
 import { findCanvasBoardByPath, setCanvasRoutes } from "../shared/canvas-routes.js";
 import { setPublishedContent } from "../shared/published-content.js";
 import { canvas } from "./index";
@@ -338,7 +339,14 @@ describe("canvas publishing", () => {
 		expect(server.publicDir?.map((entry) => entry.name)).toEqual([fixture.out]);
 		expect(plugin.builderConfig?.source?.define).toEqual({
 			__RSPRESS_OBSIDIAN_CANVAS_BASE__: JSON.stringify("/docs/"),
+			__RSPRESS_OBSIDIAN_KATEX_STYLESHEET__: JSON.stringify(KATEX_STYLESHEET_PATH),
 		});
+		// Cards typeset math in the browser, which loads KaTeX's stylesheet from
+		// the directory this plugin publishes rather than the global stylesheet.
+		const builderPlugins = (plugin.builderConfig?.plugins ?? []) as Array<{ name?: string }>;
+		expect(builderPlugins.map((builderPlugin) => builderPlugin.name)).toContain(
+			"rspress-plugin-obsidian:katex-stylesheet",
+		);
 	});
 
 	test("resolves card links like Obsidian: shortest path, relative, and per note", async () => {

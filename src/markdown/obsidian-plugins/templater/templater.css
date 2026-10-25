@@ -12,7 +12,3 @@
 	font-size: 0.9em;
 	white-space: pre-wrap;
 }
-
-.dark .templater-error {
-	background: var(--rp-c-bg-mute, #2a2c31);
-}

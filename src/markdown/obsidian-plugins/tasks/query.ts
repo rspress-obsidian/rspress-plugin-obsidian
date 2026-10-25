@@ -52,7 +52,7 @@ const COMPONENT_BY_OPTION: Record<string, TaskComponent> = {
 	"start date": "startDate",
 };
 
-export interface QueryLayout {
+interface QueryLayout {
 	hideBacklinks: boolean;
 	hideEditButton: boolean;
 	hideNestedBacklinks: boolean;
@@ -436,7 +436,7 @@ export function parseQuery(source: string, context: QueryContext): Query {
 	return query;
 }
 
-export interface GroupHeading {
+interface GroupHeading {
 	level: number;
 	name: string;
 }

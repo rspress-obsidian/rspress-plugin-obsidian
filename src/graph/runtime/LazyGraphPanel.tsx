@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { GraphViewGroup } from "../types.js";
-import { LOCAL_STORAGE_KEY_OPEN } from "./graph-panel-storage.js";
+import { LOCAL_STORAGE_KEY_OPEN, NARROW_VIEWPORT_QUERY } from "./graph-panel-storage.js";
 
 // Lazy load heavy graph components
 const GraphPanel = lazy(() => import("./GraphPanel.js"));
@@ -62,13 +62,34 @@ function GraphPanelFallback() {
 }
 
 /**
+ * Whether a `defaultOpen` panel actually mounts open, decided the way
+ * GraphPanel's hydration effect decides it: the reader's stored choice wins,
+ * and a phone keeps it closed. A panel that would mount closed shows only its
+ * FAB, so downloading it for that would be wasted.
+ */
+function opensByDefault(): boolean {
+	try {
+		const stored = localStorage.getItem(LOCAL_STORAGE_KEY_OPEN);
+		if (stored !== null) return stored === "true";
+	} catch {
+		// localStorage may be unavailable (private mode, storage disabled)
+	}
+	return !window.matchMedia?.(NARROW_VIEWPORT_QUERY).matches;
+}
+
+/**
  * The graph data and the force-graph renderer are heavy, so the panel only
- * loads once it is wanted: immediately on pages that open it by default,
- * otherwise on the FAB click or the documented `g` shortcut — the panel's own
- * key handler cannot answer `g` until it is loaded.
+ * loads once it is wanted: on mount on pages that open it by default (unless
+ * the reader closed it before, or the screen is a phone's), otherwise on the
+ * FAB click or the documented `g` shortcut — the panel's own key handler
+ * cannot answer `g` until it is loaded.
  */
 export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelProps) {
-	const [isPanelRequested, setIsPanelRequested] = useState(defaultOpen ?? false);
+	// `undefined` while a `defaultOpen` panel is undecided: the answer depends on
+	// localStorage and the viewport, which the server render cannot see.
+	const [isPanelRequested, setIsPanelRequested] = useState<boolean | undefined>(
+		defaultOpen ? undefined : false,
+	);
 	// The reader's own request (FAB or `g`): the button they activated unmounts
 	// as the chunk loads, so the panel must take focus or it falls to <body>.
 	const [readerRequested, setReaderRequested] = useState(false);
@@ -85,6 +106,10 @@ export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelPr
 		}
 		setReaderRequested(true);
 		setIsPanelRequested(true);
+	}, []);
+
+	useEffect(() => {
+		setIsPanelRequested((requested) => requested ?? opensByDefault());
 	}, []);
 
 	useEffect(() => {
@@ -105,6 +130,8 @@ export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelPr
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [isPanelRequested, requestPanel]);
+
+	if (isPanelRequested === undefined) return <GraphPanelFallback />;
 
 	if (!isPanelRequested) {
 		return (

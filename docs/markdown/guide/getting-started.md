@@ -242,7 +242,7 @@ If no `publish` field is set, the page defaults to being included.
 | `enableBacklinks` | Appends backlinks panel to each page |
 | `enableTransclusion` | `![[Page]]` inlines file content |
 | `enableMediaEmbeds` | `![[img.png]]` renders as `<img>`; covers every format Obsidian accepts — see [Embed & Transclusion Syntax](#embed--transclusion-syntax) |
-| `enableMath` | `$inline$` / `$$display$$` rendered with KaTeX (loads KaTeX's stylesheet) |
+| `enableMath` | `$inline$` / `$$display$$` rendered with KaTeX (pages with math link KaTeX's stylesheet) |
 | `enableMermaid` | ` ```mermaid ` fences drawn as diagrams in the browser |
 | `mermaidSecurityLevel` | Mermaid's `securityLevel`; `"strict"` (default) sanitizes, looser levels do not |
 | `enableDefaultStyles` | Injects the bundled stylesheet (callouts, backlinks, transclusion, embeds) |

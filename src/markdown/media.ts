@@ -18,7 +18,6 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Image, PhrasingContent, Root } from "mdast";
 import type { Parent } from "unist";
-import { visit } from "unist-util-visit";
 import { escapeHtmlAttribute, sanitizeUrl } from "../shared/escape.js";
 import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
 import { parsePdfSubpath, pdfEmbedHtml, webEmbedHtml } from "../shared/media-html.js";
@@ -26,6 +25,7 @@ import { humanizeBaseName } from "../shared/slug.js";
 import { assetUrlPath } from "./content-index.js";
 import type { ContentIndex, ParsedWikiLink } from "./types.js";
 import { normalizeFilePathKey, normalizeFsPath } from "./utils.js";
+import { visit } from "./visit.js";
 
 /** What media rendering needs from the page being compiled. */
 export interface MediaContext {
@@ -185,7 +185,7 @@ function uniqueByName(
  * that is not a bare dimension — `![A picture|wide](url)` — is no size, so none
  * is ever claimed from prose.
  */
-export function splitImageSize(
+function splitImageSize(
 	caption: string,
 ): { alt: string; width: string; height?: string } | undefined {
 	const separator = caption.lastIndexOf("|");

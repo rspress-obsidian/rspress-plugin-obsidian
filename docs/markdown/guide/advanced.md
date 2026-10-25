@@ -317,12 +317,15 @@ newline for inline math, so `$5 and $10` stays prose. Code fences, inline code
 and raw HTML are never touched. Malformed TeX is rendered by KaTeX as its own
 inline error rather than failing the build.
 
-Enabling math also loads KaTeX's stylesheet through the `globalStyles` hook —
-together with the plugin's own stylesheet when `enableDefaultStyles` is set, on
-its own otherwise. KaTeX is already a dependency, so the site build resolves its
-fonts from the installed package. You never need to import KaTeX's stylesheet
-yourself: it is injected whenever math is enabled, regardless of
-`enableDefaultStyles`.
+Enabling math also publishes KaTeX's stylesheet and its fonts with the site,
+under `obsidian-katex/<katex version>/`, and every page that shows KaTeX math —
+its own or an embedded note's — links that stylesheet from its `<head>`. Pages
+without math never download it, and the stylesheet the plugin injects on every
+page (`enableDefaultStyles`) does not carry it. A page reached by client-side
+navigation waits for the stylesheet before it shows, so formulas never flash
+unstyled. You never need to import KaTeX's stylesheet yourself, whatever
+`enableDefaultStyles` is set to; `rspress-plugin-obsidian/markdown/katex.css`
+remains for a theme that renders KaTeX markup of its own.
 
 ### `mathEngine`
 

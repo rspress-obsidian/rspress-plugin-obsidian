@@ -29,7 +29,7 @@ import {
 } from "./task.js";
 
 /** What rendering needs from the page being built. */
-export interface RenderTools {
+interface RenderTools {
 	renderInline(markdown: string, page?: ContentPage): Promise<string>;
 	resolve(parsed: ParsedWikiLink, page?: ContentPage): Promise<ResolvedWikiLink>;
 	/** Whether no other published note shares a task's file name. */
@@ -81,7 +81,7 @@ const COMPONENT_CLASSES: Record<TaskComponent, string> = {
 };
 
 /** `today`, `past-3d`, `future-far`…: how far a date is from today, for CSS. */
-export function relativeDateAttribute(date: TaskDate, today: Day): string | undefined {
+function relativeDateAttribute(date: TaskDate, today: Day): string | undefined {
 	if (Number.isNaN(date.day)) return undefined;
 	const days = today - date.day;
 	if (days === 0) return "today";

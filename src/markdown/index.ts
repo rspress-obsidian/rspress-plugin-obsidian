@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
 import { mermaidBuilderConfig } from "../mermaid/install.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { getContentLineFlags } from "../shared/content-flags.js";
@@ -42,12 +43,11 @@ import { resolveWikiLink } from "./resolve-wikilink.js";
 import { generateTagPages } from "./tag-pages.js";
 import type {
 	ContentAsset,
-	NormalizedPluginOptions,
 	RemarkPluginFactory,
 	RemarkWikiLinkPluginOptions,
 	RspressPluginMarkdownOptions,
 } from "./types.js";
-import { isPathInsideRoot } from "./utils.js";
+import { isPathInsideRoot, pathUnderRoot } from "./utils.js";
 
 // Destinations a page links: a markdown link or image (`](url)`, `](<url>)`)
 // and an HTML `src`/`href` attribute.
@@ -162,15 +162,6 @@ const STYLES_PATH = resolveRuntimeFile(
 	path.join(moduleDir, "markdown.css"),
 	path.join(moduleDir, "markdown", "styles.css"),
 );
-// Plugin stylesheet + KaTeX, used when both `enableDefaultStyles` and
-// `enableMath` are on.
-const MATH_STYLES_PATH = resolveRuntimeFile(
-	path.join(moduleDir, "markdown", "math.css"),
-	path.join(moduleDir, "markdown", "styles-math.css"),
-);
-// KaTeX alone, for sites that bring their own stylesheet. The published and
-// source layouts put it in the same relative place, so one candidate suffices.
-const KATEX_STYLES_PATH = path.join(moduleDir, "markdown", "katex.css");
 // Inline picker for an ambiguous vault search (`[[##query]]`).
 const WIKI_PICKER_COMPONENT_PATH = resolveRuntimeFile(
 	path.join(moduleDir, "markdown", "runtime", "WikiPicker.js"),
@@ -181,20 +172,11 @@ const MERMAID_COMPONENT_PATH = resolveRuntimeFile(
 	path.join(moduleDir, "markdown", "runtime", "MermaidBlocks.js"),
 	path.join(moduleDir, "markdown", "runtime", "MermaidBlocks.tsx"),
 );
-/**
- * Pick the single stylesheet this plugin injects. KaTeX's stylesheet is needed
- * for math to be readable, so enabling math loads it even when the plugin's own
- * styles are off.
- */
-function selectStylesheet(options: NormalizedPluginOptions): string | undefined {
-	// MathJax brings its own generated stylesheet, emitted inline with the page,
-	// so loading KaTeX's for it would be dead weight.
-	const needsKatex = options.enableMath && options.mathEngine === "katex";
-	if (options.enableDefaultStyles) {
-		return needsKatex ? MATH_STYLES_PATH : STYLES_PATH;
-	}
-	return needsKatex ? KATEX_STYLES_PATH : undefined;
-}
+// Links KaTeX's stylesheet from the head of the pages that show KaTeX math.
+const KATEX_STYLESHEET_COMPONENT_PATH = resolveRuntimeFile(
+	path.join(moduleDir, "markdown", "runtime", "KatexStylesheet.js"),
+	path.join(moduleDir, "markdown", "runtime", "KatexStylesheet.tsx"),
+);
 
 /** Page descriptor yielded by the plugin's addPages hook. */
 type VaultPage = { routePath: string; filepath?: string; content?: string };
@@ -373,7 +355,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 	);
 
 	const isVaultFile = (filePath: string): boolean =>
-		Boolean(vaultRoot && isPathInsideRoot(filePath, vaultRoot));
+		Boolean(vaultRoot && pathUnderRoot(filePath, vaultRoot));
 	// A vault note with no `# heading` is titled by its file name on the page
 	// (the remark pass's `applyPageTitle`); search results and page data match.
 	const titleUntitledVaultPage = (page: { title: string; _filepath: string }): void => {
@@ -518,6 +500,10 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		);
 	};
 
+	// KaTeX's stylesheet is linked per page, by the pages that show KaTeX math
+	// (see `../katex-stylesheet.ts`). MathJax needs none: the pass emits its
+	// generated stylesheet inline with each page that has math.
+	const katexMath = normalizedOptions.enableMath && normalizedOptions.mathEngine === "katex";
 	const remarkPluginTuple: [
 		RemarkPluginFactory<RemarkWikiLinkPluginOptions>,
 		RemarkWikiLinkPluginOptions,
@@ -525,17 +511,16 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		remarkWikilink,
 		{
 			getDocsRoot: (filePath) =>
-				filePath &&
-				normalizedOptions.vaultRoot &&
-				isPathInsideRoot(filePath, normalizedOptions.vaultRoot)
-					? normalizedOptions.vaultRoot
-					: docsRoot,
+				vaultRoot && filePath && isVaultFile(filePath) ? vaultRoot : docsRoot,
 			getContentIndex: getIndexForFile,
 			getPublishedIndexes: async () => {
 				const { docs, vault } = await getIndexes().both;
 				return vault ? [docs, vault] : [docs];
 			},
 			getSiteBase: () => siteBase,
+			...(katexMath && {
+				getKatexStylesheetHref: () => `${siteBase}${KATEX_STYLESHEET_PATH}`,
+			}),
 			options: normalizedOptions,
 		},
 	];
@@ -543,12 +528,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 	return {
 		name: "rspress-plugin-obsidian:markdown",
 
-		// One stylesheet slot per plugin, so the math variants are pre-built:
-		// plugin styles alone, plugin styles + KaTeX, or KaTeX alone.
-		...(() => {
-			const stylesheet = selectStylesheet(normalizedOptions);
-			return stylesheet ? { globalStyles: stylesheet } : {};
-		})(),
+		...(normalizedOptions.enableDefaultStyles && { globalStyles: STYLES_PATH }),
 
 		...(() => {
 			const components = [
@@ -572,6 +552,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 				plugins: [
 					deferInvalidationPlugin,
 					publicDirectoryPlugin("rspress-plugin-obsidian:assets", assetStagingDir),
+					...(katexMath ? [katexStylesheetPlugin()] : []),
 				],
 			},
 			...features.map((feature) => feature.builderConfig?.(normalizedOptions) ?? {}),
@@ -776,10 +757,12 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		},
 
 		markdown: {
-			// The picker is emitted as a JSX element by the remark pass, so the
-			// component has to be resolvable by name in every compiled page.
+			// The picker and the KaTeX stylesheet link are emitted as JSX elements
+			// by the remark pass, so each component has to be resolvable by name in
+			// every compiled page.
 			globalComponents: [
 				WIKI_PICKER_COMPONENT_PATH,
+				...(katexMath ? [KATEX_STYLESHEET_COMPONENT_PATH] : []),
 				...features.flatMap((feature) => feature.globalComponents?.() ?? []),
 			],
 			remarkPlugins: [remarkPluginTuple],

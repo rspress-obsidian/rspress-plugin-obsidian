@@ -25,7 +25,7 @@ import type {
 export type BuilderConfig = NonNullable<RspressPlugin["builderConfig"]>;
 
 /** Identifier of a reproduced Obsidian plugin; also its diagnostic scope. */
-export type ObsidianPluginId = "tasks" | "kanban" | "excalidraw" | "bases" | "templater";
+type ObsidianPluginId = "tasks" | "kanban" | "excalidraw" | "bases" | "templater";
 
 /** What a feature may use while a note is being rendered. */
 export interface PluginRenderContext {

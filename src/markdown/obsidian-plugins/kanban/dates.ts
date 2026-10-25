@@ -30,7 +30,7 @@ export function parseNow(now: Date | string | undefined): Date | undefined {
 }
 
 /** Whole calendar days from `from` to `to` (negative when `to` is earlier), as `diff(…, "day")`. */
-export function dayDifference(to: Date, from: Date): number {
+function dayDifference(to: Date, from: Date): number {
 	return momentDiff(startOf(to, "day"), startOf(from, "day"), "day");
 }
 

@@ -15,7 +15,7 @@ import path from "node:path";
 import { moduleDir } from "../../../runtime-paths.js";
 import { readFontFile } from "./font-file.js";
 
-export interface FontMetrics {
+interface FontMetrics {
 	unitsPerEm: number;
 	ascender: number;
 	descender: number;

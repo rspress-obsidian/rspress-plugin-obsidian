@@ -307,6 +307,22 @@ test("a press shorter than the capture threshold is a click, not a pan", () => {
 	expect(viewportState(viewport)).toMatchObject({ x: 0, y: 0 });
 });
 
+/** Press `target` with click count `clicks`; returns whether the selection it starts survived. */
+function pressSelects(target: Element, clicks: number): boolean {
+	fireEvent.mouseDown(target, { detail: clicks });
+	const selectStart = new Event("selectstart", { bubbles: true, cancelable: true });
+	target.dispatchEvent(selectStart);
+	return !selectStart.defaultPrevented;
+}
+
+test("a single press never starts a text selection; a double click and a text field still do", () => {
+	const { content, getByTestId } = setup();
+	expect(pressSelects(content, 1)).toBe(false);
+	expect(pressSelects(content, 2)).toBe(true);
+	expect(pressSelects(content, 3)).toBe(true);
+	expect(pressSelects(getByTestId("field"), 1)).toBe(true);
+});
+
 test("middle-button drag pans even from a text field", () => {
 	const { viewport, getByTestId } = setup();
 	drag(
@@ -522,13 +538,23 @@ test("removes every window and container listener when it unmounts", () => {
 	try {
 		const { viewport, unmount } = setup(instrumentElement);
 		const panZoomListeners = added.filter((entry) =>
-			["keydown", "keyup", "wheel", "pointerenter", "pointerleave"].includes(entry.type),
+			[
+				"keydown",
+				"keyup",
+				"wheel",
+				"pointerenter",
+				"pointerleave",
+				"mousedown",
+				"selectstart",
+			].includes(entry.type),
 		);
 		expect(panZoomListeners.map((entry) => entry.type).sort()).toEqual([
 			"keydown",
 			"keyup",
+			"mousedown",
 			"pointerenter",
 			"pointerleave",
+			"selectstart",
 			"wheel",
 		]);
 		expect(panZoomListeners.find((entry) => entry.type === "wheel")?.target).toBe(viewport);

@@ -70,7 +70,7 @@ export interface DerivedGraphViewData {
 }
 
 export const LARGE_GRAPH_NODE_THRESHOLD = 80;
-export const LARGE_GRAPH_LINK_THRESHOLD = 160;
+const LARGE_GRAPH_LINK_THRESHOLD = 160;
 
 /**
  * Hard ceiling on rendered neighbors. A hub/MOC page can link thousands of
@@ -310,7 +310,7 @@ function keepLocalLink(
 	return Math.abs(sourceHop - targetHop) === 1;
 }
 
-export function normalizeFilters(filters?: GraphViewFilters): Required<GraphViewFilters> {
+function normalizeFilters(filters?: GraphViewFilters): Required<GraphViewFilters> {
 	const pick = <K extends keyof GraphViewFilters>(key: K): Required<GraphViewFilters>[K] =>
 		(filters?.[key] ?? DEFAULT_GRAPH_FILTERS[key]) as Required<GraphViewFilters>[K];
 	return {

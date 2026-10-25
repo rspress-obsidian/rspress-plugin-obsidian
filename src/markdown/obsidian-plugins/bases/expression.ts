@@ -23,7 +23,7 @@ export type Expr =
 	| { kind: "unary"; operator: "!" | "-"; operand: Expr }
 	| { kind: "binary"; operator: BinaryOperator; left: Expr; right: Expr };
 
-export type BinaryOperator =
+type BinaryOperator =
 	| "||"
 	| "&&"
 	| "=="

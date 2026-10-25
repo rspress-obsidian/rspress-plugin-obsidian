@@ -8,12 +8,12 @@
 
 export type Point = [number, number];
 
-export interface Roundness {
+interface Roundness {
 	type: number;
 	value?: number;
 }
 
-export interface ImageCrop {
+interface ImageCrop {
 	x: number;
 	y: number;
 	width: number;
@@ -79,13 +79,13 @@ export interface FrameRendering {
 	clip: boolean;
 }
 
-export interface SceneAppState {
+interface SceneAppState {
 	viewBackgroundColor: string;
 	theme: "light" | "dark";
 	frameRendering: FrameRendering;
 }
 
-export interface BinaryFile {
+interface BinaryFile {
 	mimeType: string;
 	dataURL: string;
 }

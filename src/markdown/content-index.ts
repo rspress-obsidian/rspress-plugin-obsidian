@@ -527,7 +527,6 @@ async function buildContentPage(
 }
 
 export { getContentLineFlags } from "../shared/content-flags.js";
-export { deriveRoutePath, normalizeRoutePath as normalizePathKey } from "../shared/route-path.js";
 
 /**
  * The page-link targets Dataview's `file.outlinks` and the legacy backlinks
@@ -715,5 +714,3 @@ function pushNamedAsset(
 	existing.push(asset);
 	map.set(rawValue, existing);
 }
-
-export { normalizeFsPath } from "../shared/route-path.js";

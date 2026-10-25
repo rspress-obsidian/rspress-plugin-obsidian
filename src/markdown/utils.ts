@@ -1,12 +1,13 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { normalizeFilePathKey } from "../shared/paths.js";
 import { normalizeFsPath } from "../shared/route-path.js";
-import { humanizeBaseName, normalizeUnicode } from "../shared/slug.js";
+import { humanizeBaseName } from "../shared/slug.js";
 import type { ContentPage, ParsedWikiLink } from "./types.js";
 
 export { normalizeFilePathKey } from "../shared/paths.js";
-export { normalizeFsPath, normalizeRoutePath as normalizePathKey } from "../shared/route-path.js";
+export { normalizeFsPath } from "../shared/route-path.js";
 
 /**
  * The text Obsidian shows for a wikilink: the alias when there is one, else the
@@ -60,6 +61,34 @@ export function isPathInsideRoot(
 }
 
 /**
+ * `filePath` spelled under `rootDir`, or `undefined` when it is outside it.
+ *
+ * Rspack resolves every module to its real path, so Rspress compiles a note
+ * of a vault whose configured root runs through a symlink — a vault linked
+ * into the site, or anything under macOS's `/tmp` (`/private/tmp`) — at a
+ * path no prefix test against the root matches. Such a note was taken for a
+ * docs-root page, rendered without its own index entry (no Dataview fields,
+ * queries over the wrong tree, no backlinks), while the same note embedded
+ * elsewhere rendered fine. The content index keeps the configured spelling,
+ * so a path under the root's real path is rewritten to it.
+ */
+export function pathUnderRoot(filePath: string, rootDir: string): string | undefined {
+	if (isPathInsideRoot(filePath, rootDir)) return filePath;
+	let realRoot: string;
+	try {
+		realRoot = normalizeFsPath(normalizeRealPath(fs.realpathSync.native(rootDir))).replace(
+			/\/+$/,
+			"",
+		);
+	} catch {
+		return undefined;
+	}
+	if (!isPathInsideRoot(filePath, realRoot)) return undefined;
+	const root = normalizeFsPath(rootDir).replace(/\/+$/, "");
+	return `${root}${normalizeFsPath(filePath).slice(realRoot.length)}`;
+}
+
+/**
  * Strip the extended-length prefix Windows' `realpathSync` may return.
  *
  * A resolved path longer than `MAX_PATH` comes back as `\\?\C:\vault`, and a
@@ -110,18 +139,7 @@ export function backlinkLabel(page: ContentPage): string {
 	return humanizeBaseName(page.baseName) || page.baseName;
 }
 
-/**
- * Normalize a vault-relative Markdown path without applying Rspress route
- * aliases such as removing a trailing `index` segment. The result is folded to
- * NFC (see {@link normalizeUnicode}) because it doubles as a lookup key.
- */
-
-/**
- * Encode a page route for use as an HTML URL while preserving its slash
- * separators. Content-page route paths remain unencoded as index keys; only
- * emitted href values use this helper.
- */
-export { encodeRoutePath, isIndexRoute, routeHref } from "../shared/route-path.js";
+export { routeHref } from "../shared/route-path.js";
 
 /**
  * Resolve an explicitly relative wikilink target from the current note.

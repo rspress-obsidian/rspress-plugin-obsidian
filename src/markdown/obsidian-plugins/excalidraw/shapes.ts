@@ -23,7 +23,7 @@ const ROUNDNESS_ADAPTIVE = 3;
 
 const generator = rough.generator();
 
-export function isTransparent(color: string): boolean {
+function isTransparent(color: string): boolean {
 	return (
 		color === "transparent" ||
 		(color.length === 5 && color[4] === "0") ||
@@ -86,14 +86,14 @@ function adjustRoughness(element: ExcalidrawElement): number {
 	return Math.min(element.roughness / (max < 10 ? 3 : 2), 2.5);
 }
 
-export function dashArray(strokeStyle: string, strokeWidth: number): number[] | undefined {
+function dashArray(strokeStyle: string, strokeWidth: number): number[] | undefined {
 	if (strokeStyle === "dashed") return [8, 8 + strokeWidth];
 	if (strokeStyle === "dotted") return [1.5, 6 + strokeWidth];
 	return undefined;
 }
 
 /** Excalidraw's roughjs options for an element (`generateRoughOptions`). */
-export function roughOptions(element: ExcalidrawElement, continuousPath = false): Options {
+function roughOptions(element: ExcalidrawElement, continuousPath = false): Options {
 	const options: Options = {
 		seed: element.seed,
 		strokeLineDash: dashArray(element.strokeStyle, element.strokeWidth),
@@ -130,7 +130,7 @@ export function roughOptions(element: ExcalidrawElement, continuousPath = false)
 }
 
 /** The four corners of a diamond, relative to its box (`getDiamondPoints`). */
-export function diamondPoints(element: ExcalidrawElement): Point[] {
+function diamondPoints(element: ExcalidrawElement): Point[] {
 	const topX = Math.floor(element.width / 2) + 1;
 	const sideY = Math.floor(element.height / 2) + 1;
 	return [

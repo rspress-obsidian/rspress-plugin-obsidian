@@ -176,7 +176,7 @@ function reportScene(error: unknown, name: string, ctx: PluginRenderContext): st
  * An embed's size and style, from its alias as the plugin reads it
  * (`parseAlias`): `400`, `400x300`, `x300`, `alias|400`, `400|style`.
  */
-export function embedPresentation(
+function embedPresentation(
 	alias: string | undefined,
 	defaultWidth: string,
 ): { style: string; className: string } {
@@ -318,7 +318,8 @@ export const excalidrawFeature: ObsidianPluginFeature = {
 	},
 
 	async modifySearchIndexData(pages) {
-		for (const page of pages) await cleanDrawingPage(page, true);
+		// Each page reads its own file head; one after another, the whole site waited on them.
+		await Promise.all(pages.map((page) => cleanDrawingPage(page, true)));
 	},
 
 	async addPages(ctx) {

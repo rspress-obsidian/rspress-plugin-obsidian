@@ -9,9 +9,9 @@
  */
 import type { Blockquote, Html, Root, Text } from "mdast";
 import type { Parent } from "unist";
-import { visit } from "unist-util-visit";
 import { escapeHtmlAttribute, escapeHtmlText } from "../shared/escape.js";
 import { parseObsidianMarkdown } from "./syntax.js";
+import { visit } from "./visit.js";
 
 /**
  * `[!type]`, `[!type|metadata]`, then an optional fold sign and title. Obsidian
@@ -189,12 +189,21 @@ export function restoreHijackedCallouts(tree: Root, source: string, enableMath: 
 
 		const startOffset = lineOffsets[candidate.startLine - 1] ?? 0;
 		const endOffset = lineOffsets[candidate.endLine] ?? source.length;
-		// Everything before the blockquote becomes blank space with the same line
-		// breaks, so the re-parsed nodes carry the document's own offsets.
-		const fragment =
-			source.slice(0, startOffset).replace(/[^\r\n]/g, " ") + source.slice(startOffset, endOffset);
-		const parsed = parseObsidianMarkdown(fragment, { enableMath });
+		// Parsed on its own, then moved to where it sits in the document so the
+		// nodes carry the document's own positions. (Padding the fragment with
+		// the blanked text above it gives the same positions, but makes every
+		// callout re-tokenize the whole page above it.)
+		const parsed = parseObsidianMarkdown(source.slice(startOffset, endOffset), { enableMath });
 		if (parsed.children.length === 0) continue;
+		const moved = new WeakSet<object>();
+		visit(parsed, (node) => {
+			for (const point of [node.position?.start, node.position?.end]) {
+				if (!point || moved.has(point)) continue;
+				moved.add(point);
+				point.line += candidate.startLine - 1;
+				if (point.offset !== undefined) point.offset += startOffset;
+			}
+		});
 
 		const index = candidate.parent.children.indexOf(
 			candidate.node as unknown as Root["children"][number],

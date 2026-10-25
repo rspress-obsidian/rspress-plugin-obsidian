@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
 import type { Element } from "hast";
 import type { ListItem, Root, RootContent, Text } from "mdast";
-import { visit } from "unist-util-visit";
 import { escapeHtmlText } from "../../../shared/escape.js";
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import type { ContentPage } from "../../types.js";
+import { visit } from "../../visit.js";
 import type { ObsidianPluginFeature, PluginRenderContext } from "../types.js";
 import {
 	explainQuery,

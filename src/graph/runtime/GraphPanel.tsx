@@ -16,6 +16,7 @@ import {
 	LOCAL_STORAGE_KEY_FORCES,
 	LOCAL_STORAGE_KEY_OPEN,
 	LOCAL_STORAGE_KEY_POS,
+	NARROW_VIEWPORT_QUERY,
 } from "./graph-panel-storage.js";
 import { parseGraphQuery } from "./graph-query.js";
 import { loadGraphSearchText } from "./graph-search-data.js";
@@ -47,6 +48,8 @@ const GRAPH_REGION_ID = "rspress-graph-view-region";
 const SYSTEM_FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 /** Secondary text: `--rp-c-text-2` is ≥ 4.5:1 on Rspress's light and dark backgrounds. */
 const SECONDARY_TEXT = "var(--rp-c-text-2, #475569)";
+/** Pause in typing, in ms, after which the search box's query reaches the graph. */
+export const SEARCH_DEBOUNCE_MS = 200;
 
 const DEFAULT_FILTER_SETTINGS: GraphFilterSettings = {
 	scope: DEFAULT_GRAPH_FILTERS.scope,
@@ -121,9 +124,6 @@ function injectKeyframes() {
   `;
 	document.head.appendChild(style);
 }
-
-/** Screens too narrow for the floating panel to sit beside the article. */
-const NARROW_VIEWPORT_QUERY = "(max-width: 639px)";
 
 export default function GraphPanel({
 	defaultOpen = false,
@@ -371,9 +371,21 @@ export default function GraphPanel({
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [isOpen, isFullscreen, query]);
 
+	// Every applied query re-derives the view and re-heats the layout, which a
+	// large graph cannot afford per keystroke: the query applies once typing
+	// pauses. Clearing skips the pause.
+	const [appliedQuery, setAppliedQuery] = useState("");
+	useEffect(() => {
+		const timer = setTimeout(() => setAppliedQuery(query), query ? SEARCH_DEBOUNCE_MS : 0);
+		return () => clearTimeout(timer);
+	}, [query]);
+
 	// Stable identity: GraphView re-derives only when a filter value changes,
 	// not on every panel re-render (position drags, stats ticks).
-	const filters = useMemo(() => ({ ...filterSettings, query }), [filterSettings, query]);
+	const filters = useMemo(
+		() => ({ ...filterSettings, query: appliedQuery }),
+		[filterSettings, appliedQuery],
+	);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: stats track route, filter and data changes; graphViewRef is stable
 	useEffect(() => {

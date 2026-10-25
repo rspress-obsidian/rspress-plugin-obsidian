@@ -262,7 +262,7 @@ async function fileOfAsset(asset: ContentAsset, index: ContentIndex): Promise<Ba
 const WHOLE_WIKILINK = /^!?\[\[[^\]]+\]\]$/;
 
 /** Frontmatter → values: dates, links and the types `types.json` assigns. */
-export function convertProperties(
+function convertProperties(
 	raw: Record<string, unknown>,
 	types: PropertyTypes,
 	link: (text: string) => LinkValue,

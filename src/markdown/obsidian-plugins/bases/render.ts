@@ -688,7 +688,7 @@ function coordinatesOf(value: unknown): [number, number] | undefined {
 }
 
 /** Shown on a map view, and reported, when the site is built without the map library. */
-export const MAP_INSTALL_HINT =
+const MAP_INSTALL_HINT =
 	"Interactive map views need the optional peer dependency `maplibre-gl`: install it next to rspress-plugin-obsidian (`npm install maplibre-gl`) and rebuild the site.";
 
 /**
@@ -713,13 +713,31 @@ export function isMapLibraryInstalled(fromDir: string = moduleDir): boolean {
 export const mapLibrary: { installed?: boolean } = {};
 
 /**
- * Rsbuild config for the map component: nothing when `maplibre-gl` is
- * installed, otherwise an alias that turns its import into an empty module,
- * so the site still builds and each map view keeps its table.
+ * Rsbuild config for the map component. Without `maplibre-gl`: an alias that
+ * turns its import into an empty module, so the site still builds and each map
+ * view keeps its table. With it: a split chunk for MapLibre's stylesheet, which
+ * the component imports lazily. Rspress's own `styles` group (priority 99)
+ * pulls every stylesheet, lazy ones included, into the global CSS file, which
+ * put MapLibre's ~70 kB of rules in front of every page's first paint; this
+ * group outranks it, so the rules ship as an async stylesheet the browser
+ * fetches, and applies, before the map chunk runs.
  */
 export function mapLibraryBuilderConfig(): BuilderConfig {
 	mapLibrary.installed ??= isMapLibraryInstalled();
-	return mapLibrary.installed ? {} : { resolve: { alias: { "maplibre-gl": false } } };
+	if (!mapLibrary.installed) return { resolve: { alias: { "maplibre-gl": false } } };
+	return {
+		splitChunks: {
+			cacheGroups: {
+				"obsidian-maplibre-css": {
+					test: /[\\/]maplibre-gl[\\/]dist[\\/]maplibre-gl\.css$/,
+					name: "maplibre-gl",
+					chunks: "async",
+					priority: 100,
+					enforce: true,
+				},
+			},
+		},
+	};
 }
 
 /** A CSS colour as the Maps plugin takes one: hex, a name, a colour function or a custom property. */

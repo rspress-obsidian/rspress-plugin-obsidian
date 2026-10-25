@@ -80,8 +80,8 @@ export interface RenderInput {
 }
 
 /** Excalidraw's dark export (`THEME_FILTER`) and the counter-filter that keeps photos natural. */
-export const THEME_FILTER = "invert(93%) hue-rotate(180deg)";
-export const IMAGE_INVERT_FILTER = "invert(100%) hue-rotate(180deg) saturate(1.25)";
+const THEME_FILTER = "invert(93%) hue-rotate(180deg)";
+const IMAGE_INVERT_FILTER = "invert(100%) hue-rotate(180deg) saturate(1.25)";
 
 const FRAME_STYLE = {
 	strokeColor: "#bbb",
@@ -101,7 +101,7 @@ function round(value: number): string {
 }
 
 /** A frame's name as a text element above it (`addFrameLabelsAsTextElements`), cut to the frame's width. */
-export function frameLabel(
+function frameLabel(
 	frame: ExcalidrawElement,
 	dark: boolean,
 	measure: TextMeasurer,

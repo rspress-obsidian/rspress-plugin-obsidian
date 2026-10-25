@@ -23,7 +23,7 @@
 
 import type { Link, PhrasingContent, Root } from "mdast";
 import type { Node, Parent } from "unist";
-import { visit } from "unist-util-visit";
+import { visit } from "./visit.js";
 
 /** The `^[…]` construct, before the footnote pass numbers it. */
 export interface InlineFootnoteNode extends Node {
@@ -185,12 +185,13 @@ function findMatches(chars: Char[]): Match[] {
  * Returns the original array when there are none.
  */
 export function extractInlineFootnotes(children: PhrasingContent[]): PhrasingContent[] {
+	const serialized = children.map(serializeInline);
+	// Checked on the text before building the per-character stream, which most
+	// blocks (no `^[` at all) would only throw away.
+	if (!serialized.join("").includes("^[")) return children;
 	const chars: Char[] = [];
-	for (const child of children) {
-		for (const value of serializeInline(child)) chars.push({ value, child });
-	}
-	if (!chars.some((char, index) => char.value === "^" && chars[index + 1]?.value === "[")) {
-		return children;
+	for (const [position, child] of children.entries()) {
+		for (const value of serialized[position] ?? "") chars.push({ value, child });
 	}
 
 	const matches = findMatches(chars);

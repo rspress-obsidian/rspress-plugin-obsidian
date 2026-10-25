@@ -14,6 +14,15 @@ import { findTestRoute, setTestRoutes } from "./rspress-routes.js";
 GlobalRegistrator.register({ url: "http://localhost/" });
 
 /**
+ * `Head` from the runtime entry. Head tags are the host's job (unhead, outside
+ * the React tree); a component test sees what renders in the page, which for
+ * `Head` is nothing.
+ */
+function NoHead(): null {
+	return null;
+}
+
+/**
  * Stub `@rspress/core/runtime` in the preload, for every test file.
  *
  * The real entry transitively imports Rspress's virtual modules
@@ -36,6 +45,7 @@ mock.module("@rspress/core/runtime", () => ({
 	useNavigate,
 	PageContext: createContext({ data: {} }),
 	removeBase: (pathname: string) => pathname,
+	Head: NoHead,
 	pathnameToRouteService: (pathname: string) => {
 		const route = findTestRoute(pathname);
 		return (

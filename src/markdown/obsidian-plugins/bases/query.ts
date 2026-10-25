@@ -171,7 +171,7 @@ function mean(list: number[]): number | null {
 }
 
 /** The summaries every view offers (Bases syntax.md, "Default Summary Formulas"). Averages show two decimals. */
-export const DEFAULT_SUMMARIES: Record<string, (values: Value[]) => Value> = {
+const DEFAULT_SUMMARIES: Record<string, (values: Value[]) => Value> = {
 	Average: (values) => {
 		const average = mean(numbers(values));
 		return average === null ? null : Math.round(average * 100) / 100;

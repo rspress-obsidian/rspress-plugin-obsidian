@@ -169,8 +169,13 @@ export async function filesToStage(
 		}
 	};
 	for (const index of ctx.vault ? [ctx.vault, ctx.docs] : [ctx.docs]) {
-		for (const page of index.pages) {
-			const drawing = await readDrawingIfAny(page.absolutePath);
+		// Every note's head is read to find the drawings; one after another,
+		// that was most of `addPages` for a large vault.
+		const drawings = await Promise.all(
+			index.pages.map((page) => readDrawingIfAny(page.absolutePath)),
+		);
+		for (const [position, page] of index.pages.entries()) {
+			const drawing = drawings[position];
 			if (!drawing) continue;
 			for (const ref of drawing.embeddedFiles.values()) {
 				if (ref.kind !== "link") continue;

@@ -22,12 +22,20 @@ function fakeWatch() {
 
 /**
  * Run the plugin's `setup` against a fake Rsbuild API: records what reaches the
- * compiler's in-memory store and every invalidation of its watching.
+ * compiler's in-memory store and every invalidation of its watching, and lets
+ * a test fire the compiler's `watchRun` and `done` hooks.
  */
 function attachCompiler(refresher: GraphDevRefresher) {
 	const writes: Array<[string, string]> = [];
 	const invalidated: string[][] = [];
 	const seeded: Array<Record<string, string>> = [];
+	const taps = new Map<string, Array<() => void>>();
+	const hook = (name: string) => ({
+		tap: (_plugin: string, fn: () => void) => taps.set(name, [...(taps.get(name) ?? []), fn]),
+	});
+	const fire = (name: string) => {
+		for (const fn of taps.get(name) ?? []) fn();
+	};
 	class VirtualModulesPlugin {
 		constructor(modules: Record<string, string>) {
 			seeded.push(modules);
@@ -43,6 +51,7 @@ function attachCompiler(refresher: GraphDevRefresher) {
 		watching: {
 			invalidateWithChangesAndRemovals: (changed: Set<string>) => invalidated.push([...changed]),
 		},
+		hooks: { watchRun: hook("watchRun"), done: hook("done"), failed: hook("failed") },
 	};
 	const plugin = refresher.rsbuildPlugin as { setup: (api: unknown) => void };
 	plugin.setup({
@@ -64,7 +73,14 @@ function attachCompiler(refresher: GraphDevRefresher) {
 				},
 			),
 	});
-	return { writes, seeded, invalidated };
+	return { writes, seeded, invalidated, fire };
+}
+
+/** Let a started rebuild and its write finish (`setImmediate` is not on the fake clock). */
+async function settled(): Promise<void> {
+	const { promise, resolve } = Promise.withResolvers<void>();
+	setImmediate(resolve);
+	await promise;
 }
 
 afterEach(() => {
@@ -114,6 +130,83 @@ describe("graph dev refresher", () => {
 		// refresh above); `node_modules` noise is ignored.
 		expect(builds).toBe(2);
 		expect(writes).toEqual([[path.join(moduleDir, "virtual-graph-data.js"), "v2"]]);
+		refresher.close();
+	});
+
+	test("a change that lands mid-compile rebuilds once that compile is done, not before", async () => {
+		// The saved note is itself being recompiled when the debounce ends;
+		// invalidating then would hold the note's hot update back for a second run.
+		vi.useFakeTimers();
+		const { watch, listeners } = fakeWatch();
+		let builds = 0;
+		const refresher = createGraphDevRefresher({
+			moduleDir,
+			watch,
+			rebuild: async () => {
+				builds += 1;
+				return { "virtual-graph-data": `v${builds + 1}` };
+			},
+		});
+		refresher.publish({ "virtual-graph-data": "v1" });
+		const { fire, invalidated } = attachCompiler(refresher);
+		refresher.watch(["/docs"]);
+		const onChange = listeners.get("/docs");
+
+		fire("watchRun");
+		onChange?.("change", "a.md");
+		vi.advanceTimersByTime(25);
+		await settled();
+		expect(builds).toBe(0);
+
+		fire("done");
+		await settled();
+		expect(builds).toBe(1);
+		expect(invalidated).toEqual([[path.join(moduleDir, "virtual-graph-data.js")]]);
+
+		// A compile with no change waiting rebuilds nothing.
+		fire("watchRun");
+		fire("done");
+		await settled();
+		expect(builds).toBe(1);
+
+		// A failed compile releases the change too, unless the watcher was closed.
+		fire("watchRun");
+		onChange?.("change", "b.md");
+		vi.advanceTimersByTime(25);
+		fire("failed");
+		await settled();
+		expect(builds).toBe(2);
+		fire("watchRun");
+		onChange?.("change", "c.md");
+		vi.advanceTimersByTime(25);
+		refresher.close();
+		fire("done");
+		await settled();
+		expect(builds).toBe(2);
+	});
+
+	test("a change with no compile running rebuilds as soon as the debounce ends", async () => {
+		vi.useFakeTimers();
+		const { watch, listeners } = fakeWatch();
+		let builds = 0;
+		const refresher = createGraphDevRefresher({
+			moduleDir,
+			watch,
+			rebuild: async () => {
+				builds += 1;
+				return {};
+			},
+		});
+		attachCompiler(refresher);
+		refresher.watch(["/docs"]);
+
+		listeners.get("/docs")?.("change", "a.md");
+		vi.advanceTimersByTime(24);
+		await settled();
+		expect(builds).toBe(0);
+		vi.advanceTimersByTime(1);
+		await settled();
+		expect(builds).toBe(1);
 		refresher.close();
 	});
 

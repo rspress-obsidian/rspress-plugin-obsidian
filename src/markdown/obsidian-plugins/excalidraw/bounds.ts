@@ -92,7 +92,7 @@ function linearCoords(element: ExcalidrawElement): Coords {
 }
 
 /** A point of a linear element in scene coordinates, rotation applied. */
-export function linearPointInScene(element: ExcalidrawElement, point: Point): Point {
+function linearPointInScene(element: ExcalidrawElement, point: Point): Point {
 	const [, , , , cx, cy] = linearCoords(element);
 	return rotatePoint([element.x + point[0], element.y + point[1]], [cx, cy], element.angle);
 }

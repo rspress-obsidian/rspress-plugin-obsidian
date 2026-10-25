@@ -73,7 +73,7 @@ export function combineExplanations(symbol: string, children: Explanation[]): Ex
 	return makeExplanation(BOOLEAN_DESCRIPTIONS[symbol] ?? symbol, children, symbol);
 }
 
-export function explanationText(explanation: Explanation, indent = ""): string {
+function explanationText(explanation: Explanation, indent = ""): string {
 	if (explanation.children.length === 0) return indent + explanation.description;
 	let result = indent;
 	if (explanation.symbol === "") {

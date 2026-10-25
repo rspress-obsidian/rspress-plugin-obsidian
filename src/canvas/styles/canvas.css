@@ -1,4 +1,6 @@
-@import "katex/dist/katex.min.css";
+/* KaTeX's stylesheet is not imported here: a board loads it before it
+ * typesets its first formula (utils/math-render.ts), so pages without one never
+ * download it. */
 /* A canvas card renders attachments with the markdown renderer, so the PDF
  * frame styles come from the same file a note uses. */
 @import "../../markdown/media-embed.css";
@@ -21,7 +23,9 @@
 	--canvas-blockquote-border: #cbd5e1;
 	--canvas-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.05);
 	--canvas-shadow-hover: 0 10px 25px rgba(0, 0, 0, 0.08), 0 20px 48px rgba(0, 0, 0, 0.08);
-	--canvas-accent: #3b82f6;
+	/* Card links take the accent: #3b82f6 was 3.7:1 on a white card. This
+	   clears 4.5:1 on every preset tint too. */
+	--canvas-accent: #1d4ed8;
 	--canvas-accent-subtle: rgba(59, 130, 246, 0.05);
 	--canvas-toolbar-bg: rgba(255, 255, 255, 0.92);
 	--canvas-toolbar-btn-hover: #f1f5f9;
@@ -315,7 +319,8 @@ html.dark,
 	line-height: 1.6;
 	color: var(--canvas-node-text);
 	height: 100%;
-	overflow: auto;
+	overflow: hidden;
+	scrollbar-gutter: stable;
 	box-sizing: border-box;
 }
 
@@ -366,6 +371,15 @@ html.dark,
 
 .canvas-markdown em {
 	font-style: italic;
+}
+
+/* `==highlight==`, in Obsidian's translucent yellow rather than the browser's
+   opaque #ff0 with black text, which glared on a dark card. */
+.canvas-markdown mark {
+	padding: 0 0.1em;
+	border-radius: 2px;
+	color: inherit;
+	background-color: rgb(255 208 0 / 40%);
 }
 
 .canvas-markdown code {
@@ -910,6 +924,7 @@ img.canvas-file-image {
 /* Footnotes */
 .canvas-footnote-ref {
 	font-size: 0.8em;
+	line-height: 0;
 	vertical-align: super;
 }
 
@@ -971,6 +986,15 @@ img.canvas-file-image {
 	flex: 1;
 	min-height: 0;
 	height: auto;
+}
+
+/* Scrollable only while the reader is on the card: at rest every overflowing
+   card body was its own composited scroller, and on a large board each pan or
+   zoom frame re-layerized all of them. Wheel and keyboard scrolling need hover
+   or focus anyway. */
+.canvas-node-frame:hover .canvas-markdown,
+.canvas-node-frame:focus-within .canvas-markdown {
+	overflow: auto;
 }
 
 /* Foldable callouts (`> [!faq]-`) are <details>; the summary is the title. */

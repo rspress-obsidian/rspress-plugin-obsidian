@@ -1,6 +1,6 @@
 import type { CanvasNodeData, NodeSide } from "../types.js";
 
-export interface Point {
+interface Point {
 	x: number;
 	y: number;
 }
@@ -28,7 +28,7 @@ export function facingSides(from: Box, to: Box): { fromSide: NodeSide; toSide: N
 	return dy >= 0 ? { fromSide: "bottom", toSide: "top" } : { fromSide: "top", toSide: "bottom" };
 }
 
-export function sidePoint(node: Box, side: NodeSide): Point {
+function sidePoint(node: Box, side: NodeSide): Point {
 	switch (side) {
 		case "top":
 			return { x: node.x + node.width / 2, y: node.y };

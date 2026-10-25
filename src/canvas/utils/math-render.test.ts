@@ -1,4 +1,4 @@
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 import * as katexMath from "../../math-katex.js";
 import { renderMarkdown } from "./markdown";
 import { renderCanvasMath } from "./math-render";
@@ -59,4 +59,37 @@ test("leaves a root without math untouched", async () => {
 	const before = root.innerHTML;
 	await renderCanvasMath(root);
 	expect(root.innerHTML).toBe(before);
+});
+
+test("inside a site build, formulas go in once KaTeX's stylesheet applies", async () => {
+	// The canvas plugin defines these through `source.define`.
+	const globals = globalThis as Record<string, unknown>;
+	globals.__RSPRESS_OBSIDIAN_KATEX_STYLESHEET__ = "obsidian-katex/9.9.9/katex.min.css";
+	globals.__RSPRESS_OBSIDIAN_CANVAS_BASE__ = "/docs/";
+	// happy-dom would fetch (and fail) a stylesheet put in the document.
+	const appended: HTMLLinkElement[] = [];
+	const append = spyOn(document.head, "append").mockImplementation((...nodes) => {
+		for (const node of nodes) if (node instanceof HTMLLinkElement) appended.push(node);
+	});
+	try {
+		const root = card("energy $E = mc^2$ here");
+		const typeset = renderCanvasMath(root);
+		// One turn of the event loop: the KaTeX chunk has resolved by then, so
+		// only the stylesheet can be holding the formula back.
+		const { promise: turn, resolve } = Promise.withResolvers<void>();
+		setImmediate(resolve);
+		await turn;
+		expect(appended.map((link) => link.getAttribute("href"))).toEqual([
+			"/docs/obsidian-katex/9.9.9/katex.min.css",
+		]);
+		expect(root.querySelector(".canvas-math[data-rendered]")).toBeNull();
+
+		appended[0]?.dispatchEvent(new Event("load"));
+		await typeset;
+		expect(root.querySelector(".canvas-math[data-rendered] .katex")).not.toBeNull();
+	} finally {
+		append.mockRestore();
+		delete globals.__RSPRESS_OBSIDIAN_KATEX_STYLESHEET__;
+		delete globals.__RSPRESS_OBSIDIAN_CANVAS_BASE__;
+	}
 });

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /** Obsidian's default configuration folder; a vault may rename it. */
-export const DEFAULT_CONFIG_DIR = ".obsidian";
+const DEFAULT_CONFIG_DIR = ".obsidian";
 
 const cache = new Map<string, { mtimeMs: number; value: Record<string, unknown> | undefined }>();
 
@@ -23,13 +23,19 @@ export function readObsidianConfigFile(
 ): Record<string, unknown> | undefined {
 	if (!vaultRoot) return undefined;
 	const file = path.join(vaultRoot, configDir, relativePath);
-	let mtimeMs: number;
+	// Read on every page render, and most vaults have no such file: a missing
+	// one returns `undefined` instead of building an exception each time.
+	let stats: fs.Stats | undefined;
 	try {
-		mtimeMs = fs.statSync(file).mtimeMs;
+		stats = fs.statSync(file, { throwIfNoEntry: false });
 	} catch {
+		stats = undefined;
+	}
+	if (!stats) {
 		cache.delete(file);
 		return undefined;
 	}
+	const mtimeMs = stats.mtimeMs;
 	const cached = cache.get(file);
 	if (cached?.mtimeMs === mtimeMs) return cached.value;
 	let value: Record<string, unknown> | undefined;

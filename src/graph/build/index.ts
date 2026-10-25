@@ -16,11 +16,10 @@ export type {
 	GraphBuildOptions,
 	GraphBuildResult,
 	GraphBuildState,
-	GraphModules,
 } from "./types.js";
 
-export const GRAPH_DATA_MODULE = "virtual-graph-data";
-export const GRAPH_SEARCH_MODULE = "virtual-graph-search-data";
+const GRAPH_DATA_MODULE = "virtual-graph-data";
+const GRAPH_SEARCH_MODULE = "virtual-graph-search-data";
 
 /**
  * Build the graph's virtual modules for the routes Rspress publishes.

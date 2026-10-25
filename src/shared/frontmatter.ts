@@ -30,7 +30,7 @@ const JAVASCRIPT_FRONTMATTER_REFUSED =
 	'JavaScript frontmatter ("---js") is not executed; use YAML or JSON frontmatter.';
 
 /** Thrown when frontmatter is refused or cannot be parsed. */
-export class FrontmatterError extends Error {
+class FrontmatterError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = "FrontmatterError";
@@ -44,7 +44,7 @@ export class FrontmatterError extends Error {
  * `---js` block becomes a named {@link FrontmatterError} rather than executed
  * code. YAML and JSON keep their stock engines.
  */
-export const SAFE_FRONTMATTER_ENGINES: Record<string, { parse: (input: string) => object }> = {
+const SAFE_FRONTMATTER_ENGINES: Record<string, { parse: (input: string) => object }> = {
 	javascript: {
 		parse(): object {
 			throw new FrontmatterError(JAVASCRIPT_FRONTMATTER_REFUSED);

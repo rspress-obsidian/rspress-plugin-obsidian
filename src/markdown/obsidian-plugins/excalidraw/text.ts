@@ -224,7 +224,7 @@ export function textWidth(text: string, width: LineWidth): number {
 const BOUND_TEXT_PADDING = 5;
 
 /** How wide a container's label may be (`getBoundTextMaxWidth`). */
-export function boundTextMaxWidth(container: ExcalidrawElement, fontSize: number): number {
+function boundTextMaxWidth(container: ExcalidrawElement, fontSize: number): number {
 	const { width } = container;
 	if (container.type === "arrow") return Math.max(0.7 * width, fontSize * 11);
 	if (container.type === "ellipse") {

@@ -11,7 +11,7 @@ import type { DrawingTheme } from "./render.js";
 import type { Scene } from "./scene.js";
 import type { TextLinkSettings } from "./text.js";
 
-export const EXCALIDRAW_PLUGIN_ID = "obsidian-excalidraw-plugin";
+const EXCALIDRAW_PLUGIN_ID = "obsidian-excalidraw-plugin";
 
 export interface ExcalidrawSettings extends TextLinkSettings {
 	theme: NonNullable<ExcalidrawOptions["theme"]>;

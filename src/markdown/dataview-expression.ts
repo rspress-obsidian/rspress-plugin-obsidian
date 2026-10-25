@@ -45,20 +45,7 @@ import {
 } from "./interpreter-limits.js";
 import { assertSafeRegex } from "./safe-regex.js";
 
-export type BinaryOp =
-	| "+"
-	| "-"
-	| "*"
-	| "/"
-	| "%"
-	| "="
-	| "!="
-	| "<"
-	| "<="
-	| ">"
-	| ">="
-	| "&"
-	| "|";
+type BinaryOp = "+" | "-" | "*" | "/" | "%" | "=" | "!=" | "<" | "<=" | ">" | ">=" | "&" | "|";
 
 /** A parsed expression (Dataview's `Field`). */
 export type Field =
@@ -574,11 +561,24 @@ export function evaluate(
 		case "lambda": {
 			const budget = budgetOf(ctx);
 			return new DataviewFunction((args) => {
-				// Own data properties, so a parameter named `__proto__` is a name, not a prototype.
-				const scope: Record<string, unknown> = {
-					...data,
-					...Object.fromEntries(field.args.map((name, position) => [name, args[position] ?? null])),
-				};
+				const scope: Record<string, unknown> = { ...data };
+				for (let position = 0; position < field.args.length; position += 1) {
+					const name = field.args[position] as string;
+					const value = args[position] ?? null;
+					// Assigning `__proto__` would set the prototype; it must be a plain name.
+					// Plain assignment for the rest: defining every parameter cost a third of
+					// a lambda call.
+					if (name === "__proto__") {
+						Object.defineProperty(scope, name, {
+							value,
+							writable: true,
+							enumerable: true,
+							configurable: true,
+						});
+					} else {
+						scope[name] = value;
+					}
+				}
 				const result = evaluate(field.body, ctx, scope);
 				budget.spend();
 				budget.charge(result, undefined);
@@ -662,7 +662,7 @@ const DURATION_PROPERTIES: Record<
 };
 
 /** `object[index]` with Dataview's rules for each type. */
-export function indexValue(object: unknown, index: string | number, ctx: EvalContext): unknown {
+function indexValue(object: unknown, index: string | number, ctx: EvalContext): unknown {
 	switch (typeOf(object)) {
 		case "object": {
 			if (typeof index !== "string") {
@@ -716,7 +716,7 @@ export function indexValue(object: unknown, index: string | number, ctx: EvalCon
 const ARITHMETIC: Record<string, true> = { "+": true, "-": true, "*": true, "/": true, "%": true };
 
 /** Dataview's binary operator table. */
-export function binaryOp(op: BinaryOp, left: unknown, right: unknown, ctx: EvalContext): unknown {
+function binaryOp(op: BinaryOp, left: unknown, right: unknown, ctx: EvalContext): unknown {
 	const leftType = typeOf(left);
 	const rightType = typeOf(right);
 	switch (op) {
@@ -874,6 +874,23 @@ function compileRegex(pattern: string, flags: string, subject: string): RegExp {
 	} catch (error) {
 		throw new Error(`Invalid Dataview pattern "${pattern}": ${(error as Error).message}`);
 	}
+}
+
+const REGEX_SYNTAX = /[\\^$.*+?()[\]{}|]/;
+
+/**
+ * `split` on a Dataview pattern. A pattern without regex syntax matches exactly
+ * its own text, and a plain-string split is several times faster than the
+ * regex one; `split(text, "")` over long text in a lambda is the common case.
+ * The pattern is still compiled first, for the same safety and length checks.
+ */
+function splitText(text: string, delimiter: string, limit: number | undefined): string[] {
+	const pattern = compileRegex(delimiter, "", text);
+	if (!REGEX_SYNTAX.test(delimiter)) return text.split(delimiter, limit);
+	const parts = text.split(pattern, limit);
+	// A capture group that took no part in a match splits out as `undefined`.
+	for (let index = 0; index < parts.length; index += 1) parts[index] ??= "";
+	return parts;
 }
 
 /** Lambda calls, and what they and the functions build, allowed per query. */
@@ -1413,14 +1430,10 @@ const FUNCTIONS: Record<string, FunctionImpl> = {
 	upper: nullary("upper", (value) => (value as string).toLocaleUpperCase(), "string"),
 	split: new FunctionBuilder("split")
 		.add(["string", "string"], ([text, delimiter]) =>
-			(text as string)
-				.split(compileRegex(delimiter as string, "", text as string))
-				.map((part) => part ?? ""),
+			splitText(text as string, delimiter as string, undefined),
 		)
 		.add(["string", "string", "number"], ([text, delimiter, limit]) =>
-			(text as string)
-				.split(compileRegex(delimiter as string, "", text as string), limit as number)
-				.map((part) => part ?? ""),
+			splitText(text as string, delimiter as string, limit as number),
 		)
 		.add(["null", "*"], () => null)
 		.add(["*", "null"], () => null)

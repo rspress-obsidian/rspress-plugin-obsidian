@@ -6,7 +6,7 @@ import type { VFile } from "vfile";
 // not abort resolution of the remaining wikilinks in the document; the
 // failure then lists every diagnostic, because Rspress never prints
 // `file.messages` and they would otherwise be invisible.
-export const pendingFailures = new WeakMap<VFile, string[]>();
+const pendingFailures = new WeakMap<VFile, string[]>();
 
 /**
  * A fatal `VFileMessage`, which is what `file.fail` throws in `"fail"` mode.

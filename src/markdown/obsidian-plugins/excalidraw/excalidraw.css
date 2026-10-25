@@ -181,13 +181,15 @@ html.dark .excalidraw-embedded-mermaid > div.obsidian-mermaid-rendered {
 	color: #6c757d;
 }
 
+/* Rspress defines no danger token, so the old fallback (#b42318) was 2.9:1 on
+ * the dark page; the plugin's pair clears AA in both modes. */
 .excalidraw-error {
 	display: block;
 	margin: 1rem 0;
 	padding: 0.6rem 0.8rem;
-	color: var(--rp-c-danger-1, #b42318);
-	background: var(--rp-c-danger-soft, rgba(240, 68, 56, 0.08));
-	border: 1px solid color-mix(in srgb, var(--rp-c-danger-1, #b42318) 30%, transparent);
+	color: var(--obsidian-c-danger, #c62828);
+	background: color-mix(in srgb, var(--obsidian-c-danger, #c62828) 8%, transparent);
+	border: 1px solid color-mix(in srgb, var(--obsidian-c-danger, #c62828) 30%, transparent);
 	border-radius: 8px;
 	font-size: 0.9rem;
 }

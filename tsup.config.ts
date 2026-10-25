@@ -79,6 +79,7 @@ export default defineConfig([
 			"canvas/components/CanvasEmbed": "src/canvas/components/CanvasEmbed.tsx",
 			"markdown/runtime/MermaidBlocks": "src/markdown/runtime/MermaidBlocks.tsx",
 			"markdown/runtime/WikiPicker": "src/markdown/runtime/WikiPicker.tsx",
+			"markdown/runtime/KatexStylesheet": "src/markdown/runtime/KatexStylesheet.tsx",
 			"graph/runtime/GraphPanel": "src/graph/runtime/GraphPanel.tsx",
 			"graph/runtime/GraphSidebar": "src/graph/runtime/GraphSidebar.tsx",
 			"graph/runtime/LazyGraphPanel": "src/graph/runtime/LazyGraphPanel.tsx",
@@ -114,7 +115,6 @@ export default defineConfig([
 	{
 		entry: {
 			markdown: "src/markdown/styles.css",
-			"markdown/math": "src/markdown/styles-math.css",
 			"markdown/katex": "src/markdown/katex.css",
 			canvas: "src/canvas/styles/canvas.css",
 			styles: "src/styles/aggregate.css",
@@ -129,7 +129,6 @@ export default defineConfig([
 		external: ["katex/*"],
 		onSuccess: async () => {
 			await minifyCssFile("dist/markdown.css");
-			await minifyCssFile("dist/markdown/math.css");
 			await minifyCssFile("dist/markdown/katex.css");
 			await minifyCssFile("dist/canvas.css");
 			await minifyCssFile("dist/styles.css");

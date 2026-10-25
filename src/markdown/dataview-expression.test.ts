@@ -332,6 +332,37 @@ describe("Dataview function library", () => {
 const run = (source: string, data: Record<string, unknown> = {}) =>
 	evaluate(parseExpression(source), { ...ctx }, data);
 
+describe("split and lambda scopes", () => {
+	test("a pattern without regex syntax splits exactly as the regex would", () => {
+		for (const [text, delimiter] of [
+			["a, b,, c", ", "],
+			["a/b/c", "/"],
+			["über👍über", "👍"],
+			["abc", ""],
+			["a-b-c", "-"],
+			["", ","],
+		] as const) {
+			for (const limit of [undefined, 0, 1, 2, -1]) {
+				const call = limit === undefined ? "" : `, ${limit}`;
+				expect(run(`split(text, delimiter${call})`, { text, delimiter })).toEqual(
+					text.split(new RegExp(delimiter), limit),
+				);
+			}
+		}
+	});
+
+	test("a capture group that matched nothing splits out as empty text", () => {
+		expect(run('split("a-b", "(x)?-")')).toEqual(["a", "", "b"]);
+	});
+
+	test("a lambda sees the enclosing lambda's parameters, and shadows them", () => {
+		expect(run("map(list(1, 2), (a) => map(list(10), (b) => a + b))")).toEqual([[11], [12]]);
+		expect(run("map(list(1, 2), (a) => map(list(10), (a) => a))")).toEqual([[10], [10]]);
+		expect(run("map(list(1), (a) => a)", { a: 5 })).toEqual([1]);
+		expect(run("map(list(1), (b) => a + b)", { a: 5 })).toEqual([6]);
+	});
+});
+
 describe("escape vectors", () => {
 	test("object() and extract() keep `__proto__` as a key, never a prototype", () => {
 		expect(run('object("__proto__", list(1, 2))["__proto__"]')).toEqual([1, 2]);

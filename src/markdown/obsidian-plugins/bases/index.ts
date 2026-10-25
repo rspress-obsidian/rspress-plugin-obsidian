@@ -109,7 +109,8 @@ export const basesFeature: ObsidianPluginFeature = {
 
 	globalUIComponents: () => [MAP_COMPONENT_PATH],
 	// `maplibre-gl` is an optional peer: without it, alias the client import
-	// away so the site still bundles and map views keep their tables.
+	// away so the site still bundles and map views keep their tables; with it,
+	// keep its stylesheet out of the global one every page loads.
 	builderConfig: mapLibraryBuilderConfig,
 
 	async addPages(ctx) {

@@ -312,6 +312,18 @@ describe("callouts", () => {
 		expect(output).not.toContain("- Read this");
 	});
 
+	test("restore alerts further down the page at their own source lines", async () => {
+		const output = await html(
+			"# Page\r\n\r\nIntro.\r\n\r\n> [!warning] First\r\n> one\r\n\r\nMiddle %%hidden%% text.\r\n\r\n> [!important]+ Second\r\n> two **bold**\r\n> three",
+			{ before: [remarkContainerSyntax] },
+		);
+		expect(output).toContain('<div class="callout-title">First</div>');
+		expect(output).toContain('<summary class="callout-title">Second</summary>');
+		expect(output).toContain("<strong>bold</strong>");
+		expect(output).not.toContain("hidden");
+		expect(output).not.toContain("[!important]");
+	});
+
 	test("read the first paragraph with GFM", async () => {
 		const output = await html("> [!note] Title\n> Visit https://example.com ~~old~~ text");
 		expect(output).toContain('<a href="https://example.com">');

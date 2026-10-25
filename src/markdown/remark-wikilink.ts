@@ -10,12 +10,11 @@
  */
 import fs from "node:fs";
 import type { Element, Root as HastRoot } from "hast";
-import type { Code, Html, Image, Link, PhrasingContent, Root } from "mdast";
+import type { Code, Html, Image, Link, PhrasingContent, Root, RootContent } from "mdast";
 import rehypeStringify from "rehype-stringify";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import type { Parent } from "unist";
-import { visit } from "unist-util-visit";
 import type { VFile } from "vfile";
 import { mathEngineStylesheet, prepareMathEngine } from "../math.js";
 import { MERMAID_BLOCK_CLASS, MERMAID_SECURITY_ATTRIBUTE } from "../mermaid/classes.js";
@@ -78,7 +77,8 @@ import type {
 	ResolvedWikiLink,
 	WikiLinkCandidate,
 } from "./types.js";
-import { isPathInsideRoot, normalizeFsPath, wikiLinkDisplayText } from "./utils.js";
+import { isPathInsideRoot, normalizeFsPath, pathUnderRoot, wikiLinkDisplayText } from "./utils.js";
+import { visit } from "./visit.js";
 
 const MAX_TRANSCLUSION_DEPTH = 5;
 
@@ -175,6 +175,8 @@ interface RenderContext {
 	embedCounter: { value: number };
 	/** Page mode inside Rspress: the page's title record. */
 	pageMeta?: RspressPageMeta;
+	/** Page mode inside the `markdown()` plugin: where KaTeX's stylesheet is served. */
+	katexStylesheetHref?: string;
 }
 
 function resolveOptionsOf(options: NormalizedPluginOptions) {
@@ -442,12 +444,16 @@ async function renderPage(
 		getContentIndex,
 		getPublishedIndexes,
 		getSiteBase,
+		getKatexStylesheetHref,
 		options,
 	}: RemarkWikiLinkPluginOptions,
 	pageMeta: RspressPageMeta | undefined,
 ): Promise<void> {
-	const currentFilePath = getCurrentFilePath(file);
-	const docsRoot = getDocsRoot(currentFilePath);
+	const compiledPath = getCurrentFilePath(file);
+	const docsRoot = getDocsRoot(compiledPath);
+	// The index spells paths under the root as configured; Rspress hands over
+	// the real path, which differs when the root runs through a symlink.
+	const currentFilePath = compiledPath && (pathUnderRoot(compiledPath, docsRoot) ?? compiledPath);
 	const index =
 		getContentIndex && currentFilePath
 			? await getContentIndex(currentFilePath)
@@ -491,6 +497,7 @@ async function renderPage(
 		idPrefix: "",
 		embedCounter: { value: 0 },
 		pageMeta,
+		katexStylesheetHref: getKatexStylesheetHref?.(),
 	});
 }
 
@@ -577,7 +584,13 @@ async function transformContent(tree: Root, ctx: RenderContext): Promise<void> {
 		for (const feature of ctx.features) {
 			const replacement = await feature.renderNote?.(tree, pluginContext(feature, ctx));
 			if (!replacement) continue;
-			tree.children = replacement;
+			// The MDX imports stay whatever the plugin returns: Rspress adds one per
+			// global component, and the pass may emit those components on any page
+			// (the KaTeX stylesheet link on a board whose cards show math).
+			const imports = tree.children.filter(
+				(node) => (node.type as string) === "mdxjsEsm" && !replacement.includes(node),
+			);
+			tree.children = [...imports, ...replacement];
 			break;
 		}
 	}
@@ -681,16 +694,29 @@ async function transformContent(tree: Root, ctx: RenderContext): Promise<void> {
 			tree.children.unshift({ type: "html", value: `<div class="${classes}">` });
 			tree.children.push({ type: "html", value: "</div>" });
 		}
-		// MathJax styles each glyph through a generated stylesheet; a page whose
-		// formulas all sit in embeds needs it as much as one with its own.
-		if (options.enableMath && options.mathEngine === "mathjax") {
+		// Both engines need styles on exactly the pages that show math, the
+		// page's own or an embed's: MathJax a stylesheet it generates per glyph,
+		// emitted inline; KaTeX its static stylesheet, linked from the head.
+		if (options.enableMath) {
+			const marker = options.mathEngine === "mathjax" ? "<mjx-" : 'class="katex';
 			let embedsMath = false;
 			visit(tree, "html", (node) => {
-				if (node.value.includes("<mjx-")) embedsMath = true;
+				if (node.value.includes(marker)) embedsMath = true;
 			});
-			const stylesheet = formulas > 0 || embedsMath ? mathEngineStylesheet("mathjax") : "";
-			if (stylesheet)
-				tree.children.unshift({ type: "html", value: `<style>${stylesheet}</style>\n` });
+			if (formulas > 0 || embedsMath) {
+				if (options.mathEngine === "mathjax") {
+					const stylesheet = mathEngineStylesheet("mathjax");
+					if (stylesheet)
+						tree.children.unshift({ type: "html", value: `<style>${stylesheet}</style>\n` });
+				} else if (ctx.katexStylesheetHref) {
+					tree.children.unshift({
+						type: "mdxJsxFlowElement",
+						name: "KatexStylesheet",
+						attributes: [{ type: "mdxJsxAttribute", name: "href", value: ctx.katexStylesheetHref }],
+						children: [],
+					} as unknown as RootContent);
+				}
+			}
 		}
 	}
 

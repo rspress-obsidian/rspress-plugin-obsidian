@@ -58,6 +58,7 @@ describe("GraphPanel accessibility", () => {
 		cleanup();
 		navigateSpy.mockClear();
 		capturedGraphProps = null;
+		vi.useRealTimers();
 	});
 
 	test("opens on G key and closes on Escape with focus returning to the FAB", () => {
@@ -111,17 +112,16 @@ describe("GraphPanel accessibility", () => {
 		input.remove();
 	});
 
-	test("reports the truncated neighborhood in the stats line", async () => {
+	test("reports the truncated neighborhood in the stats line", () => {
+		vi.useFakeTimers();
 		const container = openPanel();
 		fireEvent.click(
 			container.querySelector("button[aria-label='Open graph view']") as HTMLButtonElement,
 		);
 
 		// Stats land on a 150ms timer after the panel opens.
-		const { promise, resolve } = Promise.withResolvers<void>();
-		setTimeout(resolve, 200);
-		await act(async () => {
-			await promise;
+		act(() => {
+			vi.advanceTimersByTime(200);
 		});
 
 		const statsLine = container.querySelector("[aria-live='polite']");
@@ -376,7 +376,7 @@ describe("GraphPanel accessibility", () => {
 		fireEvent.keyDown(window, { key: "g" });
 	});
 
-	test("does not take focus when it mounts already open", async () => {
+	test("does not take focus when it mounts already open", () => {
 		// The docs site opens the panel with `defaultOpen`. Moving focus into it on a
 		// timer pulled focus out of whatever the reader had focused in the meantime —
 		// the canvas help dialog, for one — after which Escape went to the panel
@@ -386,12 +386,11 @@ describe("GraphPanel accessibility", () => {
 		document.body.appendChild(elsewhere);
 		elsewhere.focus();
 
+		vi.useFakeTimers();
 		try {
 			const { container } = render(<GraphPanel defaultOpen />);
-			const { promise, resolve } = Promise.withResolvers<void>();
-			setTimeout(resolve, 200);
-			await act(async () => {
-				await promise;
+			act(() => {
+				vi.advanceTimersByTime(200);
 			});
 
 			expect(container.querySelector("#rspress-graph-view-panel")).toBeTruthy();
@@ -437,14 +436,13 @@ describe("GraphPanel accessibility", () => {
 		}
 	});
 
-	test("takes focus when the reader opens it", async () => {
+	test("takes focus when the reader opens it", () => {
+		vi.useFakeTimers();
 		const container = openPanel();
 		fireEvent.keyDown(window, { key: "g" });
 
-		const { promise, resolve } = Promise.withResolvers<void>();
-		setTimeout(resolve, 200);
-		await act(async () => {
-			await promise;
+		act(() => {
+			vi.advanceTimersByTime(200);
 		});
 
 		expect(document.activeElement).toBe(

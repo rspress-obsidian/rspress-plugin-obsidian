@@ -131,6 +131,7 @@ test.skipIf(!distExists)(
 			// chunk fails the import of the plugin entry itself.
 			expect(shipped).toContain("dist/markdown/runtime/MermaidBlocks.js");
 			expect(shipped).toContain("dist/markdown/runtime/WikiPicker.js");
+			expect(shipped).toContain("dist/markdown/runtime/KatexStylesheet.js");
 			expect(shipped.filter((file) => /\.test\./.test(file))).toEqual([]);
 
 			// The 13 MB devkit/TypeScript chunk used to ship here.
@@ -202,6 +203,17 @@ test.skipIf(!distExists)(
 			expect(aggregate).not.toBe(markdownOnly);
 			expect(aggregate).toContain(".canvas-");
 			expect(aggregate).toContain(".obsidian-hover-preview");
+
+			// 6. KaTeX stays out of the stylesheets the plugins inject on every page
+			//    (the pages with math link it themselves); the opt-in
+			//    `markdown/katex.css` export still brings it for a hand-made theme.
+			const canvasCss = readFileSync(path.join(installDir, "dist", "canvas.css"), "utf-8");
+			for (const everyPage of [aggregate, markdownOnly, canvasCss]) {
+				expect(everyPage).not.toContain("katex");
+			}
+			expect(
+				readFileSync(path.join(installDir, "dist", "markdown", "katex.css"), "utf-8"),
+			).toContain("katex/dist/katex.min.css");
 		} finally {
 			rmSync(workDir, { recursive: true, force: true });
 		}

@@ -54,7 +54,7 @@ export interface WikiLinkNode extends Literal {
 }
 
 /** `==…==`. Renders as `<mark>` through `data.hName`. */
-export interface HighlightNode extends Parent {
+interface HighlightNode extends Parent {
 	type: "highlight";
 	children: PhrasingContent[];
 }
