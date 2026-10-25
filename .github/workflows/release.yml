@@ -28,6 +28,7 @@ concurrency:
 
 jobs:
   build:
+    name: Verify and pack
     # `branches` above filters on the head branch name only, which a fork's PR
     # from its own `main` also matches; the event and repository checks keep
     # this to pushes to this repository's main.
@@ -102,6 +103,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    name: Publish to npm
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15

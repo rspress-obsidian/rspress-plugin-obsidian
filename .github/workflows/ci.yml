@@ -22,6 +22,7 @@ concurrency:
 
 jobs:
   test:
+    name: Test · ${{ matrix.os }}
     # The package claims Windows, macOS and Linux, so the whole pipeline runs on
     # all three: path handling, line endings and shell quoting are exactly where
     # a Linux-only matrix stays green while the package is broken elsewhere.
@@ -149,6 +150,7 @@ jobs:
         run: RUN_BENCH_TESTS=1 bun test test/markdown/benchmark.test.ts
 
   node:
+    name: Node ${{ matrix.node-version }} · published entries
     # `engines` promises Node >= 22.14, but every other job runs Bun. Load both
     # published entry formats under Node so a bundler-only regression (the CJS
     # `import.meta.dirname` crash and the ESM dynamic-require failure both
@@ -197,6 +199,7 @@ jobs:
           done
 
   lint:
+    name: Lint
     # Biome's findings are source-level, not platform-level.
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -215,6 +218,7 @@ jobs:
         run: bun run lint
 
   consumer-site:
+    name: Consumer site · Rspress ${{ matrix.rspress }} · mermaid ${{ matrix.mermaid }} · graph ${{ matrix.graph }}
     # The docs site, the integration suite and e2e all import the plugin from
     # `src/`, so none of them compiles what the tarball ships: the tsup browser
     # chunks Rspress loads by path, the exports map, the CJS/ESM entries. This
@@ -310,6 +314,7 @@ jobs:
         run: node smoke.mjs
 
   e2e:
+    name: E2E · ${{ matrix.os }}
     # Chromium on Linux and macOS. Both installs are a download plus an
     # unzip; the Windows image pulls a browser-dependency SDK chain that has
     # nothing to do with this package.

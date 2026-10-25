@@ -1,13 +1,38 @@
 # rspress-plugin-obsidian
 
+[![CI](https://github.com/rspress-obsidian/rspress-plugin-obsidian/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rspress-obsidian/rspress-plugin-obsidian/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Node.js ≥ 22.14](https://img.shields.io/badge/node-%E2%89%A5%2022.14-339933.svg)](https://nodejs.org)
+[![Rspress 2](https://img.shields.io/badge/rspress-%5E2.0.21-ff6b35.svg)](https://rspress.rs)
+
 Publish an Obsidian vault as an Rspress site. Three feature plugins behind one
 entry, and a matrix saying exactly what is and is not supported.
+
+- **Markdown:** `[[wikilinks]]`, embeds, callouts, backlinks, tags and tag
+  pages, daily notes, math, Mermaid, and the Dataview, Tasks, Kanban,
+  Excalidraw, Bases and Templater syntaxes, rendered at build time.
+- **Canvas:** `.canvas` boards as interactive pages, with an in-browser editor.
+- **Graph view:** the local and global link graph, plus Obsidian's page preview
+  on hover.
 
 > **This is a publishing subset, not Obsidian.** It renders the Markdown
 > dialect, the `.canvas` format, and a link graph. There is no plugin API, no
 > `.obsidian/` configuration, and no live preview — publishing is a build-time
 > transform. Per-feature status, including everything deliberately left out, is
 > itemised in [Obsidian compatibility](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md).
+
+## Contents
+
+- [Install](#install)
+- [Use](#use)
+- [The three features](#the-three-features)
+- [What `markdown()` turns on](#what-markdown-turns-on)
+- [Coming from `rspress-plugin-graph-view`](#coming-from-rspress-plugin-graph-view)
+- [Documentation](#documentation)
+- [Vault content is trusted input](#vault-content-is-trusted-input)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Releases](#releases)
 
 ## Install
 
@@ -116,7 +141,7 @@ Everything else is opt-in, because a docs site may not want it:
 | `enableTagPages` | generates those `/tags/<tag>` pages |
 | `enableDailyNotes` | date-filed notes, `{{date}}` tokens, prev/next navigation |
 | `enableDataview` | DQL blocks (`TABLE`/`LIST`/`TASK`/`CALENDAR`), DataviewJS, and inline `` `= expr` `` / `` `$= expr` `` queries, as Dataview writes them |
-| `enableMath` | `$inline$` and `$$display$$` via KaTeX, or MathJax with `mathEngine` |
+| `enableMath` | `$inline$` and `$$display$$` via KaTeX, or MathJax with `mathEngine`; only pages that show math load KaTeX's stylesheet |
 | `enableMermaid` | ` ```mermaid ` fences drawn in the browser (needs the optional `mermaid` package) |
 | `enableTasks` | ` ```tasks ` queries over every published task, with the Tasks plugin's filters, sorting, grouping, layout and markup |
 | `enableKanban` | notes saved by the Kanban plugin publish as read-only boards (board, list and table views) |
@@ -135,6 +160,13 @@ features read the vault's own plugin settings
 the build — that is the diagnostic working, not a bug. `onAmbiguousLink`
 defaults to `"warn"`. `onPluginError` (default `"error"`) fails the build for a
 plugin block that will not render, which is also shown in place.
+
+With `enableMath`, KaTeX's stylesheet and fonts are published under
+`obsidian-katex/<katex version>/` and linked from the `<head>` of each page
+that shows KaTeX math, its own or an embedded note's. Pages without math never
+download it, and you never import it yourself;
+`rspress-plugin-obsidian/markdown/katex.css` remains for a theme that renders
+KaTeX markup of its own.
 
 ## Coming from `rspress-plugin-graph-view`
 
@@ -181,23 +213,16 @@ escaped and URL-scheme-checked before insertion. Mermaid diagrams inside a
 canvas board always render at `securityLevel: "strict"`; `mermaidSecurityLevel`
 configures the Markdown pipeline only.
 
-## Layout
-
-- `src/shared/` — primitives more than one feature needs, and nothing else; node-free
-- `src/markdown/` — the `markdown()` feature: remark pipeline, content index, Dataview, backlinks
-- `src/canvas/` — the `canvas()` feature: parser, renderer components, editor
-- `src/graph/` — the `graphview()` feature: build-time extraction, runtime panel
-- `test/` — unit (colocated `*.test.ts`) + e2e (playwright)
-- `Obsidian Vault/` — shared demo fixture
-
 ## Development
 
 Contributors need **Bun ≥ 1.4** (`packageManager` pins the exact version CI
 uses): the committed `bun.lock` is a v2 lockfile that older Bun cannot read.
+Type checking runs on **TypeScript 7** (`tsc` from the `typescript` devDependency).
 
 ```bash
 bun install
 bun run typecheck
+bun run lint           # Biome; `bun run lint:fix` applies safe fixes
 bun test               # unit tests only
 bun run test:coverage  # the same suite under the coverage gate CI enforces
 bun run build          # tsup → dist/ (ESM+CJS, d.ts/d.cts, css)
@@ -206,22 +231,49 @@ bun run test:types     # publint against the package's exports and files (after 
 bun run test:doc-examples  # type-checks the configs the docs tell you to copy (after build)
 bun run docs:build     # required before the build-integration and e2e suites
 RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts  # asserts the docs build
+bunx playwright install chromium  # once, before the first e2e run
 bun run test:e2e       # playwright against doc_build/
 ```
 
-CI also installs the packed tarball into the minimal site in
-`test/consumer-site/`, builds it with `rspress build`, with and without
-`mermaid`, and smoke-checks the output.
+CI runs the suite on Linux, macOS and Windows, loads the published entries
+under Node 22.14 and 24, and runs e2e on Linux and macOS. It also installs the
+packed tarball into the minimal site in `test/consumer-site/` and builds it with
+`rspress build` against the oldest and newest supported Rspress, with and
+without `mermaid`, and once without `react-force-graph-2d`, then smoke-checks the
+output.
+
+Source layout:
+
+- `src/shared/` — primitives more than one feature needs, and nothing else; node-free
+- `src/markdown/` — the `markdown()` feature: remark pipeline, content index, Dataview, backlinks
+- `src/canvas/` — the `canvas()` feature: parser, renderer components, editor
+- `src/graph/` — the `graphview()` feature: build-time extraction, runtime panel
+- `test/` — unit (colocated `*.test.ts`) + e2e (playwright)
+- `Obsidian Vault/` — shared demo fixture
+
+## Contributing
+
+Bug reports and feature requests go through the
+[issue forms](https://github.com/rspress-obsidian/rspress-plugin-obsidian/issues/new/choose),
+which ask for the plugin and Rspress versions and a minimal note that shows the
+problem. Check the
+[compatibility matrix](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md)
+first: what it lists as unsupported is a known boundary, not a bug.
+
+Write commit messages as Conventional Commits (`fix:`, `feat:`, `perf:`, …),
+since semantic-release reads them to pick the next version, and run
+`bun run lint`, `bun run typecheck` and `bun test` before pushing. CI runs on
+every pull request into `main`.
 
 ## Releases
 
 Releases are cut by semantic-release from Conventional Commits on `main`
-(`fix:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major). The version is
-not kept in git: `package.json` holds the `0.0.0-development` placeholder that
-semantic-release recommends, and the released version lives in the git tag, the
-npm registry and `CHANGELOG.md`. The first release is `1.0.0`. Release sections
-in `CHANGELOG.md` are generated, so describe a change in its commit message
-rather than editing the file.
+(`fix:` and `perf:` → patch, `feat:` → minor, `BREAKING CHANGE:` → major). The
+version is not kept in git: `package.json` holds the `0.0.0-development`
+placeholder that semantic-release recommends, and the released version lives in
+the git tag, the npm registry and `CHANGELOG.md`. The first release is `1.0.0`.
+Release sections in `CHANGELOG.md` are generated, so describe a change in its
+commit message rather than editing the file.
 
 The Release workflow runs only after CI passes for a push to `main`, and only
 for the commit that CI verified. A read-only job repeats lint, typecheck, build,

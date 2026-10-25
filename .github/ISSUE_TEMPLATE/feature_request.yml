@@ -1,0 +1,40 @@
+name: Feature request
+description: Support an Obsidian feature, plugin syntax or option the plugin does not handle yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The plugin publishes a vault at build time; it does not run Obsidian's
+        plugin API or live preview. The
+        [compatibility matrix](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md)
+        explains what is deliberately left out and why.
+
+  - type: textarea
+    id: obsidian-behavior
+    attributes:
+      label: What Obsidian does
+      description: The syntax or behavior, as Obsidian (or the community plugin) shows it. Link its docs if you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: published-today
+    attributes:
+      label: What the published site does today
+      description: How the same note renders now.
+    validations:
+      required: true
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example note
+      description: A short note that uses the feature, to test against.
+      render: markdown
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Workarounds you use now, or why it matters for your site.

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Obsidian compatibility matrix
+    url: https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md
+    about: Per-feature support status, including what is left out on purpose.
+  - name: Getting started
+    url: https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/getting-started.md
+    about: Install, configure and publish a vault.
