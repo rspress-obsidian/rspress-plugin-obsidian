@@ -293,10 +293,16 @@ jobs:
             exit 1
           fi
 
+      # The peer range spans two Mermaid majors, so the tarball is built with
+      # each: the `min` legs install the oldest allowed major (11.x) beside the
+      # Rspress floor, the `latest` leg the newest allowed major (12.x) beside
+      # the newest Rspress.
       - name: Add the optional mermaid peer
         if: matrix.mermaid == 'installed'
         working-directory: ${{ runner.temp }}/site
-        run: npm install --no-audit --no-fund mermaid@^11.17.2
+        env:
+          MERMAID_RANGE: ${{ matrix.rspress == 'latest' && '^12.2.0' || '^11.17.2' }}
+        run: npm install --no-audit --no-fund "mermaid@$MERMAID_RANGE"
 
       # Within the peer range the tarball declares, so npm resolves the newest
       # 2.x instead of the fixture's pinned floor.
