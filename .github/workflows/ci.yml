@@ -4,11 +4,11 @@ on:
   push:
     # `dev` is where the package is developed; without it, a push runs no
     # workflow at all and nothing is linted, built or tested until a PR to main.
-    branches: [main, master, dev]
+    branches: [main, dev]
   pull_request:
     # `dev` too: Dependabot opens its upgrade PRs against `dev`, and each must
     # pass this matrix before it is merged.
-    branches: [main, master, dev]
+    branches: [main, dev]
 
 # Every job here only reads the checkout; the release workflow carries the
 # write scopes it needs.
