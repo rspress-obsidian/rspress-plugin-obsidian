@@ -5,8 +5,8 @@
  * The package sets `"type": "module"`, so the `.d.ts` files `tsc` emits are
  * ESM-flavored: a CJS consumer resolving through the `require` condition
  * needs a CommonJS-flavored declaration, or TypeScript sees ESM types over
- * CJS JavaScript ("masquerading as ESM" — the attw `false-esm` finding and
- * publint's shared-`types`-condition warning).
+ * CJS JavaScript ("masquerading as ESM" — publint's shared-`types`-condition
+ * warning).
  *
  * A verbatim copy is not enough past the entry file: TypeScript resolves the
  * twin's relative specifier `./canvas/index.js` to `canvas/index.d.ts`, so the

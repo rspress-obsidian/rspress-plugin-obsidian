@@ -202,7 +202,7 @@ bun test               # unit tests only
 bun run test:coverage  # the same suite under the coverage gate CI enforces
 bun run build          # tsup → dist/ (ESM+CJS, d.ts/d.cts, css)
 bun run test:publish   # packs the tarball and checks every exports entry (after build)
-bun run test:types     # publint + attw against the packed tarball (after build)
+bun run test:types     # publint against the package's exports and files (after build)
 bun run test:doc-examples  # type-checks the configs the docs tell you to copy (after build)
 bun run docs:build     # required before the build-integration and e2e suites
 RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts  # asserts the docs build

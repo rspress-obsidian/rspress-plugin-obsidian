@@ -9,11 +9,9 @@ cache = true
 # Install peer dependencies automatically (@rspress/core, react, react-dom,
 # react-force-graph-2d are needed for local dev and test to work)
 peer = true
-# Refuse to install when package.json and bun.lock disagree (CI already passes
-# --frozen-lockfile). A silently rewritten lockfile is how "works on my machine"
-# starts; an intentional dependency change should update the lock in the same
-# commit.
-frozenLockfile = true
+# No `frozenLockfile` here: it also froze `bun update`, `bun add` and the relock
+# an intentional dependency change needs. CI and release enforce the lock with
+# an explicit `bun install --frozen-lockfile` instead.
 
 [test]
 # Bun's `[test]` section has no `timeout`, `bail` or `quiet` key — all three were
