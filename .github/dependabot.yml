@@ -24,6 +24,11 @@ updates:
       time: "06:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 10
+    # A release must be 3 days old before an upgrade PR proposes it, so a
+    # compromised or broken publish is usually yanked first. bunfig.toml's
+    # `minimumReleaseAge` holds local `bun add`/`bun update` to the same age.
+    cooldown:
+      default-days: 3
     commit-message:
       prefix: fix
       prefix-development: chore
@@ -54,6 +59,8 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+    cooldown:
+      default-days: 3
     groups:
       actions:
         patterns: ["*"]
