@@ -8,10 +8,11 @@ import path from "node:path";
 // process, a real directory, a real exit code. It used to be a `node -e`
 // one-liner whose nested quotes only survived the shell that happened to run
 // it, so the build worked on Linux and nowhere else.
-const script = path.resolve(import.meta.dir, "..", "scripts", "clean.ts");
+const repoRoot = path.resolve(import.meta.dir, "..");
+const script = path.join(repoRoot, "scripts", "clean.ts");
 
-const run = (target: string) => {
-	const result = spawnSync(process.execPath, [script, target], { encoding: "utf8" });
+const run = (target: string, cwd?: string) => {
+	const result = spawnSync(process.execPath, [script, target], { cwd, encoding: "utf8" });
 	return { status: result.status ?? 1, stderr: result.stderr };
 };
 
@@ -42,5 +43,25 @@ describe("clean", () => {
 		expect(result.status).toBe(0);
 		expect(result.stderr).toBe("");
 		rmSync(dir, { recursive: true, force: true });
+	});
+
+	// The build may be started from any directory; a relative target must name
+	// the repo's directory, never one that happens to sit under the caller's cwd.
+	test("resolves a relative target against the repo root, not the cwd", () => {
+		const inRepo = mkdtempSync(path.join(repoRoot, ".clean-test-"));
+		const elsewhere = mkdtempSync(path.join(os.tmpdir(), "clean-"));
+		const name = path.basename(inRepo);
+		const decoy = path.join(elsewhere, name);
+		mkdirSync(decoy);
+		try {
+			const result = run(name, elsewhere);
+
+			expect(result.status).toBe(0);
+			expect(existsSync(inRepo)).toBe(false);
+			expect(existsSync(decoy)).toBe(true);
+		} finally {
+			rmSync(inRepo, { recursive: true, force: true });
+			rmSync(elsewhere, { recursive: true, force: true });
+		}
 	});
 });

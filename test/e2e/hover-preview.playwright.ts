@@ -123,6 +123,10 @@ test.describe("Page preview", () => {
 		if (!box) throw new Error("popover has no box");
 
 		await page.mouse.move(box.x + 40, box.y + 40, { steps: 8 });
+		// Leaving the link starts the close grace and entering the popover must
+		// cancel it. Nothing in the page marks either, and a cancelled timer emits
+		// nothing, so only outlasting the grace shows the popover stayed: without
+		// this wait the assertion below passes before a close could happen.
 		await page.waitForTimeout(SETTLE_MS);
 		await expect(popover).toBeVisible();
 
@@ -160,21 +164,32 @@ test.describe("Page preview", () => {
 		const scrollBefore = await page.evaluate(() => window.scrollY);
 
 		// Scroll anchoring keeps the link where it is and scrolls the page instead,
-		// as when a Mermaid diagram or an image above it finishes rendering.
-		await page.evaluate((article) => {
+		// as when a Mermaid diagram or an image above it finishes rendering. The
+		// preview decides on that scroll event synchronously (a dismissal has no
+		// grace), so once the event has run and React has committed, the popover
+		// is either gone or here to stay.
+		await page.evaluate(async (article) => {
+			const scrolled = Promise.withResolvers<void>();
+			document.addEventListener("scroll", () => scrolled.resolve(), { capture: true, once: true });
 			const spacer = document.createElement("div");
 			spacer.style.height = "240px";
 			document.querySelector(`${article} h2`)?.before(spacer);
+			await scrolled.promise;
+			for (let frame = 0; frame < 2; frame++) {
+				const painted = Promise.withResolvers<void>();
+				requestAnimationFrame(() => painted.resolve());
+				await painted.promise;
+			}
 		}, ARTICLE);
 		expect(await page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(scrollBefore + 240);
 		expect(await link.evaluate((element) => element.getBoundingClientRect().top)).toBe(linkTop);
 
-		await page.waitForTimeout(SETTLE_MS);
 		await expect(popover).toBeVisible();
 	});
 
 	test("a sidebar link shows nothing", async ({ page }) => {
 		await hoverLink(page.locator(SIDEBAR_LINK));
+		// A popover that never opens emits nothing to await: outlast the hover delay.
 		await page.waitForTimeout(SETTLE_MS);
 		await expect(page.locator(POPOVER)).toHaveCount(0);
 
@@ -194,6 +209,7 @@ test.describe("Page preview", () => {
 			document.addEventListener("click", (event) => event.preventDefault(), { capture: true });
 		});
 		await page.touchscreen.tap(box.x + 4, box.y + box.height / 2);
+		// A popover that never opens emits nothing to await: outlast the hover delay.
 		await page.waitForTimeout(SETTLE_MS);
 		await expect(page.locator(POPOVER)).toHaveCount(0);
 

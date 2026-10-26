@@ -19,6 +19,7 @@
 import { rmSync } from "node:fs";
 import path from "node:path";
 
-const target = path.resolve(process.argv[2] ?? path.join(import.meta.dir, "..", "dist"));
+const repoRoot = path.resolve(import.meta.dir, "..");
+const target = path.resolve(repoRoot, process.argv[2] ?? "dist");
 
 rmSync(target, { recursive: true, force: true });
