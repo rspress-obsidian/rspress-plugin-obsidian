@@ -445,11 +445,19 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 				forceRef.current?.zoomToFit?.(300, 16);
 			},
 			centerOnCurrent: () => {
-				forceRef.current?.centerAt?.(0, 0, 0);
+				// force-graph writes each node's simulated position onto the node
+				// object; before the first tick, or with no current page in view,
+				// the layout's origin is where the center forces gather the graph.
+				const current: (ForceGraphNode & { x?: number; y?: number }) | undefined =
+					forceGraphData.nodes.find((node) => node.isCurrent);
+				const x = current?.x;
+				const y = current?.y;
+				const placed = Number.isFinite(x) && Number.isFinite(y);
+				forceRef.current?.centerAt?.(placed ? x : 0, placed ? y : 0, 300);
 			},
 			getStats: () => ({ ...statsRef.current }),
 		}),
-		[],
+		[forceGraphData.nodes],
 	);
 
 	useEffect(() => {
