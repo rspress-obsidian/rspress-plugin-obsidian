@@ -31,9 +31,17 @@ export type MermaidSecurityLevel = "strict" | "loose" | "antiscript" | "sandbox"
 /**
  * Attribute carrying the configured security level on a placeholder.
  *
- * Mermaid's configuration is global, so one stamped value configures every
- * diagram on the page. Reading it at scan time means the level is known
- * before the first render starts, with no ordering dependency on when the
- * client component mounts.
+ * Each diagram renders at its own placeholder's level (unstamped or unknown:
+ * `strict`), so a page that configured a looser level never hands it to a
+ * diagram that did not ask for it. Reading it per block means the level is known
+ * before the render starts, with no ordering dependency on when the client
+ * component mounts.
  */
 export const MERMAID_SECURITY_ATTRIBUTE = "data-security";
+
+/**
+ * Marks a container whose diagrams always render at `strict`, whatever their
+ * placeholders stamp. Canvas boards carry it: their text comes from canvas files,
+ * not from the site configuration that chooses a looser level for notes.
+ */
+export const MERMAID_STRICT_SCOPE_ATTRIBUTE = "data-mermaid-strict";

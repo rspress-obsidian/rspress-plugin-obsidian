@@ -21,6 +21,12 @@
  * canvas or of a markdown page in the same document; the last release drops the
  * tracked set and the theme observer, and the next `renderMermaidBlocks` call
  * rebuilds both.
+ *
+ * Mermaid's configuration is global too, yet each diagram has its own security
+ * level (see {@link securityLevelOf}). Renders therefore run one at a time
+ * through a single queue, ordered so diagrams of one level render together, and
+ * the instance is re-initialized before the first render of each group: no
+ * render ever observes another block's level.
  */
 
 import {
@@ -29,6 +35,7 @@ import {
 	MERMAID_INSTALL_HINT,
 	MERMAID_RENDERED_CLASS,
 	MERMAID_SECURITY_ATTRIBUTE,
+	MERMAID_STRICT_SCOPE_ATTRIBUTE,
 	MERMAID_UNAVAILABLE_ATTRIBUTE,
 	type MermaidSecurityLevel,
 } from "./classes.js";
@@ -59,15 +66,16 @@ let consumers = 0;
 let mermaidPromise: Promise<Mermaid> | null = null;
 /** Theme the shared instance was last configured with; `null` until first use. */
 let initializedTheme: "dark" | "default" | null = null;
-/**
- * Security level the shared instance was last configured with. Mermaid's
- * configuration is global, so the level is tracked here and a change
- * re-initializes it — see {@link setMermaidSecurityLevel}.
- */
+/** Security level the shared instance was last configured with. */
 let initializedSecurityLevel: MermaidSecurityLevel | null = null;
-/** Level every diagram renders with until a placeholder stamps another. */
+/** Level of an unstamped diagram, and of every diagram in a strict scope. */
 const DEFAULT_SECURITY_LEVEL: MermaidSecurityLevel = "strict";
-let securityLevel: MermaidSecurityLevel = DEFAULT_SECURITY_LEVEL;
+/**
+ * Tail of the render queue. Every render, including its `initialize`, runs after
+ * the previous one settles, so re-configuring mermaid for one diagram's level can
+ * never land while another diagram is still rendering.
+ */
+let renderQueue: Promise<void> = Promise.resolve();
 
 function isDark(): boolean {
 	return typeof document !== "undefined" && document.documentElement.classList.contains("dark");
@@ -145,18 +153,6 @@ async function loadMermaid(): Promise<Mermaid> {
 
 let warnedUnavailable = false;
 
-/**
- * Choose the `securityLevel` every diagram renders with.
- *
- * `strict` is the default: mermaid's own sanitising pass strips unsafe link
- * URLs, so a diagram with `click A "javascript:..."` never reaches the DOM as
- * a live anchor. The looser levels hand rendering to the diagram source and
- * are only ever set from plugin configuration.
- */
-export function setMermaidSecurityLevel(level: MermaidSecurityLevel): void {
-	securityLevel = level;
-}
-
 /** Read a stamped level, or `null` when the attribute is absent or unknown. */
 function readSecurityLevel(value: string | null): MermaidSecurityLevel | null {
 	const match = SECURITY_LEVELS.find((level) => level === value);
@@ -164,13 +160,29 @@ function readSecurityLevel(value: string | null): MermaidSecurityLevel | null {
 }
 
 /**
+ * The `securityLevel` one diagram renders with.
+ *
+ * `strict` unless the placeholder stamps another level: mermaid's own sanitising
+ * pass then strips unsafe link URLs, so a diagram with `click A "javascript:..."`
+ * never reaches the DOM as a live anchor. Only note placeholders carry a stamp,
+ * written from plugin configuration; an unknown stamp counts as none, and a
+ * diagram inside a strict scope (a canvas board) is `strict` whatever it stamps.
+ */
+function securityLevelOf(block: HTMLElement): MermaidSecurityLevel {
+	if (block.closest(`[${MERMAID_STRICT_SCOPE_ATTRIBUTE}]`)) return DEFAULT_SECURITY_LEVEL;
+	return (
+		readSecurityLevel(block.getAttribute(MERMAID_SECURITY_ATTRIBUTE)) ?? DEFAULT_SECURITY_LEVEL
+	);
+}
+
+/**
  * Load mermaid once, and re-run `initialize` only when the theme or the
  * security level actually changed. `mermaid.initialize` writes global config, so
- * calling it per block was both wasted work and a way for two renders to
- * observe each other's settings; theme switches still need it, since the
- * diagram text is re-rendered with the new palette.
+ * calling it per block was wasted work; theme switches still need it, since the
+ * diagram text is re-rendered with the new palette. Only ever called from a
+ * queued render, so nothing else renders between this and that render.
  */
-async function ensureMermaid(): Promise<Mermaid> {
+async function ensureMermaid(securityLevel: MermaidSecurityLevel): Promise<Mermaid> {
 	const mermaid = await loadMermaid();
 	const theme = isDark() ? "dark" : "default";
 	if (initializedTheme !== theme || initializedSecurityLevel !== securityLevel) {
@@ -190,21 +202,44 @@ async function ensureMermaid(): Promise<Mermaid> {
 	return mermaid;
 }
 
-async function renderBlock(block: HTMLElement): Promise<void> {
-	const code = block.getAttribute("data-code") ?? "";
-	if (!code) return;
+/** Settle with `work`, or reject once a render has taken too long. */
+async function withRenderTimeout<T>(work: Promise<T>): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	// Executor form: this ships to browsers, and `Promise.withResolvers` needs Safari 17.4.
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(
+			() => reject(new Error(`Mermaid render timed out after ${RENDER_TIMEOUT_MS}ms`)),
+			RENDER_TIMEOUT_MS,
+		);
+	});
 	try {
-		const mermaid = await ensureMermaid();
+		return await Promise.race([work, timeout]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/**
+ * Render one diagram. `onShown` fires as soon as the block shows its outcome —
+ * a diagram or the error class, a timeout included — while the returned promise
+ * waits for Mermaid itself: a render that timed out is still running inside it,
+ * and the queued render behind it must not `initialize` the shared instance
+ * under it. Its late result is discarded.
+ */
+async function renderBlock(
+	block: HTMLElement,
+	securityLevel: MermaidSecurityLevel,
+	onShown: () => void,
+): Promise<void> {
+	let rendering: Promise<unknown> | undefined;
+	try {
+		const code = block.getAttribute("data-code") ?? "";
+		if (!code) return;
+		const mermaid = await ensureMermaid(securityLevel);
 		renderId += 1;
-		const { svg } = await Promise.race([
-			mermaid.render(`obsidian-mermaid-${renderId}`, code),
-			new Promise<never>((_, reject) =>
-				setTimeout(
-					() => reject(new Error(`Mermaid render timed out after ${RENDER_TIMEOUT_MS}ms`)),
-					RENDER_TIMEOUT_MS,
-				),
-			),
-		]);
+		const render = mermaid.render(`obsidian-mermaid-${renderId}`, code);
+		rendering = render;
+		const { svg } = await withRenderTimeout(render);
 		block.innerHTML = svg;
 		block.classList.add(MERMAID_RENDERED_CLASS);
 		block.classList.remove(MERMAID_ERROR_CLASS);
@@ -222,12 +257,44 @@ async function renderBlock(block: HTMLElement): Promise<void> {
 			return;
 		}
 		console.warn("[rspress-plugin-obsidian] Mermaid diagram failed to render", error);
+	} finally {
+		onShown();
 	}
+	await rendering?.catch(() => undefined);
+}
+
+/**
+ * Queue renders for `blocks`, those sharing a level back to back, so the shared
+ * instance is re-initialized once per level rather than once per alternation.
+ * Returns each block's render, settling once that block is drawn or errored.
+ */
+function enqueueRenders(blocks: readonly HTMLElement[]): Promise<void>[] {
+	const groups = new Map<MermaidSecurityLevel, HTMLElement[]>();
+	for (const block of blocks) {
+		const level = securityLevelOf(block);
+		const group = groups.get(level);
+		if (group) group.push(block);
+		else groups.set(level, [block]);
+	}
+	const renders: Promise<void>[] = [];
+	for (const [level, group] of groups) {
+		for (const block of group) {
+			// `renderBlock` reports its own failures on the block and never
+			// rejects, so a failed diagram does not stop the ones behind it.
+			renders.push(
+				new Promise<void>((shown) => {
+					renderQueue = renderQueue.then(() => renderBlock(block, level, shown));
+				}),
+			);
+		}
+	}
+	return renders;
 }
 
 function ensureObserver(): void {
 	if (observer || typeof document === "undefined") return;
 	observer = new MutationObserver(() => {
+		const stale: HTMLElement[] = [];
 		for (const block of trackedBlocks) {
 			// Client-side navigation detaches a page's placeholders; drop them so
 			// the set tracks only live diagrams and a theme toggle does not
@@ -239,8 +306,9 @@ function ensureObserver(): void {
 			// Reset to raw source so the diagram re-renders with the new theme.
 			block.textContent = block.getAttribute("data-code") ?? "";
 			block.classList.remove(MERMAID_RENDERED_CLASS, MERMAID_ERROR_CLASS);
-			void renderBlock(block);
+			stale.push(block);
 		}
+		enqueueRenders(stale);
 	});
 	observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 }
@@ -249,27 +317,13 @@ function ensureObserver(): void {
  * Render any placeholders inside `root` that are missing their diagram, and
  * return how many are still unrendered (including renders now in flight).
  * Idempotent — safe to call after every React commit, route change or DOM
- * mutation.
+ * mutation. Each diagram renders at its own level ({@link securityLevelOf}), so
+ * scanning a page together with an embedded canvas, or two scans racing, never
+ * renders one diagram at another's level.
  */
 export function renderMermaidBlocks(root: ParentNode): number {
 	const blocks = Array.from(root.querySelectorAll<HTMLElement>(`.${MERMAID_BLOCK_CLASS}`));
-	// A placeholder emitted from a note carries the configured security level, so
-	// the shared instance is configured before the first render starts. Every
-	// block of one site carries the same value; the first stamped one wins.
-	//
-	// Unstamped blocks must reset it rather than inherit: a canvas board emits
-	// no stamp, and the level is module-global, so a page that configured a
-	// looser one would otherwise hand that level to the next route's diagrams.
-	let stamped = false;
-	for (const block of blocks) {
-		const level = readSecurityLevel(block.getAttribute(MERMAID_SECURITY_ATTRIBUTE));
-		if (level) {
-			setMermaidSecurityLevel(level);
-			stamped = true;
-			break;
-		}
-	}
-	if (!stamped) setMermaidSecurityLevel(DEFAULT_SECURITY_LEVEL);
+	const fresh: HTMLElement[] = [];
 	let pending = 0;
 	for (const block of blocks) {
 		if (block.classList.contains(MERMAID_ERROR_CLASS)) continue;
@@ -278,8 +332,12 @@ export function renderMermaidBlocks(root: ParentNode): number {
 		if (pendingBlocks.has(block)) continue;
 		trackedBlocks.add(block);
 		pendingBlocks.add(block);
-		void renderBlock(block).finally(() => pendingBlocks.delete(block));
+		fresh.push(block);
 	}
+	const renders = enqueueRenders(fresh);
+	fresh.forEach((block, index) => {
+		void renders[index]?.finally(() => pendingBlocks.delete(block));
+	});
 	ensureObserver();
 	return pending;
 }

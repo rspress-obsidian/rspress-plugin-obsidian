@@ -17,6 +17,12 @@ const { mock } = require("bun:test");
 // own suite (`src/mermaid/blocks.test.ts`). The boundary under test here is the
 // component's own decision: whether to load the renderer at all, and which root
 // it is pointed at. Mocking that module keeps this file off mermaid entirely.
+//
+// Bun's mock registry keeps the stub for the rest of the process, so the real
+// exports are handed back in `afterAll`. Snapshot them: registering the stub
+// patches the live namespace in place, so the namespace object itself cannot
+// serve as the restore value.
+const realBlocks = { ...(await import("../../mermaid/blocks")) };
 const renderMermaidBlocks = mock((_root: HTMLElement) => {});
 mock.module("../../mermaid/blocks", () => ({
 	renderMermaidBlocks,
@@ -56,6 +62,7 @@ afterEach(() => {
 afterAll(() => {
 	globalThis.requestAnimationFrame = realRequestFrame;
 	globalThis.cancelAnimationFrame = realCancelFrame;
+	mock.module("../../mermaid/blocks", () => realBlocks);
 });
 
 function addPlaceholder(): void {
