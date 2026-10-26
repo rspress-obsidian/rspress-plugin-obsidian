@@ -27,6 +27,7 @@ import type {
 } from "../../src/markdown/types";
 import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../src/shared/media-exts.js";
 import { formatMomentDate } from "../../src/shared/moment-format.js";
+import { normalizeFsPath } from "../../src/shared/route-path.js";
 import { toHastMathHandlers, toMarkdownMathHandlers } from "./math-element";
 
 const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
@@ -3311,7 +3312,9 @@ describe("wikilink API", () => {
 
 			const { getContentIndex } = remarkPluginConfig(plugin);
 			const index = (await getContentIndex(notePath)) as ContentIndex;
-			const headings = index.byAbsolutePath.get(notePath)?.headings.map((h) => h.rawText);
+			const headings = index.byAbsolutePath
+				.get(normalizeFsPath(notePath))
+				?.headings.map((h) => h.rawText);
 			expect(headings).toContain("Added after the build");
 		} finally {
 			await fsp.rm(docsRoot, { recursive: true, force: true });
