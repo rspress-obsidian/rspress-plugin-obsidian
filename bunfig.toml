@@ -12,6 +12,12 @@ peer = true
 # No `frozenLockfile` here: it also froze `bun update`, `bun add` and the relock
 # an intentional dependency change needs. CI and release enforce the lock with
 # an explicit `bun install --frozen-lockfile` instead.
+# Resolve only versions published at least 3 days (in seconds) ago, matching
+# Dependabot's `cooldown` in .github/dependabot.yml: a compromised or broken
+# release is usually yanked within that window. It applies when a version is
+# resolved (`bun add`, `bun update`, a relock), not to a frozen install of the
+# committed lockfile.
+minimumReleaseAge = 259200
 
 [test]
 # Bun's `[test]` section has no `timeout`, `bail` or `quiet` key — all three were
