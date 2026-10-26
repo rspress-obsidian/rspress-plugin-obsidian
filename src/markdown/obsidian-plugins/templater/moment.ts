@@ -3,16 +3,12 @@
  * execution commands call the `moment` global directly
  * (`moment(tp.file.title, "YYYY-MM-DD").startOf("month").format(…)`).
  *
- * Formatting and strict parsing reuse the daily-notes Moment implementation,
- * and arithmetic is moment's own from `date-math.ts` — months clamped to the
- * month's last day, then days, then time — in local time, with moment's
- * default (`en`) locale, whose week starts on Sunday.
+ * Formatting and strict parsing are the shared Moment implementation
+ * (`moment-format.ts`), and arithmetic is moment's own from `date-math.ts` —
+ * months clamped to the month's last day, then days, then time — in local
+ * time, with moment's default (`en`) locale, whose week starts on Sunday.
  */
-import {
-	formatDailyNoteDate,
-	type MomentParseOptions,
-	parseMomentDate,
-} from "../../daily-notes.js";
+
 import {
 	endOf,
 	type MomentUnit,
@@ -21,7 +17,12 @@ import {
 	momentUnitSpan,
 	normalizeMomentUnit,
 	startOf,
-} from "../../date-math.js";
+} from "../../../shared/date-math.js";
+import {
+	formatMomentDate,
+	type MomentParseOptions,
+	parseMomentDate,
+} from "../../../shared/moment-format.js";
 import { HostFunction, HostValue, TemplaterError, toTemplateString } from "./values.js";
 
 /** A moment duration, in the buckets moment adds it by. */
@@ -156,13 +157,13 @@ export class MomentValue extends HostValue {
 
 	override toTemplateString(): string {
 		return this.date
-			? formatDailyNoteDate(this.date, "ddd MMM DD YYYY HH:mm:ss [GMT]ZZ")
+			? formatMomentDate(this.date, "ddd MMM DD YYYY HH:mm:ss [GMT]ZZ")
 			: "Invalid date";
 	}
 
 	format(format?: unknown): string {
 		if (!this.date) return "Invalid date";
-		return formatDailyNoteDate(
+		return formatMomentDate(
 			this.date,
 			format === undefined || format === null ? DEFAULT_MOMENT_FORMAT : toTemplateString(format),
 		);

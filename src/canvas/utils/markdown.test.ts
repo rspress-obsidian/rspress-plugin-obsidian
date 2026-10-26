@@ -323,6 +323,20 @@ test("embeds audio, video and PDFs written as markdown images, as their wikilink
 	expect(html).not.toContain("<img");
 });
 
+test("links a PDF on another site instead of framing it, since the frame is unsandboxed", () => {
+	const html = renderMarkdown("![](https://evil.example/x.pdf)");
+	expect(html).not.toContain("<iframe");
+	expect(html).toContain(
+		'href="https://evil.example/x.pdf" target="_blank" rel="noopener noreferrer"',
+	);
+	// A protocol-relative URL is refused outright, frame and link alike.
+	expect(renderMarkdown("![](//evil.example/x.pdf)")).not.toContain("<iframe");
+	// The site's own PDF is still framed.
+	expect(renderMarkdown("![](/files/doc.pdf)")).toContain(
+		'<iframe class="obsidian-pdf-frame" src="/files/doc.pdf"',
+	);
+});
+
 test("frames a YouTube video or a post on X from a markdown image", () => {
 	expect(renderMarkdown("![](https://youtu.be/NnTvZWp5Q7o)")).toContain(
 		'src="https://www.youtube.com/embed/NnTvZWp5Q7o"',
@@ -604,10 +618,10 @@ test("embeds only the block a `^id` subpath names", () => {
 	expect(block).not.toContain("Intro paragraph.");
 });
 
-test("renders allowlisted attribute-less HTML and escapes everything else", () => {
+test("renders allowlisted attribute-less HTML, hides comments and escapes everything else", () => {
 	const root = dom(
 		renderMarkdown(
-			"<u>under</u> H<sub>2</sub>O <kbd>Ctrl</kbd> line<br>break<br/> <img src=x onerror=alert(1)> <b class=x>b</b> <!-- <b>c</b> -->",
+			"<u>under</u> H<sub>2</sub>O <kbd>Ctrl</kbd> line<br>break<br/> <img src=x onerror=alert(1)> <b class=x>b</b> <!-- <b>secret</b> -->",
 		),
 	);
 	expect(root.querySelector("u")?.textContent).toBe("under");
@@ -618,7 +632,8 @@ test("renders allowlisted attribute-less HTML and escapes everything else", () =
 	expect(root.querySelector("b")).toBeNull();
 	expect(root.textContent).toContain("<img src=x onerror=alert(1)>");
 	expect(root.textContent).toContain("<b class=x>");
-	expect(root.textContent).toContain("<!-- <b>c</b> -->");
+	expect(root.textContent).not.toContain("<!--");
+	expect(root.textContent).not.toContain("secret");
 	expect(attributeNames(root).some((name) => name.startsWith("on"))).toBe(false);
 });
 

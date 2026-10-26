@@ -4,10 +4,10 @@
  * or `""` — and the operators bind NOT, then XOR, then AND, then OR, as in
  * Tasks.
  */
+import { escapeRegExp } from "../../../shared/escape.js";
 import {
 	combineExplanations,
 	type Explanation,
-	escapeRegExp,
 	type Filter,
 	type FilterOrError,
 	makeExplanation,

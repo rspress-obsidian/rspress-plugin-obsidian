@@ -9,6 +9,7 @@
  * and rendering all use the local wall clock, exactly as Dataview (Luxon
  * `DateTime.local()`) does inside Obsidian. Set `TZ` for the build to pick it.
  */
+
 import {
 	CASUAL_UNIT_MS,
 	DURATION_UNITS,
@@ -22,9 +23,14 @@ import {
 	localDate,
 	luxonDiff,
 	luxonPlus,
+	MONTH_NAMES,
 	scanDuration,
 	startOf,
-} from "./date-math.js";
+	WEEKDAY_NAMES,
+	zeroPad,
+} from "../shared/date-math.js";
+import { escapeRegExp } from "../shared/escape.js";
+import { assertSafeRegex, UnsafeRegexError } from "../shared/safe-regex.js";
 
 /** An Obsidian link to a file, heading or block (`Link` in Dataview). */
 export class DataviewLink {
@@ -566,43 +572,15 @@ export function luxonWeekday(date: Date): number {
 	return day === 0 ? 7 : day;
 }
 
-export const MONTH_NAMES = [
-	"January",
-	"February",
-	"March",
-	"April",
-	"May",
-	"June",
-	"July",
-	"August",
-	"September",
-	"October",
-	"November",
-	"December",
-];
-export const WEEKDAY_NAMES = [
-	"Sunday",
-	"Monday",
-	"Tuesday",
-	"Wednesday",
-	"Thursday",
-	"Friday",
-	"Saturday",
-];
-
 function offsetString(date: Date, style: "narrow" | "short" | "techie"): string {
 	const offset = -date.getTimezoneOffset();
 	const sign = offset < 0 ? "-" : "+";
 	const hours = Math.floor(Math.abs(offset) / 60);
 	const minutes = Math.abs(offset) % 60;
-	if (style === "narrow") return minutes ? `${sign}${hours}:${pad(minutes)}` : `${sign}${hours}`;
-	if (style === "short") return `${sign}${pad(hours)}:${pad(minutes)}`;
-	return `${sign}${pad(hours)}${pad(minutes)}`;
-}
-
-function pad(value: number, length = 2): string {
-	const text = String(Math.abs(value)).padStart(length, "0");
-	return value < 0 ? `-${text}` : text;
+	if (style === "narrow")
+		return minutes ? `${sign}${hours}:${zeroPad(minutes)}` : `${sign}${hours}`;
+	if (style === "short") return `${sign}${zeroPad(hours)}:${zeroPad(minutes)}`;
+	return `${sign}${zeroPad(hours)}${zeroPad(minutes)}`;
 }
 
 /** Split a Luxon format into runs of one character and `'quoted'` literals. */
@@ -657,23 +635,23 @@ function luxonToken(date: Date, token: string): string {
 		case "S":
 			return String(date.getMilliseconds());
 		case "SSS":
-			return pad(date.getMilliseconds(), 3);
+			return zeroPad(date.getMilliseconds(), 3);
 		case "s":
 			return String(date.getSeconds());
 		case "ss":
-			return pad(date.getSeconds());
+			return zeroPad(date.getSeconds());
 		case "m":
 			return String(date.getMinutes());
 		case "mm":
-			return pad(date.getMinutes());
+			return zeroPad(date.getMinutes());
 		case "h":
 			return String(hour % 12 || 12);
 		case "hh":
-			return pad(hour % 12 || 12);
+			return zeroPad(hour % 12 || 12);
 		case "H":
 			return String(hour);
 		case "HH":
-			return pad(hour);
+			return zeroPad(hour);
 		case "Z":
 			return offsetString(date, "narrow");
 		case "ZZ":
@@ -687,7 +665,7 @@ function luxonToken(date: Date, token: string): string {
 		case "d":
 			return String(date.getDate());
 		case "dd":
-			return pad(date.getDate());
+			return zeroPad(date.getDate());
 		case "c":
 		case "E":
 			return String(luxonWeekday(date));
@@ -705,7 +683,7 @@ function luxonToken(date: Date, token: string): string {
 			return String(month + 1);
 		case "LL":
 		case "MM":
-			return pad(month + 1);
+			return zeroPad(month + 1);
 		case "LLL":
 		case "MMM":
 			return (MONTH_NAMES[month] ?? "").slice(0, 3);
@@ -718,31 +696,31 @@ function luxonToken(date: Date, token: string): string {
 		case "y":
 			return String(date.getFullYear());
 		case "yy":
-			return pad(date.getFullYear() % 100);
+			return zeroPad(date.getFullYear() % 100);
 		case "yyyy":
-			return pad(date.getFullYear(), 4);
+			return zeroPad(date.getFullYear(), 4);
 		case "yyyyyy":
-			return pad(date.getFullYear(), 6);
+			return zeroPad(date.getFullYear(), 6);
 		case "G":
 			return date.getFullYear() > 0 ? "AD" : "BC";
 		case "GG":
 			return date.getFullYear() > 0 ? "Anno Domini" : "Before Christ";
 		case "kk":
-			return pad(isoWeek(date).year % 100);
+			return zeroPad(isoWeek(date).year % 100);
 		case "kkkk":
-			return pad(isoWeek(date).year, 4);
+			return zeroPad(isoWeek(date).year, 4);
 		case "W":
 			return String(isoWeek(date).week);
 		case "WW":
-			return pad(isoWeek(date).week);
+			return zeroPad(isoWeek(date).week);
 		case "o":
 			return String(dayOfYear(date));
 		case "ooo":
-			return pad(dayOfYear(date), 3);
+			return zeroPad(dayOfYear(date), 3);
 		case "q":
 			return String(Math.floor(month / 3) + 1);
 		case "qq":
-			return pad(Math.floor(month / 3) + 1);
+			return zeroPad(Math.floor(month / 3) + 1);
 		case "X":
 			return String(Math.floor(date.getTime() / 1000));
 		case "x":
@@ -756,13 +734,13 @@ function luxonToken(date: Date, token: string): string {
 		case "DDDD":
 			return `${WEEKDAY_NAMES[weekday]}, ${MONTH_NAMES[month]} ${date.getDate()}, ${date.getFullYear()}`;
 		case "t":
-			return `${hour % 12 || 12}:${pad(date.getMinutes())} ${hour < 12 ? "AM" : "PM"}`;
+			return `${hour % 12 || 12}:${zeroPad(date.getMinutes())} ${hour < 12 ? "AM" : "PM"}`;
 		case "tt":
-			return `${hour % 12 || 12}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${hour < 12 ? "AM" : "PM"}`;
+			return `${hour % 12 || 12}:${zeroPad(date.getMinutes())}:${zeroPad(date.getSeconds())} ${hour < 12 ? "AM" : "PM"}`;
 		case "T":
-			return `${pad(hour)}:${pad(date.getMinutes())}`;
+			return `${zeroPad(hour)}:${zeroPad(date.getMinutes())}`;
 		case "TT":
-			return `${pad(hour)}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+			return `${zeroPad(hour)}:${zeroPad(date.getMinutes())}:${zeroPad(date.getSeconds())}`;
 		case "f":
 			return `${luxonToken(date, "D")}, ${luxonToken(date, "t")}`;
 		case "ff":
@@ -776,7 +754,9 @@ function luxonToken(date: Date, token: string): string {
 
 /**
  * Luxon's `DateTime.fromFormat` for the numeric and name tokens people write in
- * `date(text, format)`. Returns `null` when the text does not match.
+ * `date(text, format)`. Returns `null` when the text does not match. Throws
+ * {@link UnsafeRegexError}, as `Can't handle format`, for a format whose
+ * matcher could backtrack catastrophically (twenty-one `d`s and `H`s in a row).
  */
 export function parseWithLuxonFormat(text: string, format: string): Date | null {
 	let pattern = "";
@@ -794,7 +774,14 @@ export function parseWithLuxonFormat(text: string, format: string): Date | null 
 			pattern += escapeRegExp(token.value);
 		}
 	}
-	const match = new RegExp(`^${pattern}$`, "i").exec(text.trim());
+	const source = `^${pattern}$`;
+	try {
+		assertSafeRegex(source, "i");
+	} catch (error) {
+		if (!(error instanceof UnsafeRegexError)) throw error;
+		throw new UnsafeRegexError(`Can't handle format (${format}): ${error.message}`);
+	}
+	const match = new RegExp(source, "i").exec(text.trim());
 	if (!match) return null;
 	let year = new Date().getFullYear();
 	let month = 1;
@@ -842,10 +829,6 @@ function luxonParseCapture(token: string): string | undefined {
 		return WEEKDAY_NAMES.map((name) => name.slice(0, 3)).join("|");
 	if (token === "a") return "AM|PM";
 	return undefined;
-}
-
-export function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // ---------------------------------------------------------------------------
@@ -947,7 +930,7 @@ export function formatDuration(duration: DataviewDuration, format: string): stri
 			if (token.literal) return token.value;
 			const unit = token.value[0] ?? "";
 			const amount = amounts[unit];
-			return amount === undefined ? token.value : pad(amount, token.value.length);
+			return amount === undefined ? token.value : zeroPad(amount, token.value.length);
 		})
 		.join("");
 }

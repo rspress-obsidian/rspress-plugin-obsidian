@@ -1,25 +1,23 @@
-// The umbrella entry is what `rspress-plugin-obsidian` resolves to, so this file
-// is the only place the composition contract and the re-export surface are
-// exercised as a consumer meets them: `rspress.config.ts` imports
-// `pluginObsidian` from here, and user code imports the helpers from here.
-import { describe, expect, test } from "bun:test";
+// The umbrella entry is what `rspress-plugin-obsidian` resolves to: the
+// composition contract and the public surface are exercised here as a consumer
+// meets them — `rspress.config.ts` imports `pluginObsidian` from here.
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import type { RspressPlugin } from "@rspress/core";
+import { parseCanvas } from "./canvas/parser.ts";
 import * as umbrella from "./index.ts";
-import * as markdownEntry from "./markdown/index.ts";
+import { findPublishedContent } from "./shared/published-content.ts";
 
-const {
-	buildContentIndex,
-	encodeTagPathSegment,
-	findWikilinkMatches,
-	generateTagPages,
-	parseWikiLink,
-	pluginObsidian,
-	resolveWikiLink,
-} = umbrella;
+const { pluginObsidian } = umbrella;
 
-const basicRoot = path.resolve(import.meta.dir, "..", "test/markdown/fixtures/basic");
-const tagsRoot = path.resolve(import.meta.dir, "..", "test/markdown/fixtures/tags");
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 /** A plugin object as the options are handed to Rspress, read loosely. */
 const fields = (plugin: unknown): Record<string, unknown> => plugin as Record<string, unknown>;
@@ -41,6 +39,7 @@ describe("pluginObsidian", () => {
 
 	test("returns exactly the plugins the builder builds, so a consumer can compose a subset", () => {
 		expect(pluginObsidian(() => [])).toEqual([]);
+		expect(pluginObsidian({ vaultRoot: "/vault" }, () => [])).toEqual([]);
 		expect(
 			pluginObsidian((_markdown, canvas) => [
 				canvas({ vaultRoot: "/vault", fileRoutePrefix: "/vault" }),
@@ -69,68 +68,97 @@ describe("pluginObsidian", () => {
 	});
 });
 
-describe("root entry re-exports", () => {
-	test("finds and parses the wikilinks a note contains", () => {
-		const matches = findWikilinkMatches("See [[Note|Alias]] and ![[Embed.png]]");
-		expect(matches.map((match) => match.fullMatch)).toEqual(["[[Note|Alias]]", "![[Embed.png]]"]);
-
-		expect(parseWikiLink(matches[0]?.inner ?? "", matches[0]?.fullMatch ?? "")).toMatchObject({
-			target: "Note",
-			alias: "Alias",
-			isEmbed: false,
-		});
-		expect(parseWikiLink(matches[1]?.inner ?? "", matches[1]?.fullMatch ?? "")).toMatchObject({
-			target: "Embed.png",
-			isEmbed: true,
-		});
-	});
-
-	test("resolves a wikilink against a real content index", async () => {
-		const index = await buildContentIndex(basicRoot);
-		const currentPage = index.byFilePathKey.get("index");
-		if (!currentPage) throw new Error("fixture page missing");
-
-		const parsed = parseWikiLink(
-			"guide/getting-started#Install",
-			"[[guide/getting-started#Install|Install guide]]",
+describe("pluginObsidian shared options", () => {
+	/** A vault with one note and a board whose card links it; boards publish to `out`. */
+	async function createVault() {
+		const root = await mkdtemp(path.join(tmpdir(), "plugin-obsidian-"));
+		tempDirs.push(root);
+		const vault = path.join(root, "vault");
+		const docs = path.join(root, "docs");
+		await mkdir(vault, { recursive: true });
+		await mkdir(docs, { recursive: true });
+		await writeFile(path.join(vault, "Note.md"), "x\n");
+		await writeFile(
+			path.join(vault, "Board.canvas"),
+			JSON.stringify({
+				nodes: [{ id: "t", type: "text", x: 0, y: 0, width: 10, height: 10, text: "[[Note]]" }],
+				edges: [],
+			}),
 		);
-		const resolved = resolveWikiLink(parsed, { currentPage, index });
+		return { vault, docs, out: path.join(root, "out") };
+	}
 
-		expect(resolved.status).toBe("ok");
-		// Obsidian's display text for an unaliased heading link: the link text
-		// as written, with `#` shown as ` > `.
-		expect(resolved.label).toBe("guide/getting-started > Install");
-		expect(resolved.href).toContain("getting-started");
-		expect(resolved.targetPage?.relativePath).toBe("guide/getting-started.md");
+	/** Where the board's card links the note, once the canvas plugin has published it. */
+	async function cardHref(plugin: RspressPlugin | undefined, docs: string, out: string) {
+		await plugin?.addPages?.({ root: docs }, true);
+		const board = parseCanvas(
+			await readFile(path.join(out, "__canvases__", "Board.json"), "utf-8"),
+			{
+				enriched: true,
+			},
+		);
+		return board.links?.[""]?.Note?.href;
+	}
+
+	test("the vault is named once for markdown and canvas", async () => {
+		const { vault, docs, out } = await createVault();
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const [markdownPlugin, canvasPlugin] = pluginObsidian(
+				{ vaultRoot: vault, vaultRoutePrefix: "/notes" },
+				(markdown, canvas) => [markdown(), canvas({ outDir: out })],
+			);
+
+			expect(findPublishedContent({ plugins: [markdownPlugin] })).toMatchObject({
+				vaultRoot: vault,
+				vaultRoutePrefix: "/notes",
+			});
+			// Canvas alone (no markdown plugin in this site) indexes the vault
+			// itself: its cards link notes under the shared prefix.
+			expect(await cardHref(canvasPlugin, docs, out)).toBe("/notes/Note");
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
-	test("generates one tag page per tag, listing the pages that carry it", async () => {
-		const pages = generateTagPages(await buildContentIndex(tagsRoot));
-
-		expect(pages.map((page) => page.routePath).sort()).toEqual([
-			"/tags/obsidian",
-			"/tags/tutorial",
+	test("canvas cards follow the default vault prefix when only the vault is shared", async () => {
+		const { vault, docs, out } = await createVault();
+		const [canvasPlugin] = pluginObsidian({ vaultRoot: vault }, (_markdown, canvas) => [
+			canvas({ outDir: out }),
 		]);
-		expect(pages.find((page) => page.routePath === "/tags/tutorial")?.content).toContain(
-			"# \\#tutorial",
-		);
-		expect(pages.find((page) => page.routePath === "/tags/obsidian")?.content).toContain(
-			"Tagged Guide",
-		);
+
+		expect(await cardHref(canvasPlugin, docs, out)).toBe("/vault/Note");
 	});
 
-	test("encodes a tag into a path segment that survives a URL", () => {
-		expect(encodeTagPathSegment("daily note")).toBe("daily%20note");
-		expect(encodeTagPathSegment("#todo")).toBe("%23todo");
-		expect(encodeTagPathSegment("C++")).toBe("C++");
-	});
+	test("an option passed to a feature's factory wins over the shared one", async () => {
+		const { vault, docs, out } = await createVault();
+		const other = path.join(path.dirname(vault), "other");
+		const [markdownPlugin, canvasPlugin] = pluginObsidian(
+			{ vaultRoot: other, vaultRoutePrefix: "/notes" },
+			(markdown, canvas) => [
+				markdown({ vaultRoot: vault, vaultRoutePrefix: "/kb" }),
+				canvas({ vaultRoot: vault, fileRoutePrefix: "/kb", outDir: out }),
+			],
+		);
 
-	test("re-exports every runtime helper the /markdown entry exports", () => {
-		// `docs/markdown/guide/api.md` documents the API as exported from
-		// `rspress-plugin-obsidian`, and the package ships `/markdown` as a
-		// subpath — a helper added to one entry and not the other silently
-		// breaks that promise for whichever side missed it.
-		const missing = Object.keys(markdownEntry).filter((key) => !(key in umbrella));
-		expect(missing).toEqual([]);
+		expect(findPublishedContent({ plugins: [markdownPlugin] })).toMatchObject({
+			vaultRoot: vault,
+			vaultRoutePrefix: "/kb",
+		});
+		expect(await cardHref(canvasPlugin, docs, out)).toBe("/kb/Note");
+	});
+});
+
+describe("root entry", () => {
+	test("exports the feature factories and pluginObsidian, nothing else at runtime", () => {
+		// Helpers (content index, resolver, canvas parser…) live on the feature
+		// entries — `rspress-plugin-obsidian/markdown`, `/canvas`, `/graph`.
+		expect(Object.keys(umbrella).sort()).toEqual([
+			"canvas",
+			"graphview",
+			"markdown",
+			"pluginObsidian",
+		]);
 	});
 });

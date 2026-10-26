@@ -10,8 +10,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 import { normalizeFsPath } from "../../../shared/route-path.js";
-import { formatDailyNoteDate } from "../../daily-notes.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import { resolveWikiLink } from "../../resolve-wikilink.js";
 import type {
@@ -284,10 +284,7 @@ function convertValue(
 		const date = dateFromYaml(raw);
 		// A text property keeps the date as it is written.
 		if (type !== "text") return date;
-		return formatDailyNoteDate(
-			new Date(date.ms),
-			date.hasTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD",
-		);
+		return formatMomentDate(new Date(date.ms), date.hasTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD");
 	}
 	if (Array.isArray(raw)) return raw.map((item) => convertValue(item, undefined, link));
 	if (typeof raw === "object") {

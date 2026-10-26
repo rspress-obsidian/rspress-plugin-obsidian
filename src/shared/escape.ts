@@ -1,10 +1,12 @@
 /**
- * HTML escaping shared by the build-time remark pipeline, the Dataview
- * renderers and the browser canvas renderer.
+ * Escaping shared by the build-time remark pipeline, the Dataview renderers,
+ * the reproduced plugins and the browser canvas renderer: HTML text and
+ * attributes, regular-expression literals, and markdown link destinations.
  *
- * Exactly two variants: text sinks escape `& < >`, attribute sinks additionally
- * escape `"`. Every attribute this package emits is double-quoted, so `'` needs
- * no escape — add a third variant only with a call site that proves it.
+ * HTML has exactly two variants: text sinks escape `& < >`, attribute sinks
+ * additionally escape `"`. Every attribute this package emits is
+ * double-quoted, so `'` needs no escape — add a third variant only with a call
+ * site that proves it.
  */
 // One pass, not three: `escapeHtmlAttribute` calls this for every href and
 // the Dataview renderers for every cell, and each `.replace` allocated a full
@@ -18,6 +20,32 @@ export function escapeHtmlText(value: string): string {
 
 export function escapeHtmlAttribute(value: string): string {
 	return escapeHtmlText(value).replace(/"/g, "&quot;");
+}
+
+// `-` as `\x2d`, not `\-`: under the `u` and `v` flags `\-` is a SyntaxError
+// outside a character class, while `\x2d` is the literal `-` in and out of one,
+// in every mode. `/` is escaped so the text can also sit in a regex literal.
+const REGEXP_SYNTAX = /[\\^$.*+?()[\]{}|/-]/g;
+
+/**
+ * `text` as a literal inside a regular expression: alone, in a `(?:…|…)`
+ * alternation or inside a character class, with or without the `u` flag.
+ */
+export function escapeRegExp(text: string): string {
+	return text.replace(REGEXP_SYNTAX, (character) =>
+		character === "-" ? "\\x2d" : `\\${character}`,
+	);
+}
+
+/**
+ * A URL as the destination of a markdown link, `[label](destination)`, that
+ * still names the same URL. `\`, `(` and `)` are backslash-escaped, since
+ * markdown unescapes them back to themselves; whitespace, `<`, `>` and `"`
+ * are percent-encoded, as a browser encodes them in a path anyway. Anything
+ * else (`'` included) stays as written: encoding it would change the URL.
+ */
+export function escapeMarkdownDestination(url: string): string {
+	return url.replace(/[\\()]/g, "\\$&").replace(/[\s<>"]/g, encodeURIComponent);
 }
 
 const SAFE_PROTOCOL = /^(?:https?:|mailto:|tel:)/i;

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { PageIndexInfo } from "@rspress/shared";
+import type { PageIndexInfo } from "@rspress/core";
 import type { Root, RootContent } from "mdast";
 import rehypeStringify from "rehype-stringify";
 import remarkGfm from "remark-gfm";
@@ -13,7 +13,7 @@ import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 import { VFile } from "vfile";
 import { buildContentIndex, getCachedContentIndex } from "../../src/markdown/content-index";
-import { formatDailyNoteDate, parseDailyNoteDate } from "../../src/markdown/daily-notes";
+import { parseDailyNoteDate } from "../../src/markdown/daily-notes";
 import { markdown as markdownPlugin } from "../../src/markdown/index";
 import { resolveMediaSrc } from "../../src/markdown/media";
 import { findWikilinkMatches, parseWikiLink } from "../../src/markdown/parse-wikilink";
@@ -26,6 +26,7 @@ import type {
 	RspressPluginMarkdownOptions,
 } from "../../src/markdown/types";
 import { AUDIO_EXTS, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../../src/shared/media-exts.js";
+import { formatMomentDate } from "../../src/shared/moment-format.js";
 import { toHastMathHandlers, toMarkdownMathHandlers } from "./math-element";
 
 const fixtureRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
@@ -645,7 +646,7 @@ describe("static Daily Notes", () => {
 
 		// A local calendar date, the time model Dataview's `file.day` uses.
 		expect(date).toEqual(new Date(2026, 7, 20));
-		expect(formatDailyNoteDate(date!, "dddd, MMMM D, YYYY")).toBe("Thursday, August 20, 2026");
+		expect(formatMomentDate(date!, "dddd, MMMM D, YYYY")).toBe("Thursday, August 20, 2026");
 	});
 
 	test("fills an empty daily note from the configured template", async () => {
@@ -3293,6 +3294,31 @@ describe("wikilink API", () => {
 		expect(getContentIndex(filePath)).not.toBe(first);
 	});
 
+	test("the dev compile after afterBuild indexes edits made since", async () => {
+		const docsRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-docs-"));
+		const vaultRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rspress-vault-"));
+		const notePath = path.join(vaultRoot, "Note.md");
+		try {
+			await fsp.writeFile(notePath, "# Note\n");
+			const plugin = markdownPlugin({ vaultRoot });
+			const config = { root: docsRoot };
+			await plugin.config?.(config, { addPlugin: () => {}, removePlugin: () => {} }, false);
+			await plugin.addPages?.(config, false);
+			// The dev compile finishes; the author then edits the note, which
+			// starts the next compile.
+			await plugin.afterBuild?.(config, false);
+			await fsp.writeFile(notePath, "# Note\n\n## Added after the build\n");
+
+			const { getContentIndex } = remarkPluginConfig(plugin);
+			const index = (await getContentIndex(notePath)) as ContentIndex;
+			const headings = index.byAbsolutePath.get(notePath)?.headings.map((h) => h.rawText);
+			expect(headings).toContain("Added after the build");
+		} finally {
+			await fsp.rm(docsRoot, { recursive: true, force: true });
+			await fsp.rm(vaultRoot, { recursive: true, force: true });
+		}
+	});
+
 	test("blanks comments in the search index without shifting offsets", async () => {
 		const { markdown } = await import("../../src/markdown/index");
 		const plugin = markdown();
@@ -3763,6 +3789,7 @@ describe("external vault publishing", () => {
 				enableCaseInsensitiveLookup: true,
 				siteBase: "/",
 				embedMedia: true,
+				fileChecks: new Map(),
 			});
 			expect(media).toMatchObject({ url: "/vault/media/pic.png", found: true });
 		} finally {

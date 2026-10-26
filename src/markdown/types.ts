@@ -2,6 +2,7 @@ import type { Root as MDASTRoot } from "mdast";
 import type { Plugin } from "unified";
 import type { MathEngine } from "../math.js";
 import type { MermaidSecurityLevel } from "../mermaid/classes.js";
+import type { CanvasBoards } from "../shared/canvas-routes.js";
 import type { PublishedFileRoute } from "../shared/file-routes.js";
 import type { BasesOptions } from "./obsidian-plugins/bases/options.js";
 import type { ExcalidrawOptions } from "./obsidian-plugins/excalidraw/options.js";
@@ -224,9 +225,9 @@ export interface RspressPluginMarkdownOptions {
 	 * strict build refuses, so they match Obsidian's more permissive rendering
 	 * at the cost of trusting every diagram in the vault.
 	 *
-	 * Applies to note diagrams; canvas text nodes are emitted by the canvas
-	 * feature and keep the strict default unless a note on the page has set the
-	 * level. Default: `"strict"`.
+	 * Applies to note diagrams, each rendered at its own placeholder's level.
+	 * Diagrams in canvas boards, including a board embedded in a note, always
+	 * render `"strict"`. Default: `"strict"`.
 	 */
 	mermaidSecurityLevel?: MermaidSecurityLevel;
 	/**
@@ -502,8 +503,9 @@ export interface ContentIndex {
 	/**
 	 * The other trees published on the same site (the docs root for a vault, the
 	 * vault for the docs root), consulted by `resolveWikiLink` when this index
-	 * has no match and merged into the backlinks panel. Set by the plugin per
-	 * build generation.
+	 * has no match and merged into the backlinks panel. Set only on the views
+	 * `linkContentIndexes` derives for a site; an index from
+	 * `getCachedContentIndex` is shared by every reader and never carries it.
 	 */
 	linkedIndexes?: ContentIndex[];
 }
@@ -589,7 +591,14 @@ export interface ResolveContext {
 	fallbackIndexes?: ContentIndex[];
 	options?: Partial<
 		Pick<NormalizedPluginOptions, "enableFuzzyMatching" | "enableCaseInsensitiveLookup">
-	>;
+	> & {
+		/**
+		 * The boards the site's canvas feature published: a link to one resolves
+		 * to its viewer route instead of the raw `.canvas` attachment. Unset when
+		 * the site has no canvas feature.
+		 */
+		canvasBoards?: CanvasBoards;
+	};
 }
 
 /**
@@ -625,4 +634,11 @@ export interface RemarkWikiLinkPluginOptions {
 	 * its head. Unset, the pass links nothing, and the site styles KaTeX itself.
 	 */
 	getKatexStylesheetHref?: () => string;
+	/**
+	 * The boards the site's canvas feature published, read once per file; the
+	 * promise settles once that feature's scan has listed them. Set by the
+	 * `markdown()` plugin from the canvas plugin listed in the same site;
+	 * unset, a board link resolves as a plain attachment.
+	 */
+	getCanvasBoards?: () => Promise<CanvasBoards> | undefined;
 }

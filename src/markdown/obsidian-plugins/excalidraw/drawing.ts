@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isMermaidInstalled } from "../../../mermaid/install.js";
-import { sanitizeUrl } from "../../../shared/escape.js";
+import { escapeRegExp, sanitizeUrl } from "../../../shared/escape.js";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
 import { extensionOf, IMAGE_EXTS, PDF_EXT } from "../../../shared/media-exts.js";
 import { withSiteBase } from "../../media.js";
@@ -220,7 +220,7 @@ function noteSection(content: string, subpath: WikiSubpath | undefined): string 
 	if (!subpath) return body.trim();
 	const lines = body.split("\n");
 	if (subpath.kind === "block") {
-		const marker = new RegExp(`\\s\\^${subpath.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`);
+		const marker = new RegExp(`\\s\\^${escapeRegExp(subpath.value)}\\s*$`);
 		const index = lines.findIndex((line) => marker.test(line));
 		if (index === -1) return undefined;
 		let start = index;

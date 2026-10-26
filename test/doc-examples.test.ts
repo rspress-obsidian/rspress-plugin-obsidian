@@ -22,9 +22,9 @@ const DOC_DIRS = ["docs"];
 const DOC_FILES = ["README.md"];
 const FACTORIES = ["markdown", "canvas", "graphview", "pluginObsidian"];
 
-/** Every value and type the umbrella entry exports, read from its own source. */
-function publicSurface(): Set<string> {
-	const source = readFileSync(path.join(ROOT, "src", "index.ts"), "utf-8");
+/** Every value and type an entry exports, read from its own source. */
+function publicSurface(entryFile: string): Set<string> {
+	const source = readFileSync(path.join(ROOT, entryFile), "utf-8");
 	const names = new Set<string>();
 	// Two forms reach this file: `export { a, type B } from "…"` /
 	// `export type { … }`, and a direct declaration such as
@@ -40,10 +40,12 @@ function publicSurface(): Set<string> {
 		/export\s+(?:type\s+)?\{([^}]*)\}(?:\s*from\s*["'][^"']*["'])?/g,
 	)) {
 		for (const part of (match[1] ?? "").split(",")) {
+			// `export { a as b }` exports `b`: the name after `as` is the public one.
 			const name = part
 				.trim()
 				.replace(/^type\s+/, "")
-				.split(/\s+as\s+/)[0]
+				.split(/\s+as\s+/)
+				.at(-1)
 				?.trim();
 			if (name) names.add(name);
 		}
@@ -93,7 +95,15 @@ function fences(): Array<{ file: string; line: number; code: string }> {
 	return out;
 }
 
-const SURFACE = publicSurface();
+/** What each package entry exports, by the subpath a doc imports it from. */
+const SURFACES = new Map(
+	Object.entries({
+		"": "src/index.ts",
+		"/markdown": "src/markdown/index.ts",
+		"/canvas": "src/canvas/index.ts",
+		"/graph": "src/graph/index.ts",
+	}).map(([subpath, entryFile]) => [subpath, publicSurface(entryFile)]),
+);
 const ALL_FENCES = fences();
 
 describe("documented examples", () => {
@@ -101,23 +111,30 @@ describe("documented examples", () => {
 		expect(ALL_FENCES.length).toBeGreaterThan(40);
 	});
 
-	test("every symbol imported from the package is actually exported", () => {
+	test("every symbol imported from the package is exported by the entry it names", () => {
 		const bad: string[] = [];
 		for (const fence of ALL_FENCES) {
 			const imports = fence.code.matchAll(
-				/import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']rspress-plugin-obsidian(?:\/[^"']*)?["']/g,
+				/import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']rspress-plugin-obsidian((?:\/[^"']*)?)["']/g,
 			);
 			for (const group of imports) {
+				const subpath = group[2] ?? "";
+				const surface = SURFACES.get(subpath);
+				if (!surface) {
+					bad.push(`${fence.file}:${fence.line} imports names from \`${subpath}\`, not an entry`);
+					continue;
+				}
 				for (const part of (group[1] ?? "").split(",")) {
 					const name = part
 						.trim()
 						.replace(/^type\s+/, "")
 						.split(/\s+as\s+/)[0]
 						?.trim();
-					// A subpath import (`…/markdown`) is about files, not symbols.
-					if (!name || name.startsWith("/") || name.startsWith(".")) continue;
-					if (!SURFACE.has(name)) {
-						bad.push(`${fence.file}:${fence.line} imports \`${name}\`, which is not exported`);
+					if (!name) continue;
+					if (!surface.has(name)) {
+						bad.push(
+							`${fence.file}:${fence.line} imports \`${name}\` from \`rspress-plugin-obsidian${subpath}\`, which does not export it`,
+						);
 					}
 				}
 			}
@@ -147,10 +164,12 @@ describe("documented examples", () => {
 				/import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']rspress-plugin-obsidian(?:\/[^"']*)?["']/g,
 			)) {
 				for (const part of (group[1] ?? "").split(",")) {
+					// The name the fence can call is the local binding, after `as`.
 					const name = part
 						.trim()
 						.replace(/^type\s+/, "")
-						.split(/\s+as\s+/)[0]
+						.split(/\s+as\s+/)
+						.at(-1)
 						?.trim();
 					if (name) imported.add(name);
 				}

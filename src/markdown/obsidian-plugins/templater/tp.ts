@@ -10,7 +10,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
-import { formatDailyNoteDate } from "../../daily-notes.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 import { expandCommands } from "./engine.js";
 import { invoke, type ProgramRuntime, type RunBudget } from "./interpreter.js";
 import { addDuration, momentFunction, parseDateText, parseMomentDuration } from "./moment.js";
@@ -167,7 +167,7 @@ function referenceDate(host: TemplaterHost, reference: unknown, referenceFormat:
 function dateModule(host: TemplaterHost): HostObject {
 	const relativeDay = (days: number) =>
 		new HostFunction("tp.date", ([format]) =>
-			formatDailyNoteDate(
+			formatMomentDate(
 				addDuration(host.now, { months: 0, days, milliseconds: 0 }),
 				formatOf(format, "YYYY-MM-DD"),
 			),
@@ -181,7 +181,7 @@ function dateModule(host: TemplaterHost): HostObject {
 					: typeof offset === "number"
 						? { months: 0, days: offset, milliseconds: 0 }
 						: undefined;
-			return formatDailyNoteDate(
+			return formatMomentDate(
 				duration ? addDuration(date, duration) : date,
 				formatOf(format, "YYYY-MM-DD"),
 			);
@@ -193,7 +193,7 @@ function dateModule(host: TemplaterHost): HostObject {
 			([format, weekday, reference, referenceFormat]) => {
 				const date = referenceDate(host, reference, referenceFormat);
 				date.setDate(date.getDate() + Number(weekday ?? 0) - date.getDay());
-				return formatDailyNoteDate(date, formatOf(format, "YYYY-MM-DD"));
+				return formatMomentDate(date, formatOf(format, "YYYY-MM-DD"));
 			},
 		),
 	});
@@ -321,10 +321,10 @@ function fileModule(session: Session): HostObject {
 		content: host.content,
 		tags: [...host.tags],
 		creation_date: new HostFunction("tp.file.creation_date", ([format]) =>
-			formatDailyNoteDate(new Date(target.stat.ctime), formatOf(format, "YYYY-MM-DD HH:mm")),
+			formatMomentDate(new Date(target.stat.ctime), formatOf(format, "YYYY-MM-DD HH:mm")),
 		),
 		last_modified_date: new HostFunction("tp.file.last_modified_date", ([format]) =>
-			formatDailyNoteDate(new Date(target.stat.mtime), formatOf(format, "YYYY-MM-DD HH:mm")),
+			formatMomentDate(new Date(target.stat.mtime), formatOf(format, "YYYY-MM-DD HH:mm")),
 		),
 		folder: new HostFunction("tp.file.folder", ([absolute]) => {
 			const folder = target.folderPath;

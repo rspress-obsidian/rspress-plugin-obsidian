@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
 import { buildContentIndex, getCachedContentIndex } from "./content-index.ts";
+import { getMentions } from "./mentions.ts";
 
 /** Run `body` against a throwaway vault built from `files`. */
 async function withVault(
@@ -662,6 +663,55 @@ describe("rebuilds", () => {
 				writeFileSync(note, "---\ntitle: Fresh\n---\n");
 				utimesSync(note, stamp, stamp);
 				expect(await titleOf()).toBe("Fresh");
+			},
+		);
+	});
+
+	test("concurrent callers share one load and one index", async () => {
+		await withVault({ "Note.md": "# Note" }, async (root) => {
+			// A fresh option set, so no earlier test has cached this entry.
+			const options = { excludeFolders: ["concurrent"] };
+			const [first, second] = await Promise.all([
+				getCachedContentIndex(root, options),
+				getCachedContentIndex(root, options),
+			]);
+			expect(second).toBe(first);
+			expect(first.byFilePathKey.get("Note")).toBeDefined();
+		});
+	});
+
+	test("a failed load is not remembered", async () => {
+		const root = path.join(mkdtempSync(path.join(os.tmpdir(), "obsidian-missing-")), "vault");
+		try {
+			const attempts = await Promise.allSettled([
+				getCachedContentIndex(root),
+				getCachedContentIndex(root),
+			]);
+			expect(attempts.map((attempt) => attempt.status)).toEqual(["rejected", "rejected"]);
+
+			mkdirSync(root);
+			writeFileSync(path.join(root, "Note.md"), "# Note");
+			expect((await getCachedContentIndex(root)).byFilePathKey.get("Note")).toBeDefined();
+		} finally {
+			rmSync(path.dirname(root), { recursive: true, force: true });
+		}
+	});
+});
+
+describe("unlinked mentions", () => {
+	test("text a comment hides is not a mention", async () => {
+		await withVault(
+			{
+				"Widget Notes.md": "# Widget Notes\n",
+				"Shown.md": "Read Widget Notes first.\n",
+				"Html.md": "Plain.\n\n<!-- Widget Notes -->\n",
+				"Unclosed.md": "Plain.\n\n%%\nWidget Notes\n",
+			},
+			async (root) => {
+				// The cached builder is the one that keeps each page's mention text.
+				const index = await getCachedContentIndex(root, { unlinkedMentions: true });
+				const refs = [...getMentions(index).values()].flat();
+				expect(refs.map((ref) => ref.relativePath)).toEqual(["Shown.md"]);
 			},
 		);
 	});

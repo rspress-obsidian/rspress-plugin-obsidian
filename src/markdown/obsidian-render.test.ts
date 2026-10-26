@@ -218,6 +218,19 @@ describe("markdown images resolve like Obsidian attachments", () => {
 		);
 	});
 
+	test("links a PDF on another site instead of framing it, since the frame is unsandboxed", async () => {
+		const output = await html(
+			"![Report](https://evil.example/x.pdf#page=2) ![](//evil.example/y.pdf) ![](doc.pdf)",
+			{ enableMediaEmbeds: true },
+		);
+		expect(output).toContain('<a href="https://evil.example/x.pdf#page=2">Report</a>');
+		// A protocol-relative URL is refused outright, frame and link alike.
+		expect(output).not.toContain("//evil.example/y.pdf");
+		expect(output).not.toContain('src="https://evil.example');
+		// The vault's own PDF is still framed.
+		expect(output).toContain('<iframe class="obsidian-pdf-frame" src="/attachments/doc.pdf"');
+	});
+
 	test("exempts every relative image url from Rspress's dead-image gate", () => {
 		expect(isPluginOwnedImageUrl("img.png")).toBe(true);
 		expect(isPluginOwnedImageUrl("my%20image.png")).toBe(true);

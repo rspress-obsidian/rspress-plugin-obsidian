@@ -2,15 +2,15 @@
  * Render-cost and lifecycle contract of the renderer. Both heavy modules it calls —
  * markdown parsing and mermaid injection — are replaced with counting wrappers so a
  * test can assert *how often* the renderer does that work; the markdown wrapper still
- * delegates to the real implementation. It lives in its own file because
- * `mock.module` applies for the whole run: the other component tests keep exercising
- * the real modules unwrapped.
+ * delegates to the real implementation. Bun keeps a `mock.module` registration for
+ * the rest of the run, so every replaced module is handed its real exports back in
+ * `afterAll`: the other component tests must keep exercising the real modules.
  */
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { memo } from "react";
 import type { CanvasData, CanvasFileData } from "../types";
@@ -32,6 +32,7 @@ mock.module("../utils/markdown", () => ({
 }));
 
 const mermaid = { scans: 0, retained: 0, released: 0 };
+const mermaidModule = { ...(await import("../../mermaid/blocks")) };
 mock.module("../../mermaid/blocks", () => ({
 	renderMermaidBlocks: () => {
 		mermaid.scans += 1;
@@ -50,18 +51,31 @@ mock.module("../../mermaid/blocks", () => ({
 // component would also have done.
 const cardRenders: string[] = [];
 const edgeRenders: string[] = [];
+let toolbarRenders = 0;
 const nodeModule = { ...(await import("./CanvasNode")) };
 const edgeModule = { ...(await import("./CanvasEdge")) };
-const CountingCanvasNode = memo((props: Parameters<typeof nodeModule.CanvasNodeComponent>[0]) => {
+const toolbarModule = { ...(await import("./CanvasToolbar")) };
+const CountingCanvasNode = memo(function CountingCanvasNode(
+	props: Parameters<typeof nodeModule.CanvasNodeComponent>[0],
+) {
 	cardRenders.push(props.node.id);
 	return <nodeModule.CanvasNodeComponent {...props} />;
 });
-const CountingCanvasEdge = memo((props: Parameters<typeof edgeModule.CanvasEdge>[0]) => {
+const CountingCanvasEdge = memo(function CountingCanvasEdge(
+	props: Parameters<typeof edgeModule.CanvasEdge>[0],
+) {
 	edgeRenders.push(props.edge.id);
 	return <edgeModule.CanvasEdge {...props} />;
 });
 mock.module("./CanvasNode", () => ({ ...nodeModule, CanvasNodeComponent: CountingCanvasNode }));
 mock.module("./CanvasEdge", () => ({ ...edgeModule, CanvasEdge: CountingCanvasEdge }));
+const CountingCanvasToolbar = memo(function CountingCanvasToolbar(
+	props: Parameters<typeof toolbarModule.CanvasToolbar>[0],
+) {
+	toolbarRenders += 1;
+	return <toolbarModule.CanvasToolbar {...props} />;
+});
+mock.module("./CanvasToolbar", () => ({ ...toolbarModule, CanvasToolbar: CountingCanvasToolbar }));
 
 const { CanvasRenderer } = await import("./CanvasRenderer");
 const { CanvasNodeComponent } = nodeModule;
@@ -71,9 +85,18 @@ afterEach(() => {
 	parsed.length = 0;
 	cardRenders.length = 0;
 	edgeRenders.length = 0;
+	toolbarRenders = 0;
 	mermaid.scans = 0;
 	mermaid.retained = 0;
 	mermaid.released = 0;
+});
+
+afterAll(() => {
+	mock.module("../utils/markdown", () => markdown);
+	mock.module("../../mermaid/blocks", () => mermaidModule);
+	mock.module("./CanvasNode", () => nodeModule);
+	mock.module("./CanvasEdge", () => edgeModule);
+	mock.module("./CanvasToolbar", () => toolbarModule);
 });
 
 function board(): CanvasData {
@@ -137,6 +160,22 @@ test("a drag frame re-renders only the moving card and the edges touching it", (
 
 	expect(new Set(cardRenders)).toEqual(new Set(["a"]));
 	expect(new Set(edgeRenders)).toEqual(new Set(["ab"]));
+});
+
+test("a pan frame leaves the toolbar alone", () => {
+	const { container } = render(<CanvasRenderer data={board()} editable />);
+	const viewport = pick<HTMLElement>(container, ".canvas-viewport");
+	const world = pick<HTMLElement>(container, ".canvas-world");
+	fireEvent.pointerDown(viewport, { button: 0, clientX: 0, clientY: 0, pointerId: 4 });
+	fireEvent.pointerMove(viewport, { clientX: 30, clientY: 20, pointerId: 4 });
+	const before = world.style.transform;
+	toolbarRenders = 0;
+
+	fireEvent.pointerMove(viewport, { clientX: 60, clientY: 40, pointerId: 4 });
+	fireEvent.pointerMove(viewport, { clientX: 90, clientY: 60, pointerId: 4 });
+
+	expect(world.style.transform).not.toBe(before);
+	expect(toolbarRenders).toBe(0);
 });
 
 test("reuses a file card's markdown while its node, assets and notes are unchanged", () => {

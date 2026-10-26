@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatDailyNoteDate } from "../../daily-notes.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 import {
 	addDuration,
 	type DateValue,
@@ -21,7 +21,7 @@ function date(text: string): DateValue {
 }
 
 function show(value: DateValue): string {
-	return formatDailyNoteDate(new Date(value.ms), value.hasTime ? "YYYY-MM-DD HH:mm" : "YYYY-MM-DD");
+	return formatMomentDate(new Date(value.ms), value.hasTime ? "YYYY-MM-DD HH:mm" : "YYYY-MM-DD");
 }
 
 describe("date + duration", () => {

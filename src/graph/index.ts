@@ -2,7 +2,8 @@ import * as path from "node:path";
 import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
-import { getPublishedContent } from "../shared/published-content.js";
+import { findCanvasBoards } from "../shared/canvas-routes.js";
+import { findPublishedContent } from "../shared/published-content.js";
 import { buildGraphModules, type CollectedRoute, type GraphBuildState } from "./build/index.js";
 import { createGraphDevRefresher } from "./dev-refresh.js";
 import { forceGraphBuilderConfig } from "./install.js";
@@ -20,6 +21,8 @@ function findRuntimeFile(name: string): string {
 		path.join(runtimeDir, `${name}.tsx`),
 	);
 }
+
+export type { GraphViewColors, GraphViewGroup };
 
 export interface RspressPluginGraphViewOptions {
 	/** Panel starts expanded on first paint — except on screens narrower than
@@ -101,9 +104,11 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 			pageName: route.pageName,
 		}));
 
-	const build = (config: UserConfig) =>
+	const build = async (config: UserConfig) =>
 		buildGraphModules(collectRoutes(), state, {
 			docsRoot: path.resolve(config.root ?? "docs"),
+			published: findPublishedContent(config),
+			canvasBoards: await findCanvasBoards(config),
 			base: config.base ?? "/",
 			profile: shouldProfileBuild,
 			onUnresolvedLink: options.onUnresolvedLink,
@@ -144,7 +149,7 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 			const { modules } = await build(config);
 			if (isProd) return modules;
 
-			const published = getPublishedContent();
+			const published = findPublishedContent(config);
 			devRefresher.watch(
 				[path.resolve(config.root ?? "docs"), published?.vaultRoot].filter((root): root is string =>
 					Boolean(root),
@@ -168,5 +173,3 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 		],
 	};
 }
-
-export default graphview;

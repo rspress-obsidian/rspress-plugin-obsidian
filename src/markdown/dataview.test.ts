@@ -916,3 +916,20 @@ test("one local time model: the same note renders the same in any zone", async (
 	expect(outputs[1]).toBe(outputs[0]);
 	expect(outputs[2]).toBe(outputs[0]);
 });
+
+test("an ambiguous link resolves from each page's own folder, whichever page asks first", async () => {
+	const vault = await makeVault({
+		"a/Note.md": "where:: alpha\n",
+		"b/Note.md": "where:: beta\n",
+		"a/Query.md": "",
+		"b/Query.md": "",
+	});
+	try {
+		const where = (page: string) =>
+			renderDataviewInline("[[Note]].where", vault.page(page), vault.index).html;
+		expect(where("a/Query.md")).toContain(">alpha<");
+		expect(where("b/Query.md")).toContain(">beta<");
+	} finally {
+		rmSync(vault.root, { recursive: true, force: true });
+	}
+});

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { MERMAID_STRICT_SCOPE_ATTRIBUTE } from "../../mermaid/classes";
 import { viewportStorageKey } from "../hooks/usePanZoom";
 import type { CanvasData } from "../types";
 import { CanvasRenderer } from "./CanvasRenderer";
@@ -294,6 +295,15 @@ describe("CanvasRenderer read-only mode", () => {
 			"true",
 		);
 		expect(container.querySelector('[data-edge-id][role="button"]')).toBeNull();
+	});
+
+	test("scopes every card diagram to Mermaid's strict security level", () => {
+		const { container } = render(<CanvasRenderer data={oneNode()} />);
+		expect(
+			pick<HTMLElement>(container, ".canvas-container").hasAttribute(
+				MERMAID_STRICT_SCOPE_ATTRIBUTE,
+			),
+		).toBe(true);
 	});
 
 	test("exposes cards as named groups, not opaque buttons, so their content is readable", () => {

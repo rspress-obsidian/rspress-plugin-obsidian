@@ -1,4 +1,4 @@
-import { compileSafeRegex, UnsafeRegexError } from "../../safe-regex.js";
+import { compileSafeRegex, UnsafeRegexError } from "../../../shared/safe-regex.js";
 import { messageOf } from "./builtins.js";
 import type { Expr } from "./parser.js";
 import { FORBIDDEN_IDENTIFIERS, FORBIDDEN_PROPERTIES, TemplaterError } from "./values.js";

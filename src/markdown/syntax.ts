@@ -45,6 +45,7 @@ import type {
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { type Processor, unified } from "unified";
+import { isInlineMathContent } from "../shared/inline-syntax.js";
 import { parseWikiLink } from "./parse-wikilink.js";
 import { wikiLinkDisplayText } from "./utils.js";
 
@@ -409,7 +410,7 @@ function obsidianMathFromMarkdown(): FromMarkdownExtension {
 				const raw = this.sliceSerialize(token);
 				const display = raw.startsWith("$$");
 				const inner = raw.slice(display ? 2 : 1, display ? -2 : -1);
-				if (!display && (/^\s/.test(inner) || /\s$/.test(inner))) {
+				if (!display && !isInlineMathContent(inner)) {
 					node.type = "text";
 					node.value = raw;
 					delete node.data;

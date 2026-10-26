@@ -8,9 +8,10 @@ import type {
 	ParsedWikiLink,
 	ResolveContext,
 } from "../../markdown/types.js";
-import { type CanvasBoardRoute, findCanvasBoardByRoute } from "../../shared/canvas-routes.js";
+import { isPrivateVaultFile } from "../../markdown/vault-files.js";
+import type { CanvasBoardRoute, CanvasBoards } from "../../shared/canvas-routes.js";
 import { parseFrontmatter } from "../../shared/frontmatter.js";
-import { getPublishedContent } from "../../shared/published-content.js";
+import type { PublishedContentConfig } from "../../shared/published-content.js";
 import { normalizeFsPath } from "../../shared/route-path.js";
 import { extractCanvasLinks } from "./canvas-links.js";
 import type { CollectedRoute } from "./types.js";
@@ -76,8 +77,9 @@ export interface GraphDocumentPlan {
 export async function planGraphDocuments(
 	routes: CollectedRoute[],
 	fallbackDocsRoot: string,
+	published: PublishedContentConfig | undefined,
+	canvasBoards: CanvasBoards | undefined,
 ): Promise<GraphDocumentPlan> {
-	const published = getPublishedContent();
 	const docsRoot = published?.docsRoot ?? fallbackDocsRoot;
 	const docsIndex = await getCachedContentIndex(docsRoot, published?.docsIndexOptions ?? {});
 	const vaultRoot = published?.vaultRoot;
@@ -104,7 +106,7 @@ export async function planGraphDocuments(
 		}
 		// A board's route points at the temp page the canvas feature handed
 		// Rspress; its links live in the original `.canvas` file.
-		const board = findCanvasBoardByRoute(route.routePath);
+		const board = canvasBoards?.byRoute(route.routePath);
 		if (board) {
 			plans.push({ route, type: "board", board });
 			untracked.push(await fileStamp(board.absolutePath));
@@ -130,6 +132,7 @@ export async function planGraphDocuments(
 		resolveOptions: {
 			enableCaseInsensitiveLookup: published?.enableCaseInsensitiveLookup ?? true,
 			enableFuzzyMatching: published?.enableFuzzyMatching ?? false,
+			canvasBoards,
 		},
 		docsIndex,
 		vaultIndex,
@@ -210,7 +213,16 @@ export async function loadGraphDocuments(
 				} catch {
 					// A board removed mid-build keeps its node and loses its links.
 				}
-				const { outlinks, tags } = extractCanvasLinks(json);
+				// The canvas feature's rule (`isPrivateVaultFile`): a card naming a
+				// file of any kind that is on disk but not published adds no node.
+				const { outlinks, tags } = extractCanvasLinks(json, (file) =>
+					isPrivateVaultFile(
+						owner.index,
+						owner.root,
+						file,
+						(board) => plan.resolveOptions.canvasBoards?.bySource(board, true) !== undefined,
+					),
+				);
 				const boardPage = syntheticPage(board.absolutePath, relativePath, route.routePath);
 				return {
 					...base,

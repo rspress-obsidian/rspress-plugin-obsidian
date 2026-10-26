@@ -15,6 +15,7 @@ import type { Heading } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import { HIGHLIGHT_PATTERN, MATH_PATTERN } from "../shared/inline-syntax.js";
 import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
 import { wikiLinkDisplayText } from "./utils.js";
 
@@ -25,8 +26,6 @@ const MARKUP_CHARACTERS = /[[\]*_~`<>$=%\\&!{]/;
 /** Rspress's custom-id syntax (`## Title {#custom-id}`), read off the end. */
 const EXPLICIT_ID = /\s*\\?\{#([^{}]*)\}\s*$/;
 const COMMENT = /%%[\s\S]*?(?:%%|$)/g;
-const HIGHLIGHT = /==(?=\S)([\s\S]*?\S)==/g;
-const MATH = /(?<!\\)\$\$([\s\S]+?)\$\$|(?<![\\$])\$(?![\s$])((?:\\.|[^$\\\n])+?)(?<!\s)\$(?!\d)/g;
 const PLACEHOLDER = /\uE000(\d+)\uE001/g;
 
 export interface HeadingText {
@@ -97,10 +96,10 @@ export function parseHeadingText(markdown: string): HeadingText {
 		cursor = match.end;
 	}
 	source = withLinks + source.slice(cursor);
-	source = source.replace(MATH, (_match, display?: string, inline?: string) =>
+	source = source.replace(MATH_PATTERN, (_match, display?: string, inline?: string) =>
 		park((display ?? inline ?? "").trim()),
 	);
-	source = source.replace(HIGHLIGHT, "$1");
+	source = source.replace(HIGHLIGHT_PATTERN, "$1");
 
 	const tree = inlineParser.parse(source);
 	const text = collectText(tree).replace(PLACEHOLDER, (_match, index: string) => {

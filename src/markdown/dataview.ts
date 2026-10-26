@@ -4,12 +4,13 @@
  * blacksmithgu/obsidian-dataview's query engine (`query/engine.ts`) and page
  * model (`data-model/markdown.ts`).
  */
+
+import { MONTH_NAMES } from "../shared/date-math.js";
 import { escapeHtmlAttribute, escapeHtmlText, sanitizeUrl } from "../shared/escape.js";
 import { extensionOf, IMAGE_EXTS } from "../shared/media-exts.js";
 import { type DailyNoteConfig, parseDailyNoteDate } from "./daily-notes.js";
 import {
 	DqlCursor,
-	type EvalContext,
 	evaluate,
 	type Field,
 	parseExpression,
@@ -19,6 +20,7 @@ import {
 	startsExpression,
 } from "./dataview-expression.js";
 import { extractDataviewMetadata, frontmatterOf, linksInText } from "./dataview-metadata.js";
+import type { EvalContext } from "./dataview-operators.js";
 import { type RenderContext, renderMarkdownInline, renderValue } from "./dataview-render.js";
 import {
 	compareValues,
@@ -27,7 +29,6 @@ import {
 	DEFAULT_DATE_FORMATS,
 	daysInMonth,
 	isTruthy,
-	MONTH_NAMES,
 	startOfDay,
 	typeOf,
 } from "./dataview-values.js";
@@ -335,10 +336,13 @@ export function createDataviewEnvironment(
 ): DataviewEnvironment {
 	const lookups = lookupsFor(index);
 	const resolveOptions = settings.resolve ?? { enableCaseInsensitiveLookup: true };
-	// A target that is neither relative (`./x`) nor on this page (`#h`) resolves
-	// the same from every page, so those results are shared by every fence of
-	// the build; the rest are cached for this query only. The plugin relinks
-	// the docs and vault indexes each build generation, which drops the share.
+	// A target that is neither relative (`./x`) nor on this page (`#h`)
+	// resolves the same from every page of one folder — a name several files
+	// share picks the one in the asking page's folder — so those results are
+	// shared by every fence of the build, keyed by that folder; the rest are
+	// cached for this query only. The plugin links the docs and vault trees
+	// through views (`linkContentIndexes`) that are replaced whenever either
+	// tree is re-indexed, and a new link drops the share.
 	if (lookups.linkedIndexes !== index.linkedIndexes) {
 		lookups.resolutions.clear();
 		lookups.linkedIndexes = index.linkedIndexes;
@@ -350,6 +354,10 @@ export function createDataviewEnvironment(
 		lookups.resolutions.set(sharedKey, shared);
 	}
 	const local = new Map<string, ResolvedWikiLink>();
+	const folder = currentPage.relativePath.slice(
+		0,
+		Math.max(0, currentPage.relativePath.lastIndexOf("/")),
+	);
 
 	const resolve = (link: DataviewLink): ResolvedWikiLink => {
 		const exact = link.type === "file" ? lookups.byRelativePath.get(link.path) : undefined;
@@ -361,15 +369,17 @@ export function createDataviewEnvironment(
 			};
 		}
 		const inner = linkInner(link);
-		const cache = inner.startsWith(".") || inner.startsWith("#") ? local : shared;
-		const cached = cache.get(inner);
+		const isLocal = inner.startsWith(".") || inner.startsWith("#");
+		const cache = isLocal ? local : shared;
+		const key = isLocal ? inner : `${folder}\u0000${inner}`;
+		const cached = cache.get(key);
 		if (cached) return cached;
 		const resolved = resolveWikiLink(parseWikiLink(inner, `[[${inner}]]`), {
 			currentPage,
 			index,
 			options: resolveOptions,
 		});
-		cache.set(inner, resolved);
+		cache.set(key, resolved);
 		return resolved;
 	};
 

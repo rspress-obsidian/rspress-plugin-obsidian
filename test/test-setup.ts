@@ -3,9 +3,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import type { ReactNode } from "react";
 import { createContext, createElement } from "react";
 import { useInRouterContext, useLocation, useNavigate } from "react-router-dom";
-import { setCanvasRoutes } from "../src/shared/canvas-routes.js";
 import { clearPublishedFileRoutes } from "../src/shared/file-routes.js";
-import { setPublishedContent } from "../src/shared/published-content.js";
 import { findTestRoute, setTestRoutes } from "./rspress-routes.js";
 
 // A real origin so the no-router `usePathname` fallback has a pathname to
@@ -92,13 +90,11 @@ mock.module("@rspress/core/theme", () => ({
 	Callout,
 }));
 
-// The plugins hand each other build state through module-level registries
-// (what `markdown()` publishes, the boards `canvas()` routes). Every test file
-// shares one process, so a test that runs a plugin's hooks would otherwise leak
-// that state into whichever file Bun runs next.
+// The plugins hand each other the files a feature publishes as pages through
+// a module-level registry.
+// Every test file shares one process, so a test that runs a plugin's hooks
+// would otherwise leak that state into whichever file Bun runs next.
 beforeEach(() => {
-	setPublishedContent(undefined);
-	setCanvasRoutes([]);
 	clearPublishedFileRoutes();
 	setTestRoutes([]);
 });

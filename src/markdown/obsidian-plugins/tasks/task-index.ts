@@ -7,8 +7,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { getContentLineFlags } from "../../../shared/content-flags.js";
-import { blankCommentRanges, findCommentRanges } from "../../comments.js";
-import { parseMomentDate } from "../../daily-notes.js";
+import { parseMomentDate } from "../../../shared/moment-format.js";
+import { blankAllComments } from "../../comments.js";
 import type { ContentIndex, ContentPage } from "../../types.js";
 import { type Day, dayFromParts, dayOfLocalDate, isoDay } from "./dates.js";
 import type { FilenameDates, TaskStatus } from "./settings.js";
@@ -77,12 +77,12 @@ export function parseNoteTasks(
 ): Task[] {
 	const raw = source.split(/\r?\n/);
 	const fallback = filenameDate(file.path, settings.filenameDates);
-	// Comment-blanked lines decide where tasks are; the line as written is the
-	// task, so an inline `%%note%%` stays in its description (as in Tasks) and
-	// is hidden when the description renders.
-	const lines = source.includes("%%")
-		? blankCommentRanges(source, findCommentRanges(source)).split(/\r?\n/)
-		: raw;
+	// Comment-blanked lines decide where tasks are (a task inside `%%…%%` or
+	// `<!-- -->` is not on the page); the line as written is the task, so an
+	// inline `%%note%%` stays in its description (as in Tasks) and is hidden
+	// when the description renders.
+	const blanked = blankAllComments(source);
+	const lines = blanked === source ? raw : blanked.split(/\r?\n/);
 	const isContent = getContentLineFlags(raw);
 	const tasks: Task[] = [];
 	let heading: string | undefined;

@@ -6,6 +6,12 @@ import { MERMAID_BLOCK_CLASS } from "../../mermaid/classes.js";
 import { escapeHtmlAttribute, escapeHtmlText, sanitizeUrl } from "../../shared/escape.js";
 import { NOTE_MARKDOWN_EXTENSIONS } from "../../shared/extensions.js";
 import {
+	EMBED_SIZE_PATTERN,
+	highlightAt,
+	highlightStart,
+	mathAt,
+} from "../../shared/inline-syntax.js";
+import {
 	AUDIO_EXTS,
 	extensionOf,
 	IMAGE_EXTS,
@@ -56,18 +62,10 @@ export interface MarkdownTargets {
 // embed to a plain link.
 const NOTE_FILE_EXTENSION_RE = /\.[a-z0-9]{1,8}$/i;
 
-// Obsidian highlight: `==text==`, where a single `=` may appear inside the
-// span; a bare run like `====` is left alone. Mirrors `HIGHLIGHT_PATTERN` in
-// the Markdown plugin so a card and a note page agree on where a span ends.
-const HIGHLIGHT_RE = /^==([^=]+(?:=[^=]+)*)==/;
+// Highlights (`==…==`), inline math and embed sizes are read with the rules in
+// `shared/inline-syntax.ts`, the same ones a note page's heading text uses, so a
+// card and a page agree on where a span starts and ends.
 
-// Inline math: `$...$` with no adjacent whitespace inside the delimiters and no
-// digit straight after the closing one, so `$5 and $6` stays prose. Neither
-// form may hold a backtick: code spans are lexed after this extension, and a
-// `$` inside one must not pair with a `$` outside it.
-const INLINE_MATH_RE = /^\$(?!\s)([^$\n`]+?)(?<!\s)\$(?!\d)/;
-// Display math written inline: `$$...$$`.
-const DISPLAY_MATH_RE = /^\$\$([^`]+?)\$\$/;
 // Display math as its own block. The start finder uses the whole pattern, not
 // just `$$`, because cutting a paragraph at a `$$` that turns out not to open a
 // block would split it in two.
@@ -84,8 +82,8 @@ const CALLOUT_RE = /^ {0,3}> ?\[!([\w-]+)\]([+-]?)[ \t]*([^\n]*)/;
 const BLOCKQUOTE_RE = Lexer.rules.block.gfm.blockquote;
 
 // Obsidian renders sanitized HTML. Attribute-less tags from this list cannot
-// run script, so they render as written; every other tag, any tag carrying
-// attributes, and every comment is shown as text.
+// run script, so they render as written; every other tag and any tag carrying
+// attributes is shown as text. A comment is hidden, as on a note page.
 const ALLOWED_HTML_TAGS: Record<string, true> = {
 	u: true,
 	br: true,
@@ -118,7 +116,6 @@ const ALLOWED_HTML_TAGS: Record<string, true> = {
 };
 const HTML_PIECE_RE = /<!--[\s\S]*?(?:-->|$)|<(\/?)([a-zA-Z][a-zA-Z0-9]*)\s*(\/?)>/g;
 
-const SIZE_RE = /^(\d+)(?:x(\d+))?$/i;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 // The `(destination "title")` half of an inline link or image.
 const LINK_TAIL_RE =
@@ -377,7 +374,7 @@ function renderEmbed(token: WikilinkToken): string {
 	const subpath = subpathOf(parsed);
 	// Obsidian size syntax: `![[image.png|300]]` or `![[image.png|300x200]]`.
 	// A pipe value that is a bare dimension is a size, not an alias.
-	const size = parsed.alias?.match(SIZE_RE);
+	const size = parsed.alias?.match(EMBED_SIZE_PATTERN);
 	const alias = size ? undefined : parsed.alias;
 	const width = size ? Number(size[1]) : 0;
 	const height = size?.[2] ? Number(size[2]) : 0;
@@ -443,7 +440,7 @@ function plainText(tokens: Token[]): string {
 				const link = token as WikilinkToken;
 				const alias = link.parsed.alias;
 				text += link.embed
-					? alias && !SIZE_RE.test(alias)
+					? alias && !EMBED_SIZE_PATTERN.test(alias)
 						? alias
 						: link.target.trim()
 					: (alias ?? fileLabel(link));
@@ -485,8 +482,9 @@ function sanitizeRawHtml(html: string): string {
 		const start = match.index ?? 0;
 		const name = match[2]?.toLowerCase();
 		out += escapeHtmlText(html.slice(last, start));
-		out +=
-			name && Object.hasOwn(ALLOWED_HTML_TAGS, name)
+		out += match[0].startsWith("<!--")
+			? ""
+			: name && Object.hasOwn(ALLOWED_HTML_TAGS, name)
 				? `<${match[1]}${name}${match[3]}>`
 				: escapeHtmlText(match[0]);
 		last = start + match[0].length;
@@ -711,14 +709,13 @@ const md = new Marked({
 				return index < 0 ? undefined : index;
 			},
 			tokenizer(src) {
-				const display = DISPLAY_MATH_RE.exec(src);
-				const match = display ?? INLINE_MATH_RE.exec(src);
+				const match = mathAt(src);
 				if (!match) return undefined;
 				const token: MathToken = {
 					type: "math",
-					raw: match[0],
-					tex: (match[1] ?? "").trim(),
-					display: Boolean(display),
+					raw: match.raw,
+					tex: match.content.trim(),
+					display: match.display,
 				};
 				return token;
 			},
@@ -728,16 +725,22 @@ const md = new Marked({
 			name: "highlight",
 			level: "inline",
 			start: (src) => {
-				const index = src.indexOf("==");
+				const index = highlightStart(src);
 				return index < 0 ? undefined : index;
 			},
-			tokenizer(src) {
-				const match = HIGHLIGHT_RE.exec(src);
+			tokenizer(src, tokens) {
+				// `===` is never a marker, and the pattern cannot see the `=` that
+				// ended the previous token; an escaped `\=` does not count.
+				const previous = tokens.at(-1);
+				if (previous && previous.type !== "escape" && previous.raw.endsWith("=")) {
+					return undefined;
+				}
+				const match = highlightAt(src);
 				if (!match) return undefined;
 				return {
 					type: "highlight",
-					raw: match[0],
-					tokens: this.lexer.inlineTokens(match[1] ?? ""),
+					raw: match.raw,
+					tokens: this.lexer.inlineTokens(match.content),
 				};
 			},
 			renderer(token) {
@@ -787,7 +790,7 @@ const md = new Marked({
 			const hashAt = href.indexOf("#");
 			const file = hashAt === -1 ? href : href.slice(0, hashAt);
 			const extension = extensionOf(file.split("?")[0] ?? file);
-			const size = alt.match(SIZE_RE);
+			const size = alt.match(EMBED_SIZE_PATTERN);
 			if (AUDIO_EXTS.has(extension) || VIDEO_EXTS.has(extension) || extension === PDF_EXT) {
 				// The build maps the href as written; a caller with no links map
 				// supplies assets by file path, without the `#…`.

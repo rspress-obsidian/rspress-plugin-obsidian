@@ -16,7 +16,7 @@ import {
 	type DataviewEnvironment,
 	type DataviewSettings,
 } from "./dataview.js";
-import { callDataviewFunction } from "./dataview-expression.js";
+import { callDataviewFunction } from "./dataview-functions.js";
 import { callDv } from "./dataview-js-api.js";
 import { tokenize } from "./dataview-js-lexer.js";
 import {

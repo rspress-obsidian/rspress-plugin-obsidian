@@ -38,9 +38,13 @@ export type CanvasFileKind =
 	| "pdf"
 	| "canvas"
 	| "file"
-	/** The path is outside the vault, unreadable, or does not exist. */
+	/** The path does not exist, or the file could not be read or copied. */
 	| "missing"
-	/** A note with `publish: false`: its content is never shipped. */
+	/**
+	 * The file exists but is not published (`publish: false`, a dot, `_` or
+	 * excluded folder, outside the vault): its content, path and subpath are
+	 * never shipped, and the card says it is unavailable under a stand-in name.
+	 */
 	| "private";
 
 /**
@@ -159,7 +163,9 @@ export interface CanvasPluginOptions {
 	 * Glob patterns to ignore when scanning, relative to `vaultRoot`. Appended
 	 * to the built-ins that always apply — `**\/node_modules\/**`,
 	 * `**\/dist\/**`, `**\/.git\/**`, `**\/doc_build\/**`, `**\/coverage\/**` —
-	 * so they add to that list rather than replace it.
+	 * so they add to that list rather than replace it. Boards in dot folders
+	 * and `_`-prefixed folders are never published, and neither are boards in
+	 * the folders the markdown plugin keeps out of the same root.
 	 */
 	exclude?: string[];
 	/**
@@ -182,9 +188,12 @@ export interface CanvasPluginOptions {
 	 * @default "Canvas editor" */
 	editorTitle?: string;
 	/**
-	 * Sandbox attributes for link-node website previews. PDF cards are never
-	 * sandboxed: Chromium's PDF viewer refuses to run in a sandboxed frame.
-	 * @default "allow-scripts allow-same-origin allow-popups"
+	 * Sandbox attributes for link-node website previews. The default leaves out
+	 * `allow-same-origin`: with both it and `allow-scripts`, a framed page on the
+	 * site's own origin could remove its sandbox. Add it only for previews that
+	 * need their own cookies or storage, from origins you trust. PDF cards are
+	 * never sandboxed: Chromium's PDF viewer refuses to run in a sandboxed frame.
+	 * @default "allow-scripts allow-popups"
 	 */
 	iframeSandbox?: string;
 	/**

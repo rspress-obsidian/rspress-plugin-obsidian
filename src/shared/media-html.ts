@@ -1,4 +1,4 @@
-import { escapeHtmlAttribute } from "../shared/escape.js";
+import { escapeHtmlAttribute, escapeHtmlText } from "../shared/escape.js";
 
 /**
  * The one PDF embed markup, shared by the Markdown pipeline and the canvas
@@ -48,16 +48,51 @@ function splitExtension(name: string): { stem: string; extension: string } {
 	return { stem: name.slice(0, dot), extension: name.slice(dot) };
 }
 
+// An origin no real URL is written against: a URL that resolves under it was
+// relative or root-relative, i.e. it loads from whatever site shows the page.
+const SAME_SITE_PROBE = "https://same-site.invalid/";
+
+// What a browser drops from an `src` before parsing it: leading and trailing
+// C0 controls and spaces, and every tab and newline anywhere in it.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the browser strips control characters, so this must too
+const URL_TRIM = /^[\u0000-\u0020]+|[\u0000-\u0020]+$/g;
+const URL_TAB_OR_NEWLINE = /[\t\n\r]/g;
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * Whether `url` loads from the page's own site: relative or root-relative,
+ * with no scheme and no host. Parsed the way a browser parses an `src`, so
+ * `//host/x`, `/\host/x` and `\\host\x`, which a browser reads as another
+ * host, are not same-site. Any scheme is refused before parsing: a URL like
+ * `https:host/x` is relative to an `https:` page but names `https://host/x`
+ * from an `http:` one, so whether it stays on the site depends on the page.
+ */
+export function isSameSiteUrl(url: string): boolean {
+	if (URL_SCHEME.test(url.replace(URL_TRIM, "").replace(URL_TAB_OR_NEWLINE, ""))) return false;
+	try {
+		return new URL(url, SAME_SITE_PROBE).origin === new URL(SAME_SITE_PROBE).origin;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * A PDF as a captioned frame, or — when `src` is on another site — a plain
+ * link that opens it. The frame cannot be sandboxed (see below), so it only
+ * ever loads a file the site itself serves.
+ */
 export function pdfEmbedHtml({ src, target, page, height, style }: PdfEmbedOptions): string {
 	const name = fileNameOf(target);
 	const { stem, extension } = splitExtension(name);
 	const label = `${stem}${extension}`;
 	const srcAttr = escapeHtmlAttribute(src);
+	if (!isSameSiteUrl(src)) {
+		return `<a class="obsidian-pdf-link" href="${srcAttr}" target="_blank" rel="noopener noreferrer">${escapeHtmlText(label)}</a>`;
+	}
 	const heightPx = height ?? 600;
 	const frameStyle = style
 		? ` style="${escapeHtmlAttribute(style)}"`
 		: ` width="100%" height="${heightPx}px"`;
-
 	return [
 		'<figure class="obsidian-pdf">',
 		'<figcaption class="obsidian-pdf-bar">',
@@ -78,7 +113,8 @@ export function pdfEmbedHtml({ src, target, page, height, style }: PdfEmbedOptio
 		// Deliberately not sandboxed: Chromium's PDF viewer needs scripts and
 		// renders a broken-document icon inside a sandboxed frame (verified in a
 		// browser), so a sandbox here would break the embed rather than harden it.
-		// The file is served from the site's own origin.
+		// That is safe only because the file is the site's own: a PDF on another
+		// site never reaches this frame (see `isSameSiteUrl` above).
 		`<iframe class="obsidian-pdf-frame" src="${srcAttr}" title="${escapeHtmlAttribute(label)}"`,
 		`${frameStyle} frameborder="0" loading="lazy"></iframe>`,
 		"</figure>",

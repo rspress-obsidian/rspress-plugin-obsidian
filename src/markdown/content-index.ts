@@ -71,6 +71,10 @@ interface MarkdownFileEntry {
  *  order — on access we delete-then-set to move the entry to the end, and
  *  evict the first entry when over capacity. */
 const contentIndexCache = new Map<string, CacheEntry>();
+/** Loads still running, by cache key. On a cold build the markdown, graph and
+ *  canvas plugins ask for the same index at once; without this each would scan
+ *  and parse the whole tree and hand back its own index object. */
+const pendingIndexes = new Map<string, Promise<ContentIndex>>();
 /** Options controlling route and asset URLs for an indexed root. */
 export interface ContentIndexOptions {
 	/**
@@ -167,9 +171,10 @@ export async function buildContentIndex(
 
 /**
  * Like {@link buildContentIndex} but memoized on a per-root basis. The cache
- * is invalidated whenever any routable file changes.
+ * is invalidated whenever any routable file changes. Concurrent callers share
+ * one load and get the same index; a failed load is not remembered.
  */
-export async function getCachedContentIndex(
+export function getCachedContentIndex(
 	rootDir: string,
 	options: ContentIndexOptions = {},
 ): Promise<ContentIndex> {
@@ -179,6 +184,20 @@ export async function getCachedContentIndex(
 	// Dataview metadata or the site's locales cannot answer a request that
 	// needs them.
 	const cacheKey = `${absoluteRoot}|${JSON.stringify(normalized)}`;
+	const pending = pendingIndexes.get(cacheKey);
+	if (pending) return pending;
+	const loading = loadCachedContentIndex(absoluteRoot, normalized, cacheKey).finally(() => {
+		pendingIndexes.delete(cacheKey);
+	});
+	pendingIndexes.set(cacheKey, loading);
+	return loading;
+}
+
+async function loadCachedContentIndex(
+	absoluteRoot: string,
+	normalized: NormalizedIndexOptions,
+	cacheKey: string,
+): Promise<ContentIndex> {
 	const files = await scanVaultFiles(absoluteRoot, normalized.excludeFolders);
 	const signature = files
 		.map((file) => `${file.relativePath}:${file.mtimeMs}:${file.size}`)
@@ -425,7 +444,12 @@ async function scanVaultFiles(
 	return results;
 }
 
-function isRoutableRelativePath(relativePath: string): boolean {
+/**
+ * Whether a root-relative path may be published: no `_`-prefixed segment
+ * (`__` is allowed). The index skips these files, and the canvas feature skips
+ * boards under them by the same rule.
+ */
+export function isRoutableRelativePath(relativePath: string): boolean {
 	return relativePath.split("/").every((segment) => !/^_[^_]/.test(segment));
 }
 
@@ -525,8 +549,6 @@ async function buildContentPage(
 
 	return page;
 }
-
-export { getContentLineFlags } from "../shared/content-flags.js";
 
 /**
  * The page-link targets Dataview's `file.outlinks` and the legacy backlinks

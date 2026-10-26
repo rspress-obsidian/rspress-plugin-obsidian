@@ -1,24 +1,40 @@
-import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
 import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
-import { buildContentIndex, getCachedContentIndex } from "../markdown/content-index.js";
+import { removeAllComments } from "../markdown/comments.js";
+import {
+	buildContentIndex,
+	getCachedContentIndex,
+	isRoutableRelativePath,
+} from "../markdown/content-index.js";
+import { linkContentIndexes } from "../markdown/linked-indexes.js";
 import { parseWikiLink } from "../markdown/parse-wikilink.js";
 import { resolveWikiLink } from "../markdown/resolve-wikilink.js";
 import type { ContentAsset, ContentIndex, ContentPage, ResolveContext } from "../markdown/types.js";
+import {
+	type DirectoryListings,
+	findAssetByPath,
+	findPageByPath,
+	isPrivateVaultFile,
+} from "../markdown/vault-files.js";
 import { mermaidBuilderConfig } from "../mermaid/install.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
-import type { CanvasBoardRoute } from "../shared/canvas-routes.js";
-import { findCanvasBoard, setCanvasRoutes } from "../shared/canvas-routes.js";
+import {
+	attachCanvasBoards,
+	type CanvasBoardRoute,
+	type CanvasBoards,
+	createCanvasBoards,
+} from "../shared/canvas-routes.js";
 import { NOTE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
 import { stripFrontmatter } from "../shared/frontmatter.js";
 import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
 import { normalizeFilePathKey } from "../shared/paths.js";
-import { getPublishedContent } from "../shared/published-content.js";
+import { findPublishedContent, type PublishedContentConfig } from "../shared/published-content.js";
 import { normalizeFsPath, normalizeRoutePrefix } from "../shared/route-path.js";
 import { extractBlockSection, extractHeadingSection } from "../shared/transclusion.js";
+import { DEFAULT_IFRAME_SANDBOX } from "./constants.js";
 import { parseCanvas } from "./parser.js";
 import type {
 	CanvasData,
@@ -129,6 +145,19 @@ interface PublishContext {
 	noteBodies: Map<string, Promise<string | null>>;
 	/** The resolver reports an attachment by its URL; this maps it back. */
 	assetsByUrl: Map<string, ContentAsset>;
+	/** Vault directories read this build by the private-file check. */
+	listings: DirectoryListings;
+}
+
+/** Whether a path a board names is on disk but unpublished (see {@link isPrivateVaultFile}). */
+function isPrivate(file: string, context: PublishContext): boolean {
+	return isPrivateVaultFile(
+		context.index,
+		context.vaultRoot,
+		file,
+		(board) => context.resolveOptions?.canvasBoards?.bySource(board, true) !== undefined,
+		context.listings,
+	);
 }
 
 /**
@@ -159,11 +188,19 @@ function publishAsset(asset: ContentAsset, context: PublishContext): Promise<boo
 	return pending;
 }
 
+/**
+ * A note's body as a card shows it: no frontmatter, no `%%comments%%` and no
+ * `<!-- comments -->`. The board JSON is public and the browser renders it, so
+ * anything the note page hides has to be gone before it is written. Comments
+ * are found in the whole file, as the page finds them, so a body that opens
+ * with a `---` rule is not mistaken for frontmatter.
+ */
 function readNoteBody(page: ContentPage, context: PublishContext): Promise<string | null> {
 	let pending = context.noteBodies.get(page.absolutePath);
 	if (!pending) {
 		pending = readFile(page.absolutePath, "utf-8").then(
-			(content) => stripFrontmatter(content),
+			(content) =>
+				removeAllComments(content, { from: content.length - stripFrontmatter(content).length }),
 			() => null,
 		);
 		context.noteBodies.set(page.absolutePath, pending);
@@ -301,38 +338,21 @@ async function resolveMarkdownLinks(
 	}
 }
 
-/** The page a file node's exact vault path names, case-insensitive like Obsidian. */
-function findPage(index: ContentIndex, file: string): ContentPage | undefined {
-	const key = normalizeFilePathKey(file);
-	return (
-		index.byFilePathKey.get(key) ??
-		(index.byFilePathKeyCI.get(key.toLowerCase())?.length === 1
-			? index.byFilePathKeyCI.get(key.toLowerCase())?.[0]
-			: undefined)
-	);
-}
-
-function findAsset(index: ContentIndex, file: string): ContentAsset | undefined {
-	const key = normalizeFilePathKey(file);
-	const insensitive = index.byAssetPathCI.get(key.toLowerCase());
-	return index.byAssetPath.get(key) ?? (insensitive?.length === 1 ? insensitive[0] : undefined);
-}
-
 async function resolveFileNode(
 	node: Extract<CanvasNode, { type: "file" }>,
 	context: PublishContext,
 	maps: BoardMaps,
 ): Promise<{ resolved: CanvasResolvedFile; note?: ContentPage }> {
+	// Not published: missing, or on disk but private (`publish: false`, a dot,
+	// `_`-prefixed or excluded folder, outside the vault). A private file's card
+	// says the file is unavailable and its name is never published.
+	const unavailable = (): { resolved: CanvasResolvedFile } => ({
+		resolved: { kind: isPrivate(node.file, context) ? "private" : "missing" },
+	});
 	const kind = fileKind(node.file);
 	if (kind === "note") {
-		const page = findPage(context.index, node.file);
-		if (!page) {
-			// Not in the index: missing, outside the vault, or `publish: false`.
-			// The two last look the same from here on purpose — a private note's
-			// existence is not announced either.
-			const onDisk = existsSync(path.join(context.vaultRoot, node.file));
-			return { resolved: { kind: onDisk ? "private" : "missing" } };
-		}
+		const page = findPageByPath(context.index, node.file);
+		if (!page) return unavailable();
 		const key = await registerNote(page, context, maps);
 		if (!key) return { resolved: { kind: "missing" } };
 		const route = `/${page.routePath.replace(/^\/+/, "")}`;
@@ -353,11 +373,11 @@ async function resolveFileNode(
 		return { resolved, note: page };
 	}
 	if (kind === "canvas") {
-		const board = findCanvasBoard(node.file, true);
-		return { resolved: board ? { kind, href: board.routePath } : { kind: "missing" } };
+		const board = context.resolveOptions?.canvasBoards?.bySource(node.file, true);
+		return board ? { resolved: { kind, href: board.routePath } } : unavailable();
 	}
-	const asset = findAsset(context.index, node.file);
-	if (!asset) return { resolved: { kind: "missing" } };
+	const asset = findAssetByPath(context.index, node.file);
+	if (!asset) return unavailable();
 	const key = await registerAsset(asset, context, maps);
 	return { resolved: key ? { kind, key } : { kind: "missing" } };
 }
@@ -389,6 +409,8 @@ async function enrichCanvas(
 
 	for (const node of canvasData.nodes) {
 		if (node.type === "text") {
+			// A card has no frontmatter: a leading `---` pair is two rules.
+			node.text = removeAllComments(node.text, { fragment: true });
 			boardText.push(node.text);
 		} else if (node.type === "file") {
 			const { resolved, note } = await resolveFileNode(node, context, maps);
@@ -396,17 +418,23 @@ async function enrichCanvas(
 			if (resolved.kind === "private" || resolved.kind === "missing") {
 				console.warn(`${LOG_PREFIX} Could not load vault file: ${node.file}`);
 			}
+			if (resolved.kind === "private") {
+				// The path names an unpublished file; the card only needs to know
+				// there is nothing to show.
+				node.file = "";
+				delete node.subpath;
+			}
 			if (note && resolved.key) {
 				const body = maps.notes[resolved.key];
 				if (body !== undefined)
 					sources.push({ scope: resolved.key, text: body, page: note, depth: 0 });
 			}
 		} else if (node.type === "group" && node.background) {
-			const asset = findAsset(context.index, node.background);
-			if (asset) {
-				const key = await registerAsset(asset, context, maps);
-				if (key) node.resolvedBackground = key;
-			}
+			const asset = findAssetByPath(context.index, node.background);
+			const key = asset ? await registerAsset(asset, context, maps) : undefined;
+			if (key) node.resolvedBackground = key;
+			// Like a file card's path: an unpublished file is not named.
+			else if (isPrivate(node.background, context)) delete node.background;
 		}
 	}
 	if (boardText.length > 0) {
@@ -489,32 +517,45 @@ async function mapWithLimit<T, R>(
 	return results;
 }
 
-/** The content index the Markdown plugin publishes this vault with, or our own. */
-async function loadVaultIndex(
+/**
+ * Which of the Markdown plugin's trees `vaultRoot` is — `"vault"` or
+ * `"docs"` — or `undefined` when that plugin does not publish this root.
+ */
+function sharedTree(
 	vaultRoot: string,
-	fileRoutePrefix: string | undefined,
-): Promise<{ index: ContentIndex; resolveOptions: ResolveContext["options"] }> {
-	const published = getPublishedContent();
+	published: PublishedContentConfig | undefined,
+): "vault" | "docs" | undefined {
+	if (!published) return undefined;
 	const root = normalizeFsPath(path.resolve(vaultRoot));
 	const sameRoot = (candidate: string | undefined) =>
 		candidate !== undefined && normalizeFsPath(path.resolve(candidate)) === root;
+	if (published.vaultIndexOptions && sameRoot(published.vaultRoot)) return "vault";
+	return sameRoot(published.docsRoot) ? "docs" : undefined;
+}
+
+/** The content index the site's Markdown plugin publishes this vault with, or our own. */
+async function loadVaultIndex(
+	vaultRoot: string,
+	fileRoutePrefix: string | undefined,
+	published: PublishedContentConfig | undefined,
+): Promise<{ index: ContentIndex; resolveOptions: ResolveContext["options"] }> {
 	const resolveOptions = {
 		enableCaseInsensitiveLookup: published?.enableCaseInsensitiveLookup ?? true,
 		enableFuzzyMatching: published?.enableFuzzyMatching ?? false,
 	};
-	// Sharing the Markdown plugin's index (and its options) means a card link
-	// resolves to exactly the route the note page was published at.
-	if (published && sameRoot(published.vaultRoot) && published.vaultIndexOptions) {
-		return {
-			index: await getCachedContentIndex(vaultRoot, published.vaultIndexOptions),
-			resolveOptions,
-		};
-	}
-	if (published && sameRoot(published.docsRoot)) {
-		return {
-			index: await getCachedContentIndex(vaultRoot, published.docsIndexOptions),
-			resolveOptions,
-		};
+	// Sharing the Markdown plugin's indexes (and its options) means a card link
+	// resolves to exactly the route the note page was published at, and — as on
+	// a note page — falls back to the site's other tree.
+	const tree = sharedTree(vaultRoot, published);
+	if (published && tree) {
+		const [docs, vault] = await Promise.all([
+			getCachedContentIndex(published.docsRoot, published.docsIndexOptions),
+			published.vaultRoot && published.vaultIndexOptions
+				? getCachedContentIndex(published.vaultRoot, published.vaultIndexOptions)
+				: undefined,
+		]);
+		const linked = linkContentIndexes(docs, vault);
+		return { index: (tree === "vault" ? linked.vault : undefined) ?? linked.docs, resolveOptions };
 	}
 	return {
 		index: await buildContentIndex(vaultRoot, {
@@ -522,6 +563,65 @@ async function loadVaultIndex(
 		}),
 		resolveOptions,
 	};
+}
+
+/**
+ * Every board to publish, with its route. A board sits under the same rules
+ * as a note: none in a `_`-prefixed folder (fast-glob already skips dot
+ * folders), and, when the Markdown plugin publishes this root, none in the
+ * folders it excludes — `include`/`exclude` narrow that further.
+ */
+async function scanBoards(
+	vaultRoot: string,
+	published: PublishedContentConfig | undefined,
+	options: { include: string[]; exclude: string[]; routePrefix: string },
+): Promise<CanvasBoardRoute[]> {
+	const tree = sharedTree(vaultRoot, published);
+	const excludeFolders = (
+		(tree === "vault"
+			? published?.vaultIndexOptions?.excludeFolders
+			: tree === "docs"
+				? published?.docsIndexOptions.excludeFolders
+				: undefined) ?? []
+	)
+		.map((folder) => normalizeFsPath(folder).replace(/^\/+|\/+$/g, ""))
+		.filter(Boolean);
+	// Runtime loading keeps fast-glob server-only in the published package.
+	const { default: glob } = await import("fast-glob");
+	const canvasFiles = await glob(options.include, {
+		ignore: options.exclude,
+		absolute: true,
+		cwd: vaultRoot,
+		// A symlinked canvas (or symlinked directory of them) inside the vault
+		// would otherwise be published from outside it. The content index
+		// covers the files a canvas references; this covers the canvases.
+		followSymbolicLinks: false,
+	});
+	canvasFiles.sort();
+
+	// Every route first, so a file node or card link naming another board
+	// resolves to it while the boards are enriched.
+	const routeOwners = new Map<string, string>();
+	const boards: CanvasBoardRoute[] = [];
+	for (const filePath of canvasFiles) {
+		const source = normalizeFsPath(path.relative(vaultRoot, filePath));
+		if (
+			!isRoutableRelativePath(source) ||
+			excludeFolders.some((folder) => source.startsWith(`${folder}/`))
+		) {
+			continue;
+		}
+		const routePath = resolveCanvasRoute(filePath, vaultRoot, options.routePrefix);
+		const previousOwner = routeOwners.get(routePath);
+		if (previousOwner) {
+			throw new Error(
+				`${LOG_PREFIX} Canvas route collision: ${routePath} is generated by both ${previousOwner} and ${filePath}`,
+			);
+		}
+		routeOwners.set(routePath, filePath);
+		boards.push({ absolutePath: filePath, routePath, source });
+	}
+	return boards;
 }
 
 /**
@@ -547,7 +647,8 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		linkPreview: options?.linkPreview ?? true,
 		editable: options?.editable || false,
 		editorTitle: options?.editorTitle || "Canvas editor",
-		iframeSandbox: options?.iframeSandbox || "allow-scripts allow-same-origin allow-popups",
+		// `??`: an empty string is a valid choice, the strictest sandbox.
+		iframeSandbox: options?.iframeSandbox ?? DEFAULT_IFRAME_SANDBOX,
 		// Defaults to true: the canvas stylesheet has always been injected, so the
 		// opt-out is additive and existing sites keep their styling.
 		enableDefaultStyles: options?.enableDefaultStyles ?? true,
@@ -599,10 +700,22 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		},
 	};
 
-	return {
+	// The boards the latest scan published, read back by the markdown and graph
+	// features of the same site (see `findCanvasBoards`). Pending while a scan
+	// runs, so a reader in a sibling's `addPages` waits for this build's boards.
+	let publishedBoards: Promise<CanvasBoards> = Promise.resolve(createCanvasBoards([]));
+	const plugin: RspressPlugin = {
 		name: "rspress-plugin-obsidian:canvas",
 		...(resolvedOptions.enableDefaultStyles && { globalStyles: stylePath }),
 		builderConfig,
+		// The markdown and graph features find this plugin in `config.plugins`,
+		// the only plugin list a hook sees. A plugin added with `utils.addPlugin`
+		// from another plugin's `config` hook runs without being listed there, so
+		// it lists itself — on a copy, leaving the caller's config untouched.
+		config(config) {
+			const listed = config.plugins ?? [];
+			return listed.includes(plugin) ? config : { ...config, plugins: [...listed, plugin] };
+		},
 		async addPages(config, _isProd) {
 			define.__RSPRESS_OBSIDIAN_CANVAS_BASE__ = JSON.stringify(normalizeSiteBase(config.base));
 			// The vault defaults to the Rspress content root — the same
@@ -611,18 +724,20 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			// the content, so an out-of-the-box `canvas()` found nothing.
 			const vaultRoot =
 				resolvedOptions.vaultRoot ?? path.resolve(process.cwd(), config.root ?? "docs");
-			// Runtime loading keeps fast-glob server-only in the published package.
-			const { default: glob } = await import("fast-glob");
-			const canvasFiles = await glob(resolvedOptions.include, {
-				ignore: resolvedOptions.exclude,
-				absolute: true,
-				cwd: vaultRoot,
-				// A symlinked canvas (or symlinked directory of them) inside the vault
-				// would otherwise be published from outside it. The content index
-				// covers the files a canvas references; this covers the canvases.
-				followSymbolicLinks: false,
-			});
-			canvasFiles.sort();
+			const published = findPublishedContent(config);
+			// Started before this hook's first `await`: Rspress calls every
+			// plugin's `addPages` in one go, so any sibling that asks for the
+			// boards from its own `addPages` already gets this scan's promise.
+			const scan = scanBoards(vaultRoot, published, resolvedOptions).then((boards) => ({
+				boards,
+				canvasBoards: createCanvasBoards(boards),
+			}));
+			// A failed scan fails this hook (and the build); readers see no boards.
+			publishedBoards = scan.then(
+				(scanned) => scanned.canvasBoards,
+				() => createCanvasBoards([]),
+			);
+			const { boards, canvasBoards } = await scan;
 
 			// Earlier versions wrote board JSON into the site's own `public/`; left
 			// there it would keep publishing deleted boards and, in dev, shadow
@@ -634,62 +749,48 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			await rm(resolvedOptions.outDir, { recursive: true, force: true });
 			await mkdir(resolvedOptions.outDir, { recursive: true });
 
-			// Every route first, so a file node or card link naming another board
-			// resolves through the registry while the boards are enriched.
-			const routeOwners = new Map<string, string>();
-			const boards: CanvasBoardRoute[] = canvasFiles.map((filePath) => {
-				const routePath = resolveCanvasRoute(filePath, vaultRoot, resolvedOptions.routePrefix);
-				const previousOwner = routeOwners.get(routePath);
-				if (previousOwner) {
-					throw new Error(
-						`${LOG_PREFIX} Canvas route collision: ${routePath} is generated by both ${previousOwner} and ${filePath}`,
-					);
-				}
-				routeOwners.set(routePath, filePath);
-				return {
-					absolutePath: filePath,
-					routePath,
-					source: normalizeFsPath(path.relative(vaultRoot, filePath)),
-				};
-			});
-			setCanvasRoutes(boards);
-
 			const { index, resolveOptions } = await loadVaultIndex(
 				vaultRoot,
 				resolvedOptions.fileRoutePrefix,
+				published,
 			);
 			const context: PublishContext = {
 				vaultRoot,
 				index,
-				resolveOptions,
+				resolveOptions: { ...resolveOptions, canvasBoards },
 				outDir: resolvedOptions.outDir,
 				copied: new Map(),
 				noteBodies: new Map(),
 				assetsByUrl: new Map(index.assets.map((asset) => [asset.urlPath, asset])),
+				listings: new Map(),
 			};
-
 			return mapWithLimit(boards, 8, async (board) => {
 				const canvasJson = await readFile(board.absolutePath, "utf-8");
-				let publishedJson = canvasJson;
+				// Only the enriched board is ever published: the source file holds
+				// what enrichment strips (comments, unpublished paths). A board it
+				// cannot read gets no JSON, and its page shows the viewer's load error.
+				let publishedJson: string | undefined;
 				try {
 					publishedJson = await enrichCanvas(canvasJson, board, context);
 				} catch (error) {
 					console.error(
-						`${LOG_PREFIX} Failed to process canvas file: ${board.absolutePath}`,
+						`${LOG_PREFIX} Failed to process canvas file, not publishing it: ${board.absolutePath}`,
 						error,
 					);
 				}
 
-				const outFilePath = path.join(
-					resolvedOptions.outDir,
-					CANVAS_JSON_DIR,
-					board.source.replace(/\.canvas$/i, ".json"),
-				);
-				try {
-					await mkdir(path.dirname(outFilePath), { recursive: true });
-					await writeFile(outFilePath, publishedJson, "utf-8");
-				} catch (writeErr) {
-					console.error(`${LOG_PREFIX} Failed to write board JSON: ${outFilePath}`, writeErr);
+				if (publishedJson !== undefined) {
+					const outFilePath = path.join(
+						resolvedOptions.outDir,
+						CANVAS_JSON_DIR,
+						board.source.replace(/\.canvas$/i, ".json"),
+					);
+					try {
+						await mkdir(path.dirname(outFilePath), { recursive: true });
+						await writeFile(outFilePath, publishedJson, "utf-8");
+					} catch (writeErr) {
+						console.error(`${LOG_PREFIX} Failed to write board JSON: ${outFilePath}`, writeErr);
+					}
 				}
 
 				// The page carries only the board's name: the viewer fetches the one
@@ -711,4 +812,5 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		},
 		markdown: { globalComponents: [componentPath, embedComponentPath] },
 	};
+	return attachCanvasBoards(plugin, () => publishedBoards);
 }

@@ -1,5 +1,5 @@
 /**
- * Obsidian comment (`%% … %%`) stripping.
+ * Comment stripping: Obsidian's `%% … %%` and HTML's `<!-- … -->`.
  *
  * A comment is not a single-line construct: Obsidian hides everything from an
  * opening `%%` to the next closing `%%`, paragraphs and headings included. The
@@ -8,17 +8,25 @@
  * with the source (escapes are resolved), and the content between the delimiters
  * lives in *sibling* nodes.
  *
- * Delimiters inside frontmatter, fenced code and inline code spans are not
- * delimiters. Code spans pair the CommonMark way across a paragraph: an opener
- * silences the text up to the next run of the *same* length, and a run that
- * never finds its match is literal text — it does not silence the rest of the
- * paragraph. An unclosed `%%` is left as written.
+ * Delimiters inside frontmatter, code blocks (fenced and indented) and inline
+ * code spans are not delimiters. Which text is code is read from the page's own
+ * CommonMark parse ({@link parseObsidianMarkdown}), not from line rules, so a
+ * `~~~` line inside a backtick fence, an escaped backtick, a code span that
+ * would cross a block boundary or a fence nested in a block quote reads here
+ * exactly as the page renders it.
+ *
+ * An unclosed `%%` follows Obsidian's Reading view: one that begins a line
+ * opens a block comment, and a block comment nobody closes hides the rest of
+ * the note; one written mid-line is literal text. An unclosed `<!--` hides the
+ * rest of the note, as it does in a browser.
  */
 
+import { createHash } from "node:crypto";
 import type { Root } from "mdast";
 import type { Parent } from "unist";
+import { frontmatterLength } from "../shared/content-flags.js";
 import { slugifyHeading, stripMarkdownFormatting } from "../shared/slug.js";
-import { getContentLineFlags } from "./content-index.js";
+import { parseObsidianMarkdown } from "./syntax.js";
 import { visit } from "./visit.js";
 
 const DELIMITER = "%%";
@@ -32,117 +40,165 @@ export interface CommentRange {
 	end: number;
 }
 
-/** A maximal run of backticks, in absolute source offsets. */
-interface BacktickRun {
-	start: number;
-	end: number;
-}
-
-/** Backtick runs on one line, in absolute source offsets (runs never cross a
- * line break, so each line can be scanned on its own). */
-function backtickRuns(line: string, lineStart: number): BacktickRun[] {
-	const runs: BacktickRun[] = [];
-	let index = 0;
-	while (index < line.length) {
-		if (line[index] !== "`") {
-			index += 1;
-			continue;
-		}
-		let length = 0;
-		while (line[index + length] === "`") length += 1;
-		runs.push({ start: lineStart + index, end: lineStart + index + length });
-		index += length;
-	}
-	return runs;
-}
-
-/** Code spans of one paragraph, per CommonMark pairing rules.
- *
- * An opener pairs with the next run of the same length (runs of other
- * lengths in between are content); everything between them is code. An opener
- * with no match is literal text and silences nothing.
+/**
+ * Text without which a source holds no code: a backtick, a tilde fence, an
+ * indent of four columns. A source with none of them is not parsed.
  */
-function codeSpans(runs: BacktickRun[]): { start: number; end: number }[] {
-	const spans: { start: number; end: number }[] = [];
-	for (let index = 0; index < runs.length; ) {
-		const length = (runs[index] as BacktickRun).end - (runs[index] as BacktickRun).start;
-		let close = index + 1;
-		while (close < runs.length) {
-			const candidate = runs[close] as BacktickRun;
-			if (candidate.end - candidate.start === length) break;
-			close += 1;
-		}
-		if (close === runs.length) {
-			index += 1;
-			continue;
-		}
-		spans.push({
-			start: (runs[index] as BacktickRun).end,
-			end: (runs[close] as BacktickRun).start,
-		});
-		index = close + 1;
+const MAY_HOLD_CODE = /`|~~~|\t| {4}/;
+
+/**
+ * Parsed code ranges by source digest. One note is scanned for comments by
+ * many stages of a build — the content index, unlinked mentions, Tasks, the
+ * page render (twice), the graph and canvas cards — and the parse is the
+ * expensive part, so each source is parsed once. Keyed by digest so the cache
+ * holds no note text; least recently used entries go first.
+ */
+const literalCache = new Map<string, CommentRange[]>();
+const LITERAL_CACHE_SIZE = 16_384;
+
+/**
+ * Where a comment delimiter is literal text, sorted and non-overlapping: the
+ * frontmatter block (unless `fragment`: a canvas card has none, so a leading
+ * `---` pair is two rules), code blocks and code spans.
+ */
+function literalRanges(source: string, fragment: boolean): readonly CommentRange[] {
+	const frontmatter = fragment ? 0 : frontmatterLength(source);
+	const ranges: CommentRange[] = frontmatter > 0 ? [{ start: 0, end: frontmatter }] : [];
+	if (!MAY_HOLD_CODE.test(source)) return ranges;
+
+	const key = `${frontmatter}:${createHash("sha1").update(source).digest("base64")}`;
+	const cached = literalCache.get(key);
+	if (cached) {
+		literalCache.delete(key);
+		literalCache.set(key, cached);
+		return cached;
 	}
-	return spans;
+
+	// The frontmatter is blanked rather than parsed: a ``` line in a YAML
+	// string must not open a fence that swallows the body. Blanking keeps
+	// every offset.
+	const body =
+		frontmatter > 0
+			? source.slice(0, frontmatter).replace(/[^\r\n]/g, " ") + source.slice(frontmatter)
+			: source;
+	visit(parseObsidianMarkdown(body, { enableMath: false }), (node) => {
+		if (node.type !== "code" && node.type !== "inlineCode") return;
+		const span = offsetsOf(node);
+		if (span) ranges.push(span);
+	});
+
+	if (literalCache.size >= LITERAL_CACHE_SIZE) {
+		literalCache.delete(literalCache.keys().next().value as string);
+	}
+	literalCache.set(key, ranges);
+	return ranges;
 }
 
-/** Every comment range in `source`, in document order and non-overlapping. */
-export function findCommentRanges(source: string): CommentRange[] {
-	// Most notes have no `%%`; skip classifying every line of them.
-	if (!source.includes(DELIMITER)) return [];
-	const lines = source.split("\n");
-	const isContent = getContentLineFlags(lines);
+/** A comment delimiter found outside code, in absolute source offsets. */
+interface Marker {
+	at: number;
+	text: string;
+	/** Only whitespace precedes it on its line. */
+	startsLine: boolean;
+}
+
+/** Every match of the global `pattern` in `source` that starts outside `literal`, in document order. */
+function markersOutsideCode(
+	source: string,
+	literal: readonly CommentRange[],
+	pattern: RegExp,
+): Marker[] {
+	const markers: Marker[] = [];
+	let next = 0;
+	for (const match of source.matchAll(pattern)) {
+		const at = match.index;
+		while (next < literal.length && (literal[next] as CommentRange).end <= at) next += 1;
+		if (next < literal.length && (literal[next] as CommentRange).start <= at) continue;
+		const lineStart = source.lastIndexOf("\n", at - 1) + 1;
+		markers.push({ at, text: match[0], startsLine: source.slice(lineStart, at).trim() === "" });
+	}
+	return markers;
+}
+
+function obsidianRanges(source: string, literal: readonly CommentRange[]): CommentRange[] {
+	const ranges: CommentRange[] = [];
+	let open: Marker | undefined;
+	for (const marker of markersOutsideCode(source, literal, /%%/g)) {
+		if (!open) {
+			open = marker;
+			continue;
+		}
+		ranges.push({ start: open.at, end: marker.at + DELIMITER.length });
+		open = undefined;
+	}
+	if (open?.startsLine) ranges.push({ start: open.at, end: source.length });
+	return ranges;
+}
+
+const HTML_COMMENT_OPEN = "<!--";
+
+function htmlRanges(source: string, literal: readonly CommentRange[]): CommentRange[] {
 	const ranges: CommentRange[] = [];
 	let openAt = -1;
-	let offset = 0;
-
-	// One paragraph of consecutive content lines: backtick runs pair only
-	// inside it (CommonMark code spans cannot cross a paragraph or a block
-	// boundary), while `%%` pairing may span paragraphs, as in Obsidian.
-	let paragraphRuns: BacktickRun[] = [];
-	let paragraphDelimiters: number[] = [];
-
-	const flushParagraph = () => {
-		const spans = codeSpans(paragraphRuns);
-		paragraphRuns = [];
-		for (const column of paragraphDelimiters) {
-			if (spans.some((span) => column >= span.start && column < span.end)) continue;
-			if (openAt === -1) {
-				openAt = column;
-			} else {
-				ranges.push({ start: openAt, end: column + DELIMITER.length });
-				openAt = -1;
-			}
-		}
-		paragraphDelimiters = [];
-	};
-
-	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index] ?? "";
-		const lineStart = offset;
-		// +1 for the newline; a trailing `\r` stays part of the line so offsets
-		// remain aligned for CRLF sources.
-		offset += line.length + 1;
-		// Block boundaries (frontmatter, fences) and blank lines end the
-		// paragraph; delimiters on them are not comment delimiters (or, for
-		// blank lines, not present at all).
-		if (!isContent[index] || line.trim() === "") {
-			flushParagraph();
-			continue;
-		}
-
-		paragraphRuns.push(...backtickRuns(line, lineStart));
-		for (let column = 0; column < line.length; ) {
-			if (line.startsWith(DELIMITER, column)) {
-				paragraphDelimiters.push(lineStart + column);
-				column += DELIMITER.length;
-				continue;
-			}
-			column += 1;
+	for (const marker of markersOutsideCode(source, literal, /<!--|-->/g)) {
+		if (openAt === -1 && marker.text === HTML_COMMENT_OPEN) {
+			openAt = marker.at;
+		} else if (openAt !== -1 && marker.text !== HTML_COMMENT_OPEN) {
+			ranges.push({ start: openAt, end: marker.at + marker.text.length });
+			openAt = -1;
 		}
 	}
-	flushParagraph();
-
+	if (openAt !== -1) ranges.push({ start: openAt, end: source.length });
 	return ranges;
+}
+
+/**
+ * Every `%%` comment range in `source`, in document order and
+ * non-overlapping. `fragment`: `source` is a piece of markdown with no
+ * frontmatter of its own (a canvas text card), so a leading `---` is a rule.
+ */
+export function findCommentRanges(source: string, fragment = false): CommentRange[] {
+	// Most notes have no `%%`; skip parsing them.
+	if (!source.includes(DELIMITER)) return [];
+	return obsidianRanges(source, literalRanges(source, fragment));
+}
+
+/**
+ * Every `<!-- … -->` range in `source` outside code, in document order. A
+ * comment ends at the first `-->` after its opener; an unclosed one runs to
+ * the end of `source`.
+ */
+export function findHtmlCommentRanges(source: string, fragment = false): CommentRange[] {
+	if (!source.includes(HTML_COMMENT_OPEN)) return [];
+	return htmlRanges(source, literalRanges(source, fragment));
+}
+
+/**
+ * Both kinds of comment in `source`, merged into sorted, non-overlapping
+ * ranges. HTML comments are looked for after the `%%` ones are blanked, so a
+ * `<!--` inside a `%%` comment opens nothing; both read code from the source
+ * as written.
+ */
+function findAllCommentRanges(source: string, fragment: boolean): CommentRange[] {
+	const hasObsidian = source.includes(DELIMITER);
+	const hasHtml = source.includes(HTML_COMMENT_OPEN);
+	if (!hasObsidian && !hasHtml) return [];
+	const literal = literalRanges(source, fragment);
+	const obsidian = hasObsidian ? obsidianRanges(source, literal) : [];
+	const html = hasHtml
+		? htmlRanges(obsidian.length > 0 ? blankCommentRanges(source, obsidian) : source, literal)
+		: [];
+	if (html.length === 0) return obsidian;
+	const merged: CommentRange[] = [];
+	for (const range of [...obsidian, ...html].sort((a, b) => a.start - b.start)) {
+		const last = merged.at(-1);
+		if (last && range.start <= last.end) {
+			last.end = Math.max(last.end, range.end);
+		} else {
+			merged.push({ ...range });
+		}
+	}
+	return merged;
 }
 
 function rangeContaining(
@@ -153,8 +209,8 @@ function rangeContaining(
 	return ranges.find((range) => start >= range.start && end <= range.end);
 }
 
-/** Whether a single source offset falls inside a comment. */
-function isOffsetInComment(offset: number, ranges: CommentRange[]): boolean {
+/** Whether a single source offset falls inside one of `ranges`. */
+function isOffsetIn(offset: number, ranges: readonly CommentRange[]): boolean {
 	return ranges.some((range) => offset >= range.start && offset < range.end);
 }
 
@@ -167,19 +223,17 @@ function countHeadings(
 	commented: boolean,
 ): Map<string, number> {
 	const lines = source.split("\n");
-	const isContent = getContentLineFlags(lines);
+	const literal = literalRanges(source, false);
 	const counts = new Map<string, number>();
 	let offset = 0;
 
-	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index] ?? "";
+	for (const line of lines) {
 		const lineStart = offset;
 		offset += line.length + 1;
-		if (!isContent[index]) continue;
-
 		const text = HEADING_LINE.exec(line)?.[1];
 		if (!text) continue;
-		if (isOffsetInComment(lineStart + line.indexOf(text), ranges) !== commented) continue;
+		const at = lineStart + line.indexOf(text);
+		if (isOffsetIn(at, literal) || isOffsetIn(at, ranges) !== commented) continue;
 		counts.set(text, (counts.get(text) ?? 0) + 1);
 	}
 
@@ -216,7 +270,7 @@ export function filterCommentedToc<T extends TocEntry>(toc: T[], source: string)
 
 	// Offset pass: Rspress records where a heading sits in the page content, so an
 	// entry inside a comment is dropped outright.
-	const byOffset = toc.filter((entry) => !isOffsetInComment(entry.charIndex, ranges));
+	const byOffset = toc.filter((entry) => !isOffsetIn(entry.charIndex, ranges));
 	// A build with the search index disabled records no offsets at all, which is
 	// the only case the identity pass has to decide.
 	if (!byOffset.some((entry) => entry.charIndex < 0)) {
@@ -273,6 +327,42 @@ export function blankCommentRanges(source: string, ranges: CommentRange[]): stri
 		if (range.start < cursor) continue;
 		result += source.slice(cursor, range.start);
 		result += source.slice(range.start, range.end).replace(/[^\n]/g, " ");
+		cursor = range.end;
+	}
+	return result + source.slice(cursor);
+}
+
+/**
+ * A note's source with every `%%` and `<!-- -->` comment blanked out (newlines
+ * kept, same length), for text that is searched or previewed rather than
+ * rendered: the hover preview, the graph search, link and tag extraction.
+ */
+export function blankAllComments(source: string): string {
+	const ranges = findAllCommentRanges(source, false);
+	return ranges.length > 0 ? blankCommentRanges(source, ranges) : source;
+}
+
+/**
+ * `source` from offset `from` on, with every `%%` and `<!-- -->` comment cut
+ * out, for text that is published as markdown rather than rendered here
+ * (canvas cards, which the browser renders). Cutting, not blanking: a run of
+ * spaces where an inline comment opened a line would read as an indented
+ * code block.
+ *
+ * Comments are found in the whole of `source`, so pass a note with its
+ * frontmatter and the body's offset as `from`: a body that opens with a `---`
+ * rule is then scanned as the note page scans it, not as frontmatter. Pass
+ * `fragment` for markdown that has no frontmatter at all (a text card).
+ */
+export function removeAllComments(
+	source: string,
+	{ from = 0, fragment = false }: { from?: number; fragment?: boolean } = {},
+): string {
+	let result = "";
+	let cursor = from;
+	for (const range of findAllCommentRanges(source, fragment)) {
+		if (range.end <= cursor) continue;
+		result += source.slice(cursor, Math.max(cursor, range.start));
 		cursor = range.end;
 	}
 	return result + source.slice(cursor);

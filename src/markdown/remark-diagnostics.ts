@@ -5,8 +5,9 @@ import type { VFile } from "vfile";
 // Failure is deferred to the end of the top-level pass so one bad link does
 // not abort resolution of the remaining wikilinks in the document; the
 // failure then lists every diagnostic, because Rspress never prints
-// `file.messages` and they would otherwise be invisible.
-const pendingFailures = new WeakMap<VFile, string[]>();
+// `file.messages` and they would otherwise be invisible. `cause` is the first
+// error a deferred diagnostic carried, kept so the failure keeps its stack.
+const pendingFailures = new WeakMap<VFile, { texts: string[]; cause?: Error }>();
 
 /**
  * A fatal `VFileMessage`, which is what `file.fail` throws in `"fail"` mode.
@@ -31,23 +32,38 @@ export function isFatalVFileMessage(error: unknown): boolean {
  * `mode` picks where failure lands: `"fail"` throws immediately (the
  * option-driven error modes), `"defer"` marks the file so the top-level pass
  * can fail it once every link has been resolved.
+ *
+ * `cause` is the error behind the diagnostic, when there is one: it is
+ * attached to the file message (and the failure), and a printed warning
+ * includes its stack.
  */
 export function reportPluginDiagnostic(
 	file: VFile,
 	scope: string,
 	message: string,
 	mode: "warn" | "defer" | "fail" = "warn",
+	cause?: unknown,
 ): void {
 	const text = `[rspress-plugin-obsidian:markdown${scope ? `:${scope}` : ""}] ${message}`;
-	if (mode === "fail") file.fail(text);
-	file.message(text);
+	const error = cause === undefined || cause instanceof Error ? cause : new Error(String(cause));
+	if (mode === "fail") file.fail(text, { cause: error });
+	file.message(text, { cause: error });
 	if (mode === "defer") {
 		const pending = pendingFailures.get(file);
-		if (pending) pending.push(text);
-		else pendingFailures.set(file, [text]);
+		if (!pending) pendingFailures.set(file, { texts: [text], cause: error });
+		else {
+			pending.texts.push(text);
+			pending.cause ??= error;
+		}
 		return;
 	}
-	console.warn(text);
+	if (error === undefined) console.warn(text);
+	else console.warn(text, error);
+}
+
+/** Whether `file` collected a deferred diagnostic that will fail it. */
+export function hasPendingDiagnostics(file: VFile): boolean {
+	return pendingFailures.has(file);
 }
 
 /** Fail `file` with every deferred diagnostic it collected, if it collected any. */
@@ -55,7 +71,8 @@ export function failPendingDiagnostics(file: VFile): void {
 	const pending = pendingFailures.get(file);
 	if (!pending) return;
 	file.fail(
-		`[rspress-plugin-obsidian:markdown] One or more links or plugin blocks failed to resolve or render:\n${pending.map((text) => `  - ${text}`).join("\n")}`,
+		`[rspress-plugin-obsidian:markdown] One or more links or plugin blocks failed to resolve or render:\n${pending.texts.map((text) => `  - ${text}`).join("\n")}`,
+		{ cause: pending.cause },
 	);
 }
 

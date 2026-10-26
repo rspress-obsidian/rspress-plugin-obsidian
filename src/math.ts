@@ -29,17 +29,25 @@ interface MathJaxRuntime {
 }
 
 let mathJaxRuntime: MathJaxRuntime | null = null;
+let mathJaxLoad: Promise<void> | null = null;
 
 /**
  * Load the selected engine before any formula is rendered.
  *
- * Idempotent, so the remark pass can call it on every file. Selecting MathJax
- * without the optional `mathjax-full` package installed throws with the install
- * command, rather than failing later with a module-resolution error the reader
- * cannot act on.
+ * Idempotent, so the remark pass can call it on every file: MathJax is loaded
+ * once, and pages compiled concurrently share that one load. Selecting MathJax
+ * without the optional `mathjax-full` package installed rejects with the
+ * install command, rather than failing later with a module-resolution error
+ * the reader cannot act on; the outcome is kept, so a missing install is
+ * detected once and every later call rejects with the same error.
  */
-export async function prepareMathEngine(engine: MathEngine = "katex"): Promise<void> {
-	if (engine !== "mathjax" || mathJaxRuntime) return;
+export function prepareMathEngine(engine: MathEngine = "katex"): Promise<void> {
+	if (engine !== "mathjax") return Promise.resolve();
+	mathJaxLoad ??= loadMathJax();
+	return mathJaxLoad;
+}
+
+async function loadMathJax(): Promise<void> {
 	try {
 		// Dynamic by design: a static import would pull the whole engine into every
 		// build that loads this module, including the ones using KaTeX.
@@ -90,6 +98,7 @@ export async function prepareMathEngine(engine: MathEngine = "katex"): Promise<v
 			`mathEngine: "mathjax" needs the optional "mathjax-full" package. Install it with \`bun add mathjax-full\` (or your package manager's equivalent) and keep mathEngine set. Original error: ${
 				error instanceof Error ? error.message : String(error)
 			}`,
+			{ cause: error },
 		);
 	}
 }

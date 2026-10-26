@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 import { memo, useMemo } from "react";
+import { isSameSiteUrl } from "../../shared/media-html.js";
 import { extractNoteSection } from "../../shared/transclusion.js";
+import { DEFAULT_IFRAME_SANDBOX } from "../constants.js";
 import type { CanvasFileData, CanvasLinks, CanvasNode } from "../types.js";
 import { withSiteBase } from "../utils/base.js";
 import { resolveColor } from "../utils/color.js";
@@ -21,11 +23,16 @@ export interface CanvasNodeProps {
 	iframeSandbox?: string;
 }
 
-const DEFAULT_SANDBOX = "allow-scripts allow-same-origin allow-popups";
+/**
+ * The title of a card for an unpublished file (a note, attachment or board):
+ * the build never ships its path.
+ */
+const PRIVATE_FILE_NAME = "Private file";
 
 /** The last path segment, which is what Obsidian titles a file card with. */
-function baseName(file: string): string {
-	return file.split("/").pop() ?? file;
+function fileCardName(node: CanvasFileData): string {
+	if (node.resolvedFile?.kind === "private") return PRIVATE_FILE_NAME;
+	return node.file.split("/").pop() ?? node.file;
 }
 
 function stripExtension(name: string): string {
@@ -69,7 +76,7 @@ export function cardLabel(node: CanvasNode): string {
 			return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain || "Text card";
 		}
 		case "file":
-			return baseName(node.file);
+			return fileCardName(node);
 		case "link":
 			return node.url;
 		default:
@@ -91,7 +98,7 @@ export const CanvasNodeComponent = memo(function CanvasNodeComponent({
 	isSelected,
 	fileRoutePrefix,
 	linkPreview = true,
-	iframeSandbox = DEFAULT_SANDBOX,
+	iframeSandbox = DEFAULT_IFRAME_SANDBOX,
 }: CanvasNodeProps) {
 	const className = [
 		"canvas-node",
@@ -228,7 +235,7 @@ function FileContent({
 	assets?: Record<string, string>;
 	fileRoutePrefix?: string;
 }) {
-	const name = baseName(node.file);
+	const name = fileCardName(node);
 	const resolved = node.resolvedFile;
 	const subpathLabel = node.subpath ? ` › ${node.subpath.replace(/^#/, "")}` : "";
 
@@ -310,13 +317,17 @@ function FileContent({
 				<>
 					<CardLabel href={url}>{name}</CardLabel>
 					<div className="canvas-node-content canvas-file-pdf-card">
-						{src ? (
+						{src === null ? (
+							<UnavailableFile name={name} />
+						) : isSameSiteUrl(src) ? (
 							// Deliberately not sandboxed: Chromium's PDF viewer refuses to run
-							// inside a sandboxed frame and shows a broken-document icon. The
-							// file is served from the site's own origin.
+							// inside a sandboxed frame and shows a broken-document icon. So the
+							// frame only ever loads the site's own files; a PDF elsewhere is a link.
 							<iframe className="canvas-file-pdf" src={src} title={name} loading="lazy" />
 						) : (
-							<UnavailableFile name={name} />
+							<a className="canvas-file-open" href={src} target="_blank" rel="noopener noreferrer">
+								Open {name}
+							</a>
 						)}
 					</div>
 				</>
@@ -365,8 +376,8 @@ function FileContent({
 }
 
 /**
- * A file that is missing, outside the vault, or not published. The three read
- * the same on purpose: a private note's existence is not announced.
+ * A file that is missing, outside the vault, or not published. A private file
+ * shows the same notice under a stand-in name: its path never reaches the page.
  */
 function UnavailableFile({ name }: { name: string }) {
 	return (

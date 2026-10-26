@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import {
-	callDataviewFunction,
-	type EvalContext,
-	evaluate,
-	parseExpression,
-} from "./dataview-expression";
+import { evaluate, parseExpression } from "./dataview-expression";
+import { callDataviewFunction } from "./dataview-functions";
+import type { EvalContext } from "./dataview-operators";
 import {
 	DataviewDuration,
 	DataviewExternalLink,

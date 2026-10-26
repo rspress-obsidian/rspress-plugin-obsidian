@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatDailyNoteDate } from "../../daily-notes.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 import { type MomentValue, momentFunction } from "./moment.js";
 
 const NOW = new Date(2024, 4, 15, 14, 5, 0);
@@ -63,7 +63,7 @@ describe("moment diff", () => {
 			const before = at("2024-03-10 00:00");
 			const after = at("2024-03-11 00:00");
 			expect(after.method("diff", [before, "days"])).toBe(1);
-			expect(formatDailyNoteDate(new Date(Number(after.primitive())), "Z")).toBe("-04:00");
+			expect(formatMomentDate(new Date(Number(after.primitive())), "Z")).toBe("-04:00");
 		} finally {
 			if (previous === undefined) delete process.env.TZ;
 			else process.env.TZ = previous;

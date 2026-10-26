@@ -7,7 +7,7 @@
  * `instanceof` and a property value can never be mistaken for a date or a link
  * because of the keys it happens to have.
  */
-import { formatDailyNoteDate } from "../../daily-notes.js";
+
 import {
 	CASUAL_UNIT_MS,
 	DAY_MS,
@@ -17,7 +17,8 @@ import {
 	momentAdd,
 	scanDuration,
 	startOf,
-} from "../../date-math.js";
+} from "../../../shared/date-math.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 import type { ContentAsset, ContentIndex, ContentPage } from "../../types.js";
 
 /** A file of the dataset: a note (with properties) or any other published file. */
@@ -378,7 +379,7 @@ export function plural(count: number, unit: string): string {
 
 /** A date as the view shows it by default. */
 export function formatDate(date: DateValue, formats: DisplayFormats): string {
-	return formatDailyNoteDate(
+	return formatMomentDate(
 		new Date(date.ms),
 		date.hasTime ? formats.dateTimeFormat : formats.dateFormat,
 	);

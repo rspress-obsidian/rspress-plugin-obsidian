@@ -98,10 +98,9 @@ describe("WikiPicker", () => {
 	});
 });
 
-/** The pathname `Where` last rendered with: the route the router is on. */
-let routedTo = "";
-function Where() {
-	routedTo = useLocation().pathname;
+/** Reports the router's pathname on every render. */
+function Where({ onPath }: { onPath: (pathname: string) => void }) {
+	onPath(useLocation().pathname);
 	return null;
 }
 
@@ -116,12 +115,15 @@ describe("WikiPicker navigation", () => {
 	});
 
 	test("a plain click navigates by route inside the router instead of reloading", () => {
-		routedTo = "";
+		let current = "";
+		const record = (pathname: string) => {
+			current = pathname;
+		};
 		const { container } = render(
 			<MemoryRouter initialEntries={["/start"]}>
 				<WikiPicker candidates={CANDIDATES} query="Setup" base="/repo/" />
 				<Routes>
-					<Route path="*" element={<Where />} />
+					<Route path="*" element={<Where onPath={record} />} />
 				</Routes>
 			</MemoryRouter>,
 		);
@@ -129,7 +131,7 @@ describe("WikiPicker navigation", () => {
 		const link = container.querySelector(".rp-wiki-picker-list a") as HTMLElement;
 		const notCancelled = fireEvent.click(link, { button: 0 });
 		expect(notCancelled).toBe(false);
-		expect(routedTo).toBe("/one/setup");
+		expect(current).toBe("/one/setup");
 	});
 
 	test("outside a router a plain click loads the route; a modified click is left alone", () => {

@@ -18,6 +18,7 @@ import {
 	scanDuration,
 	shiftDate,
 	startOf,
+	zeroPad,
 } from "./date-math.js";
 
 /** Run `body` with the process in time zone `zone`, then restore the zone the tests run in. */
@@ -34,8 +35,7 @@ function inZone(zone: string, body: () => void): void {
 
 /** `YYYY-MM-DD HH:mm:ss.SSS` in local time, so failures read as calendar dates. */
 function show(date: Date): string {
-	const pad = (value: number, length = 2) => String(value).padStart(length, "0");
-	return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+	return `${zeroPad(date.getFullYear(), 4)}-${zeroPad(date.getMonth() + 1)}-${zeroPad(date.getDate())} ${zeroPad(date.getHours())}:${zeroPad(date.getMinutes())}:${zeroPad(date.getSeconds())}.${zeroPad(date.getMilliseconds(), 3)}`;
 }
 
 const months = (count: number) => ({ months: count, days: 0, milliseconds: 0 });
@@ -44,6 +44,24 @@ const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
+
+describe("zeroPad", () => {
+	test("fills to the length, two digits by default, and never truncates", () => {
+		expect(zeroPad(0)).toBe("00");
+		expect(zeroPad(7)).toBe("07");
+		expect(zeroPad(42)).toBe("42");
+		expect(zeroPad(5, 3)).toBe("005");
+		expect(zeroPad(2026, 4)).toBe("2026");
+		expect(zeroPad(12345, 4)).toBe("12345");
+		expect(zeroPad(7, 1)).toBe("7");
+	});
+
+	test("puts the sign before the zeros, as moment's zeroFill does", () => {
+		expect(zeroPad(-5)).toBe("-05");
+		expect(zeroPad(-5, 4)).toBe("-0005");
+		expect(zeroPad(-12345, 4)).toBe("-12345");
+	});
+});
 
 describe("calendar", () => {
 	test("month lengths follow the Gregorian leap rule, and a month index may overflow into other years", () => {

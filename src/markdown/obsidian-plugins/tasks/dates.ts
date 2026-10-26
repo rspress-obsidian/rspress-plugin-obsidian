@@ -5,7 +5,6 @@
  * injectable "today" so a build is reproducible.
  */
 import * as chrono from "chrono-node";
-import { formatDailyNoteDate } from "../../daily-notes.js";
 import {
 	DAY_MS,
 	endOf,
@@ -14,7 +13,8 @@ import {
 	momentAdd,
 	momentUnitSpan,
 	startOf,
-} from "../../date-math.js";
+} from "../../../shared/date-math.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 
 /** Days since 1970-01-01; `NaN` for a date that does not exist (`2024-02-30`). */
 export type Day = number;
@@ -64,7 +64,7 @@ function localDateOf(day: Day): Date {
 
 /** Format a day with Moment.js tokens. */
 export function formatDay(day: Day, format: string): string {
-	return formatDailyNoteDate(localDateOf(day), format);
+	return formatMomentDate(localDateOf(day), format);
 }
 
 /** `YYYY-MM-DD`. */
