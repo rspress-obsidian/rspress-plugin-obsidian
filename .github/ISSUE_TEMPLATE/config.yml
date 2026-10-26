@@ -6,3 +6,6 @@ contact_links:
   - name: Getting started
     url: https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/getting-started.md
     about: Install, configure and publish a vault.
+  - name: Report a security vulnerability
+    url: https://github.com/rspress-obsidian/rspress-plugin-obsidian/security/advisories/new
+    about: Report it privately, not as a public issue. See SECURITY.md.

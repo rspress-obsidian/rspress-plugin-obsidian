@@ -136,8 +136,8 @@ same package draws Mermaid blocks in canvas text cards.
   with a `javascript:` URL is dropped. `mermaidSecurityLevel` accepts
   `"loose"`, `"antiscript"` or `"sandbox"` to allow what a strict build
   refuses, which means trusting every diagram in the vault. It applies to
-  diagrams in notes. Canvas cards keep `"strict"` unless a note on the same
-  page sets a level.
+  diagrams in notes. Diagrams in canvas cards always render `"strict"`,
+  including a board embedded in a note whose diagrams use a looser level.
 
 ## Styles
 
@@ -228,6 +228,12 @@ rendered, whichever mode you choose, so the build only decides whether it
 fails. Things a static site cannot do, such as `tp.system.prompt`, are always
 warnings.
 
+**Unexpected errors.** If the plugin itself fails on a page, the build prints a
+warning with the error and its stack, and keeps going; that page may miss part
+of the plugin's rendering. A page that also has an `"error"`-mode problem, such
+as a broken link, still fails the build, and the failure lists the unexpected
+error too.
+
 **A first build of a real vault** usually reports many broken links at once.
 To list them all in one run, start with warnings:
 
@@ -252,10 +258,14 @@ each broken link is reported once.
 - **Web embeds.** YouTube and X frames are built from a validated id and
   sandboxed to what the player needs. PDF frames are not sandboxed, because
   Chromium's viewer breaks in a sandbox. They load only files from your own
-  site.
+  site; a PDF on another site renders as a link. Canvas link previews run in a
+  sandbox without `allow-same-origin` unless you add it to `iframeSandbox`.
 - **Private files stay private.** Dotfiles, dot-folders, `publish: false`
-  notes and attachments that only those notes use are never published.
-  `%%comments%%` are removed from the page, its outline and the search index.
+  notes and attachments that only those notes use are never published; a
+  canvas file card that names one publishes neither its text nor its path.
+  `%%comments%%` are removed from the page, its outline and the search index,
+  and `%%comments%%` and `<!-- comments -->` from canvas text cards and the
+  notes canvas cards show.
 
 ## Troubleshooting
 

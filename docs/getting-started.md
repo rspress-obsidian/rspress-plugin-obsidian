@@ -110,31 +110,29 @@ Every Markdown option, with its default, is in the [Markdown API reference](/mar
 
 ### Canvas and the graph view
 
-Canvas and the graph view are separate features in the same list. This adds both:
+Canvas and the graph view are separate features in the same list. Give `pluginObsidian` the vault first and every feature uses it, so you name it once:
 
 ```ts
 import path from "node:path";
 import { defineConfig } from "@rspress/core";
 import { pluginObsidian } from "rspress-plugin-obsidian";
 
-const vaultRoot = path.join(import.meta.dirname, "My Vault");
-
 export default defineConfig({
   root: path.join(import.meta.dirname, "docs"),
-  plugins: pluginObsidian((markdown, canvas, graphview) => [
-    markdown({ vaultRoot, enableDefaultStyles: true }),
-    canvas({
-      vaultRoot,
-      routePrefix: "/canvas",
-      // The markdown feature's vaultRoutePrefix.
-      fileRoutePrefix: "/vault",
-    }),
-    graphview(),
-  ]),
+  plugins: pluginObsidian(
+    { vaultRoot: path.join(import.meta.dirname, "My Vault") },
+    (markdown, canvas, graphview) => [
+      markdown({ enableDefaultStyles: true }),
+      canvas({ routePrefix: "/canvas" }),
+      graphview(),
+    ],
+  ),
 });
 ```
 
-- **Canvas** publishes each `.canvas` file in the vault as a page under `/canvas`, its path lowercased with spaces as dashes, so `My Vault/Demo.canvas` becomes [`/canvas/demo`](/canvas/demo). A card that shows a note links to that note's page only when `fileRoutePrefix` names the same prefix as the markdown feature; without it the card links to `/Welcome`, which is never published.
+The shared options are `vaultRoot` and `vaultRoutePrefix`. The markdown feature publishes the vault's notes under `vaultRoutePrefix`; canvas scans the same vault for boards and links its cards to the notes under that prefix; the graph view draws whatever the markdown feature publishes. An option you pass to a feature itself, such as `markdown({ vaultRoot })`, wins over the shared one.
+
+- **Canvas** publishes each `.canvas` file in the vault as a page under `/canvas`, its path lowercased with spaces as dashes, so `My Vault/Demo.canvas` becomes [`/canvas/demo`](/canvas/demo). A card that shows a note links to that note's page.
 - **Graph view** adds a button to every page that opens a floating graph panel (or press `g`). While the panel is closed its code is not downloaded; it loads when a reader opens it, or with the page when you set `defaultOpen: true`. Install `react-force-graph-2d` to draw the graph.
 
 The graph is built from everything the site publishes: wikilinks, Markdown links, tags (linked to their tag pages when `enableTagPages` is on), daily notes, and the notes and links inside canvas boards. Its edges are the links the markdown feature resolves, so the graph and the backlinks panel always agree. The [Graph View guide](/graph/guide/graph-view) explains the panel, its filters and search.
@@ -148,41 +146,39 @@ import path from "node:path";
 import { defineConfig } from "@rspress/core";
 import { pluginObsidian } from "rspress-plugin-obsidian";
 
-const vaultRoot = path.join(import.meta.dirname, "My Vault");
-
 export default defineConfig({
   root: path.join(import.meta.dirname, "docs"),
-  plugins: pluginObsidian((markdown, canvas, graphview) => [
-    markdown({
-      vaultRoot,
+  plugins: pluginObsidian(
+    {
+      vaultRoot: path.join(import.meta.dirname, "My Vault"),
       vaultRoutePrefix: "/vault",
-      enableDefaultStyles: true,
-      enableCallouts: true,
-      enableTransclusion: true,
-      enableMediaEmbeds: true,
-      enableBacklinks: true,
-      enableTagLinking: true,
-      enableTagPages: true,
-      enableDailyNotes: true,
-      dailyNotes: {
-        folder: "daily",
-        dateFormat: "YYYY-MM-DD",
-        navigation: true,
-      },
-      enableDataview: true,
-      onBrokenLink: "error",
-      onAmbiguousLink: "warn",
-    }),
-    canvas({
-      vaultRoot,
-      routePrefix: "/canvas",
-      fileRoutePrefix: "/vault",
-    }),
-    graphview({
-      defaultOpen: false,
-      enableHoverPreviews: true,
-    }),
-  ]),
+    },
+    (markdown, canvas, graphview) => [
+      markdown({
+        enableDefaultStyles: true,
+        enableCallouts: true,
+        enableTransclusion: true,
+        enableMediaEmbeds: true,
+        enableBacklinks: true,
+        enableTagLinking: true,
+        enableTagPages: true,
+        enableDailyNotes: true,
+        dailyNotes: {
+          folder: "daily",
+          dateFormat: "YYYY-MM-DD",
+          navigation: true,
+        },
+        enableDataview: true,
+        onBrokenLink: "error",
+        onAmbiguousLink: "warn",
+      }),
+      canvas({ routePrefix: "/canvas" }),
+      graphview({
+        defaultOpen: false,
+        enableHoverPreviews: true,
+      }),
+    ],
+  ),
 });
 ```
 
@@ -196,7 +192,7 @@ With this config the site has:
 | Canvas board `Demo.canvas` | [`/canvas/demo`](/canvas/demo) |
 | Graph view | a floating panel on every page |
 
-`markdown`, `canvas` and `graphview` are also exported on their own. To use one without the others, import it and put its plugin straight into `plugins`: `plugins: [markdown({ vaultRoot })]`.
+`markdown`, `canvas` and `graphview` are also exported on their own. To use one without the others, import it and put its plugin straight into `plugins`: `plugins: [markdown({ vaultRoot })]`. Listed side by side without `pluginObsidian`, the graph view and canvas still find the markdown plugin of the same site, whatever order they are in; only the vault options have to be repeated (`canvas({ vaultRoot, fileRoutePrefix: "/vault" })`).
 
 ## Next steps
 

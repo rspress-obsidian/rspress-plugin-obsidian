@@ -33,8 +33,11 @@ a wikilink links to the board's page:
 ![[Demo.canvas]]
 
 The board above came from `![[Demo.canvas]]`, and [[Demo.canvas|this link]]
-comes from `[[Demo.canvas|this link]]`. If the Canvas plugin does not publish
-the board, both forms link to the raw `.canvas` file instead.
+comes from `[[Demo.canvas|this link]]`. Without the Canvas plugin, both forms
+link to the raw `.canvas` file instead. With it, a board it does not publish
+(one under a `_` folder, or matched by `exclude`) is a broken link, and the raw
+file is never served: it holds the comments and private paths the published
+board drops.
 
 ## How an embed behaves
 
@@ -58,6 +61,6 @@ them:
 |------|------|---------|-------------|
 | `src` | `string` | required | The board's path relative to `vaultRoot`, e.g. `Projects/Board.canvas` |
 | `linkPreview` | `boolean` | `true` | Show link cards as website previews; see [`linkPreview`](./configuration.md#linkpreview-and-iframesandbox) |
-| `iframeSandbox` | `string` | `"allow-scripts allow-same-origin allow-popups"` | `sandbox` attribute of link-card previews |
+| `iframeSandbox` | `string` | `"allow-scripts allow-popups"` | `sandbox` attribute of link-card previews |
 | `fileRoutePrefix` | `string` | none | Route prefix for file cards the build did not resolve; `![[Board.canvas]]` passes the markdown plugin's `vaultRoutePrefix` |
 | `basePath` | `string` | the site's `base` | Load a board published by a different site, e.g. `basePath="/docs"` |

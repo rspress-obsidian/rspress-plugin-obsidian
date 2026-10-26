@@ -90,8 +90,8 @@ Dataview format:
 | Id / depends on | `🆔 id` / `⛔ id1,id2` | `[id:: …]` / `[dependsOn:: …]` |
 
 - Any list marker works (`-`, `*`, `+`, `1.`, `1)`), in blockquotes too. Tasks
-  in code blocks, `%%comments%%` and frontmatter are not tasks. A trailing
-  `^block-id` stays a block link.
+  in code blocks, `%%comments%%`, `<!-- comments -->` and frontmatter are not
+  tasks. A trailing `^block-id` stays a block link.
 - A recurrence rule is read with rrule, as Tasks reads it, and shown, grouped
   and filtered as Tasks restates it: `🔁 every Monday` becomes
   `every week on Monday`, and a trailing ` when done` is kept. A rule rrule
@@ -151,6 +151,16 @@ friday`), two dates as a range (`in 2026-10-01 2026-10-31`), `last`, `this` or
 `next` `week`, `month`, `quarter` or `year` (lowercase; weeks run Monday to
 Sunday), and `2026`, `2026-Q4`, `2026-10`, `2026-W41`. They are resolved
 against the [`now` option](#options).
+
+A `regex matches` pattern whose shape can backtrack catastrophically is refused
+with an [error](#errors), though Tasks would run it.
+`description regex matches /a.*b.*c/` is refused because its two `.*` runs can
+match the same characters, as are `/\d+\.?\d*/` and `/(a|ab)*/`. Anchor the
+pattern (`/^a.*b.*c/`), end each run at a character it cannot match
+(`/a[^b]*b[^c]*c/`, `/\d+(\.\d*)?/`), or fold the shared start of a choice
+into one branch (`/(ab?)*/`). The
+[compatibility table](/obsidian-compatibility#obsidian-app-features) lists
+every refused shape.
 
 ### Sort, group and limit
 

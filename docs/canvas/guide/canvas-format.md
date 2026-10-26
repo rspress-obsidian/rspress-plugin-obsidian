@@ -49,6 +49,7 @@ A text card holds Markdown:
 | Mermaid diagrams | ` ```mermaid ` … ` ``` ` |
 | Tags | `#tag`, `#nested/tag` |
 | Footnotes | `[^1]` references with `[^1]:` definitions, and `^[inline notes]`, numbered together |
+| Comments | `%%text%%`, inline or across lines. The build removes them before it publishes the board, as a note page removes them; inside code they are plain text. |
 | Raw HTML | Tags without attributes, such as `<u>`, `<br>`, `<sub>`, `<kbd>`, `<details>` and `<summary>`. A tag with attributes is shown as text. |
 
 Cards render all of these whatever options the markdown plugin has: you do not
@@ -97,8 +98,9 @@ Obsidian stores it. The file's name is shown above the card.
 
 | File | Card |
 |------|------|
-| A published note (`.md`, `.mdx`) | The note's content, without frontmatter. The name above links to the note's page. A `subpath` (`#Heading`, `#Parent#Child`, `#^block`) shows only that section, cut the same way a transclusion cuts it. If the note has no such section, the card shows the whole note with a short notice. |
-| A `publish: false` note, or a missing file | A "not available" card. The note's text is never published. |
+| A published note (`.md`, `.mdx`) | The note's content, without frontmatter, `%%comments%%` or `<!-- comments -->`. The name above links to the note's page. A `subpath` (`#Heading`, `#Parent#Child`, `#^block`) shows only that section, cut the same way a transclusion cuts it. If the note has no such section, the card shows the whole note with a short notice. |
+| A missing file | A "not available" card under the file's name. |
+| A file that exists but is not published: a `publish: false` note, or any file in a dotfile, dot-folder, `_`-prefixed or excluded folder | A "not available" card titled "Private file". The file's content, path and subpath are never published. |
 | An image | The image alone, as in Obsidian. |
 | Audio or video | A player. |
 | A PDF | The PDF viewer. `#page=3` opens at that page. |
@@ -149,9 +151,10 @@ A group is a labelled box that holds other cards:
 ```
 
 The label sits above the group's top-left corner. `background` is a vault path,
-published like any attachment, or an `http(s)` URL; `backgroundStyle` is
-`cover`, `ratio` or `repeat`. The collapse button on a group hides the cards
-inside it until you expand it again or reload the page.
+published like any attachment, or an `http(s)` URL; a vault file that exists but
+is not published is dropped, path and all, and the group has no background.
+`backgroundStyle` is `cover`, `ratio` or `repeat`. The collapse button on a group
+hides the cards inside it until you expand it again or reload the page.
 
 Groups always paint beneath the edges, and the edges beneath every other card.
 Within each layer, the order of the `nodes` array is the stacking order, as the

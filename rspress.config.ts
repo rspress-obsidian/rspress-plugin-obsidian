@@ -12,40 +12,37 @@ export default defineConfig({
 		"Publish an Obsidian vault as an Rspress site: wikilinks, callouts, plugins, canvas and graph view",
 	globalStyles: path.join(docsRoot, "theme.css"),
 	themeDir: path.join(import.meta.dirname, "theme"),
-	plugins: pluginObsidian((markdown, canvas, graphview) => [
-		markdown({
-			vaultRoot,
-			vaultRoutePrefix: "/vault",
-			enableTagLinking: true,
-			enableCallouts: true,
-			enableBacklinks: true,
-			enableTransclusion: true,
-			enableMediaEmbeds: true,
-			enableTagPages: true,
-			enableDailyNotes: true,
-			enableDataview: true,
-			enableMath: true,
-			enableMermaid: true,
-			enableDefaultStyles: true,
-			// The reproduced community/core plugins; the demo vault has a folder
-			// of notes for each under `Plugins/`.
-			enableTasks: true,
-			enableKanban: true,
-			enableExcalidraw: true,
-			enableBases: true,
-			enableTemplater: true,
-		}),
-		canvas({
-			vaultRoot,
-			routePrefix: "/canvas",
-			fileRoutePrefix: "/vault",
-		}),
-		graphview({
-			defaultOpen: true,
-			enableHoverPreviews: true,
-			// The markdown plugin already reports every unresolved wikilink
-			// through `onBrokenLink`; without this the same link is reported twice.
-			onUnresolvedLink: "ignore",
-		}),
-	]),
+	plugins: pluginObsidian(
+		{ vaultRoot, vaultRoutePrefix: "/vault" },
+		(markdown, canvas, graphview) => [
+			markdown({
+				enableTagLinking: true,
+				enableCallouts: true,
+				enableBacklinks: true,
+				enableTransclusion: true,
+				enableMediaEmbeds: true,
+				enableTagPages: true,
+				enableDailyNotes: true,
+				enableDataview: true,
+				enableMath: true,
+				enableMermaid: true,
+				enableDefaultStyles: true,
+				// The reproduced community/core plugins; the demo vault has a folder
+				// of notes for each under `Plugins/`.
+				enableTasks: true,
+				enableKanban: true,
+				enableExcalidraw: true,
+				enableBases: true,
+				enableTemplater: true,
+			}),
+			canvas({ routePrefix: "/canvas" }),
+			graphview({
+				defaultOpen: true,
+				enableHoverPreviews: true,
+				// The markdown plugin already reports every unresolved wikilink
+				// through `onBrokenLink`; without this the same link is reported twice.
+				onUnresolvedLink: "ignore",
+			}),
+		],
+	),
 });

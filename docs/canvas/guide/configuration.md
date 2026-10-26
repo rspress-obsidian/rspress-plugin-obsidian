@@ -14,13 +14,13 @@ vault, when you want different routes, or when you want to turn on the editor.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| [`vaultRoot`](#vaultroot) | `string` | Rspress content root | Directory scanned for `.canvas` files. Every vault path on a board resolves against it. |
+| [`vaultRoot`](#vaultroot) | `string` | Rspress content root, or the shared `vaultRoot` of `pluginObsidian` | Directory scanned for `.canvas` files. Every vault path on a board resolves against it. |
 | [`routePrefix`](#routeprefix) | `string` | `"/canvas"` | URL prefix of the board pages. |
 | [`include`](#include-and-exclude) | `string[]` | `["**/*.canvas"]` | Glob patterns, relative to `vaultRoot`, for the boards to publish. |
 | [`exclude`](#include-and-exclude) | `string[]` | `[]` | Glob patterns to skip, added to the built-in ignores. |
-| [`fileRoutePrefix`](#filerouteprefix) | `string` | none | Route prefix of the vault's note pages. Set it to the markdown plugin's `vaultRoutePrefix`. |
+| [`fileRoutePrefix`](#filerouteprefix) | `string` | none, or the shared `vaultRoutePrefix` of `pluginObsidian` | Route prefix of the vault's note pages. Set it to the markdown plugin's `vaultRoutePrefix`. |
 | [`linkPreview`](#linkpreview-and-iframesandbox) | `boolean` | `true` | Show a link card as a live preview of the website. `false` shows a plain link. |
-| [`iframeSandbox`](#linkpreview-and-iframesandbox) | `string` | `"allow-scripts allow-same-origin allow-popups"` | `sandbox` attribute of link-card previews. |
+| [`iframeSandbox`](#linkpreview-and-iframesandbox) | `string` | `"allow-scripts allow-popups"` | `sandbox` attribute of link-card previews. |
 | [`editable`](#editor) | `boolean` | `false` | Add the in-browser editor to board pages. It never saves to disk. |
 | [`editorTitle`](#editor) | `string` | `"Canvas editor"` | Title in the editor's banner. |
 | [`enableDefaultStyles`](#enabledefaultstyles) | `boolean` | `true` | Inject the bundled canvas stylesheet. |
@@ -44,6 +44,13 @@ canvas({
 If you set `vaultRoot` without [`fileRoutePrefix`](#filerouteprefix), the build
 logs a warning. File cards would then link to `/Note`-style routes, while the
 markdown plugin publishes the same notes under its own prefix.
+
+Under [`pluginObsidian`](/getting-started#canvas-and-the-graph-view), `canvas()` takes the
+shared `vaultRoot` when you give it none, and while it scans that vault its
+`fileRoutePrefix` defaults to the shared `vaultRoutePrefix` (`"/vault"` when
+that is unset), so neither needs repeating. A `vaultRoot` or `fileRoutePrefix`
+passed to `canvas()` wins; with a `vaultRoot` of its own, set
+`fileRoutePrefix` yourself.
 
 A `.canvas` file or folder inside `vaultRoot` that is a symbolic link is
 skipped, so a link cannot publish a board from outside the vault.
@@ -81,6 +88,12 @@ Your `exclude` patterns are added to five built-in ignores that always apply:
 installs and build output inside the vault, and could publish a stray `.canvas`
 file from `node_modules`.
 
+Whatever the patterns say, a board is skipped by the same rules that keep a note
+off the site: anything under a dot folder (`.obsidian/`, `.trash/`) or a
+`_`-prefixed folder (`_private/`, but not `__shared/`). When the markdown plugin
+publishes the same folder, the folders it excludes, such as Templater's
+templates folder, are skipped too.
+
 ## fileRoutePrefix
 
 Set `fileRoutePrefix` to the markdown plugin's `vaultRoutePrefix`. For
@@ -115,20 +128,28 @@ canvas({ linkPreview: false });
 ```
 
 `iframeSandbox` is the frame's `sandbox` attribute. The default,
-`allow-scripts allow-same-origin allow-popups`, is what most sites need to
-render: without `allow-same-origin` a site loses access to its own storage and
-often renders blank. For untrusted third-party sites, `allow-scripts allow-popups`
-is safer because it drops the same-origin grant:
+`allow-scripts allow-popups`, runs the site's scripts in an opaque origin: the
+framed page cannot reach your site, its cookies or its storage. It leaves out
+`allow-same-origin` on purpose. Together with `allow-scripts`, that grant lets a
+page served from your own site remove its sandbox and act as your site.
+
+`iframeSandbox: ""` keeps every restriction: the framed page runs no scripts
+and opens no popups.
+
+Some sites need their own cookies or storage and render blank without
+`allow-same-origin`. Add it only when every link card on your boards points at
+sites you trust:
 
 ```ts
-canvas({ iframeSandbox: "allow-scripts allow-popups" });
+canvas({ iframeSandbox: "allow-scripts allow-same-origin allow-popups" });
 ```
 
 Sites that send `X-Frame-Options` or a `frame-ancestors` policy refuse to be
 framed anywhere. The address above the card still links to the site.
 
 PDF file cards are not sandboxed, whatever `iframeSandbox` says: Chromium's PDF
-viewer refuses to run in a sandboxed frame. The PDF is served from your own site.
+viewer refuses to run in a sandboxed frame. So a card frames only a PDF your own
+site serves; a PDF URL on another site is shown as a link instead.
 
 ## enableDefaultStyles
 

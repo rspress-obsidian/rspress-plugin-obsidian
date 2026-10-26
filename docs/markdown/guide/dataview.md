@@ -168,6 +168,17 @@ The query fails, and `onDataviewError` applies, when the parser finds text it
 cannot place, a function Dataview does not have, or a `FROM` source that does
 not resolve. A failed query never publishes a partial result.
 
+A pattern given to `regextest`, `regexmatch`, `regexreplace` or `split` (in DQL
+or through `dv.func`) is refused, failing the query, when its shape can
+backtrack catastrophically, though Dataview would run it.
+`regextest("a.*b.*c", file.name)` is refused because its two `.*` runs can
+match the same characters, as are the patterns `\d+\.?\d*` and `(a|ab)*`.
+Anchor the pattern (`^a.*b.*c`), end each run at a character it cannot match
+(`a[^b]*b[^c]*c`, `\d+(\.\d*)?`), or fold the shared start of a choice into one
+branch (`(ab?)*`). The
+[compatibility table](/obsidian-compatibility#obsidian-app-features) lists
+every refused shape.
+
 ## Inline queries
 
 Inline code that starts with `=` is an inline query, as in Dataview:
