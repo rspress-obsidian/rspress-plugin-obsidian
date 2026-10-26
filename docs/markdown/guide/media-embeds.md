@@ -103,9 +103,11 @@ Join both with `&`, as Obsidian does:
 ![[media/sample.pdf#page=2&height=320]]
 
 The frame is not sandboxed, because Chromium's PDF viewer needs scripts and
-shows a broken document inside a sandboxed frame. The file is served from your
-site's own origin. If you would rather link to PDFs than embed them, leave
-`enableMediaEmbeds` off. The frame's look comes from the `.obsidian-pdf` rules in
+shows a broken document inside a sandboxed frame. So the frame only ever loads
+a file from your own site: a PDF on another site, such as
+`![](https://example.com/report.pdf)`, renders as a link to it instead. If you
+would rather link to every PDF than embed it, leave `enableMediaEmbeds` off.
+The frame's look comes from the `.obsidian-pdf` rules in
 `rspress-plugin-obsidian/markdown/styles.css`.
 
 ## Markdown-image embeds

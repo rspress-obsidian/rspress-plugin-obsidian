@@ -1,13 +1,26 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import path from "node:path";
 import type { Root } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toMarkdown } from "mdast-util-to-markdown";
+import rehypeStringify from "rehype-stringify";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import remarkRehype from "remark-rehype";
+import { unified } from "unified";
+import { VFile } from "vfile";
 import {
+	blankAllComments,
 	blankCommentRanges,
 	filterCommentedToc,
 	findCommentRanges,
+	findHtmlCommentRanges,
+	removeAllComments,
 	stripComments,
 } from "./comments";
+import { normalizePluginOptions } from "./normalize-options";
+import { extractPageLinks } from "./page-links";
+import { remarkWikilink } from "./remark-wikilink";
 
 /** Parse, strip, and serialize — the shape the remark pass operates on. */
 function strip(source: string): string {
@@ -21,8 +34,17 @@ describe("findCommentRanges", () => {
 		expect(findCommentRanges("a %%\nhidden\n%% b")).toEqual([{ start: 2, end: 14 }]);
 	});
 
-	test("leaves an unclosed delimiter alone", () => {
+	test("leaves an unclosed delimiter written mid-line alone", () => {
 		expect(findCommentRanges("a %% dangling")).toEqual([]);
+		expect(findCommentRanges("a %%open\n\n# Heading\n\ntext")).toEqual([]);
+	});
+
+	test("hides the rest of the note after a block comment nobody closes", () => {
+		// Obsidian Help, "Comments": a block comment starts when a line begins
+		// with `%%`; left unclosed, Reading view hides the rest of the note.
+		const source = "Shown.\n\n%%\n# Heading\n\n```\ncode\n```\nmore";
+		expect(findCommentRanges(source)).toEqual([{ start: 8, end: source.length }]);
+		expect(findCommentRanges("Shown.\n  %%draft")).toEqual([{ start: 9, end: 16 }]);
 	});
 
 	test("ignores delimiters inside code fences and inline code", () => {
@@ -108,8 +130,12 @@ describe("stripComments", () => {
 		expect(strip("Use `code %% not a comment\nspan%%` here.")).toContain("%% not a comment");
 	});
 
-	test("leaves an unclosed delimiter as written", () => {
+	test("leaves an unclosed mid-line delimiter as written", () => {
 		expect(strip("Visible %% dangling text.")).toContain("%% dangling text.");
+	});
+
+	test("drops everything after an unclosed block comment", () => {
+		expect(strip("Visible.\n\n%%\n## Draft\n\nDraft text.")).toBe("Visible.");
 	});
 
 	test("strips inside a file that opens with a thematic break", () => {
@@ -157,6 +183,89 @@ describe("blankCommentRanges", () => {
 
 	test("returns the source unchanged when there is nothing to blank", () => {
 		expect(blankCommentRanges("plain text", [])).toBe("plain text");
+	});
+});
+
+describe("findHtmlCommentRanges", () => {
+	test("finds comments across lines, outside code and frontmatter", () => {
+		const source =
+			"a <!-- x -->\n\n<!--\nblock\n--> b\n\n`<!-- code -->`\n```\n<!-- fenced -->\n```";
+		const ranges = findHtmlCommentRanges(source);
+		expect(ranges.map((range) => source.slice(range.start, range.end))).toEqual([
+			"<!-- x -->",
+			"<!--\nblock\n-->",
+		]);
+		expect(findHtmlCommentRanges("---\nnote: '<!-- x -->'\n---\nbody")).toEqual([]);
+	});
+
+	test("backticks on an HTML block's closing line are raw HTML, not a code span", () => {
+		// The HTML block a line-start `<!--` opens runs through the line holding
+		// `-->`, so the browser hides the second comment too.
+		const source = "<!--\nblock\n--> b `<!-- raw -->`";
+		const ranges = findHtmlCommentRanges(source);
+		expect(ranges.map((range) => source.slice(range.start, range.end))).toEqual([
+			"<!--\nblock\n-->",
+			"<!-- raw -->",
+		]);
+	});
+
+	test("runs an unclosed comment to the end", () => {
+		expect(findHtmlCommentRanges("a <!-- open\n\nrest")).toEqual([{ start: 2, end: 17 }]);
+	});
+});
+
+describe("blankAllComments", () => {
+	test("blanks both kinds without moving any offset", () => {
+		const source = "a %%x%% b <!-- y --> c";
+		const blanked = blankAllComments(source);
+		expect(blanked).toHaveLength(source.length);
+		expect(blanked).toBe(`a ${" ".repeat(5)} b ${" ".repeat(10)} c`);
+	});
+
+	test("an HTML comment wrapping a %% comment is blanked whole", () => {
+		expect(blankAllComments("<!-- %%x%% secret -->").trim()).toBe("");
+	});
+});
+
+describe("removeAllComments", () => {
+	test("cuts every comment, across lines, and leaves code and unclosed mid-line delimiters", () => {
+		expect(removeAllComments("a %%x%% b %%\nhidden\n%% c <!-- d --> e")).toBe("a  b  c  e");
+		expect(removeAllComments("use `%%` and\n```\n%% fenced %%\n```\nend %% open")).toBe(
+			"use `%%` and\n```\n%% fenced %%\n```\nend %% open",
+		);
+	});
+
+	test("does not leave an inline comment's width behind to indent the line", () => {
+		expect(removeAllComments("%%a long inline comment%%text")).toBe("text");
+	});
+
+	test("scans the whole note and returns the body from `from`", () => {
+		// The body opens with a rule pair: scanned on its own it would read as
+		// frontmatter and keep the comment.
+		const note = "---\ntitle: x\n---\n---\ntext %% secret %%\n---\n";
+		expect(removeAllComments(note, { from: "---\ntitle: x\n---\n".length })).toBe(
+			"---\ntext \n---\n",
+		);
+	});
+
+	test("reads a fragment's leading `---` pair as rules, not frontmatter", () => {
+		expect(removeAllComments("---\ncard %% secret %%\n---", { fragment: true })).toBe(
+			"---\ncard \n---",
+		);
+	});
+});
+
+describe("page output and extracted links agree on %% comments", () => {
+	test.each([
+		["an unclosed block comment", "Shown [[Kept]].\n\n%%\n[[Hidden]]\n\nmore [[Also hidden]]"],
+		["an unclosed mid-line delimiter", "Shown %% [[Kept]]\n\n[[Also kept]]"],
+		["a closed comment", "Shown [[Kept]] %% [[Hidden]] %%\n\n[[Also kept]]"],
+	])("%s", (_name, source) => {
+		const page = strip(source);
+		const linked = extractPageLinks(source).outlinks.map((link) => link.target);
+		for (const target of ["Kept", "Also kept", "Hidden", "Also hidden"]) {
+			expect(linked.includes(target)).toBe(page.includes(target));
+		}
 	});
 });
 
@@ -242,5 +351,77 @@ describe("filterCommentedToc", () => {
 
 	test("returns an empty outline unchanged", () => {
 		expect(filterCommentedToc([], "%%\n## Gone\n%%\n")).toEqual([]);
+	});
+});
+
+describe("comments follow the page's CommonMark code boundaries", () => {
+	const docsRoot = path.resolve(process.cwd(), "test/markdown/fixtures/render-features");
+	const processor = unified()
+		.use(remarkParse)
+		.use(remarkGfm)
+		.use(remarkWikilink, {
+			getDocsRoot: () => docsRoot,
+			getSiteBase: () => "/",
+			options: normalizePluginOptions({ onBrokenLink: "warn" }),
+		})
+		.use(remarkRehype, { allowDangerousHtml: true })
+		.use(rehypeStringify, { allowDangerousHtml: true });
+
+	/** What a reader sees of the page: its HTML minus the comments a browser hides. */
+	async function pageText(source: string): Promise<string> {
+		const file = new VFile({ value: source, path: path.join(docsRoot, "index.md") });
+		return String(await processor.process(file)).replace(/<!--[\s\S]*?-->/g, "");
+	}
+
+	let warn: { mockRestore(): void };
+	beforeAll(() => {
+		warn = spyOn(console, "warn").mockImplementation(() => {});
+	});
+	afterAll(() => warn.mockRestore());
+
+	// [case, source, whether `secret` is shown]
+	const cases: [string, string, boolean][] = [
+		["a `~~~` line inside a backtick fence is code", "```\n~~~\n%% secret %%\n```\n\nafter", true],
+		["a backtick line inside a tilde fence is code", "~~~\n```\n%% secret %%\n~~~\n\nafter", true],
+		["a shorter run does not close a fence", "````\n```\n%% secret %%\n````", true],
+		["a run with an info string does not close a fence", "```\n```js\n%% secret %%\n```", true],
+		["an indented code block is code", "para\n\n    %% secret %%\n\nafter", true],
+		["a fence inside a block quote is code", "> ```\n> %% secret %%\n> ```\n\nafter", true],
+		["a fence nested in a list item is code", "- item\n\n  ```\n  %% secret %%\n  ```", true],
+		["a double-backtick span holds a single backtick", "``a ` %% secret %% ``", true],
+		["an HTML comment in an indented code block is code", "para\n\n    <!-- secret -->", true],
+		[
+			"an HTML comment in a fence a `~~~` line did not close",
+			"```\n~~~\n<!-- secret -->\n```",
+			true,
+		],
+		["escaped backticks open no code span", "a \\`%% secret %%\\` b", false],
+		["escaped backticks around an HTML comment", "a \\`<!-- secret -->\\` b", false],
+		["a backtick info string is not a fence", "``` a`b\n%% secret %%\n\nafter", false],
+		["a four-space-indented run is not a fence", "    ```\n\n%% secret %%\n\nafter", false],
+		["a code span does not cross list items", "- `a\n- %% secret %% `", false],
+		["a code span does not cross from a heading", "# Title `x\n%% secret %% `", false],
+		["a fence closes with its block quote", "> ```\n> code\n\n%% secret %%", false],
+		["a wikilink claims its backticks", "[[a `b]] %% secret %% c`", false],
+		["an indented `---` opens no frontmatter", " ---\n%% secret %%\n---\n\nafter", false],
+	];
+
+	test.each(cases)("%s", async (_name, source, shown) => {
+		expect((await pageText(source)).includes("secret")).toBe(shown);
+		// The canvas (cut) and the search index, graph preview and link
+		// extraction (blanked) read the same comments the page hides.
+		expect(removeAllComments(source).includes("secret")).toBe(shown);
+		expect(removeAllComments(source, { fragment: true }).includes("secret")).toBe(shown);
+		expect(blankAllComments(source).includes("secret")).toBe(shown);
+	});
+
+	test("frontmatter hides delimiters from the comment scan", () => {
+		const source = "---\nnote: '%% a <!-- b'\n---\nbody %% secret %%";
+		expect(blankAllComments(source)).toBe(`---\nnote: '%% a <!-- b'\n---\nbody ${" ".repeat(12)}`);
+	});
+
+	test("a fence inside frontmatter does not swallow the body", () => {
+		const source = "---\nnote: |\n  ```\n---\nbody %% secret %%";
+		expect(blankAllComments(source)).not.toContain("secret");
 	});
 });

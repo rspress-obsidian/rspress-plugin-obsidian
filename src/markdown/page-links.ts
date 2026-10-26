@@ -11,6 +11,7 @@
 import { getContentLineFlags } from "../shared/content-flags.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../shared/paths.js";
+import { blankAllComments } from "./comments.js";
 import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
 import type { ParsedWikiLink, WikiSubpath } from "./types.js";
 
@@ -28,7 +29,6 @@ export interface PageLinks {
 	tags: string[];
 }
 
-const COMMENTS = /%%[\s\S]*?(?:%%|$)|<!--[\s\S]*?(?:-->|$)/g;
 // A code span closes on a backtick run of the same length (CommonMark) and
 // never crosses a blank line.
 const CODE_SPAN = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
@@ -159,12 +159,13 @@ function collectPropertyLinks(
 }
 
 /**
- * The prose of a note: content lines only, code spans then comments blanked
- * (a `%%` inside a code span is literal text in Obsidian).
+ * The prose of a note: content lines only, comments then code spans blanked.
+ * Comments are found by `comments.ts`, which already skips code spans (a `%%`
+ * inside one is literal text in Obsidian).
  */
 export function proseText(lines: string[], isContent: boolean[]): string {
 	const content = lines.map((line, index) => (isContent[index] ? line : "")).join("\n");
-	return blank(blank(content, CODE_SPAN), COMMENTS);
+	return blank(blankAllComments(content), CODE_SPAN);
 }
 
 /** Links and tags of one note; see {@link PageLinks}. */

@@ -128,6 +128,15 @@ describe("parsing with a Luxon format", () => {
 	test("an impossible day is rejected", () => {
 		expect(parseWithLuxonFormat("2026-02-30", "yyyy-MM-dd")).toBeNull();
 	});
+
+	test("refuses a format whose matcher could backtrack catastrophically", () => {
+		// Each `d` and `H` takes one or two digits: twenty in a row split a text 2^20 ways at most.
+		const year = new Date().getFullYear();
+		expect(parseWithLuxonFormat("1".repeat(20), "dH".repeat(10))).toEqual(new Date(year, 0, 1, 1));
+		expect(() => parseWithLuxonFormat("1".repeat(21), `${"dH".repeat(10)}d`)).toThrow(
+			/^Can't handle format \((dH){10}d\): Regular expression .* has too many optional parts.*Obsidian would run it/,
+		);
+	});
 });
 
 describe("truthiness", () => {

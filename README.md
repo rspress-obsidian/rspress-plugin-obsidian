@@ -16,10 +16,12 @@ entry, and a matrix saying exactly what is and is not supported.
   on hover.
 
 > **This is a publishing subset, not Obsidian.** It renders the Markdown
-> dialect, the `.canvas` format, and a link graph. There is no plugin API, no
-> `.obsidian/` configuration, and no live preview — publishing is a build-time
-> transform. Per-feature status, including everything deliberately left out, is
-> itemised in [Obsidian compatibility](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md).
+> dialect, the `.canvas` format, and a link graph. There is no plugin API and no
+> live preview — publishing is a build-time transform. Obsidian's app settings
+> in `.obsidian/` are ignored; the supported plugins' own settings
+> (`.obsidian/plugins/<id>/data.json`) and the property types Bases uses
+> (`.obsidian/types.json`) are read. Per-feature status, including everything
+> deliberately left out, is itemised in [Obsidian compatibility](https://github.com/rspress-obsidian/rspress-plugin-obsidian/blob/main/docs/obsidian-compatibility.md).
 
 ## Contents
 
@@ -79,38 +81,39 @@ bun add lucide-static           # only for Bases icon()
 // rspress.config.ts
 import path from "node:path";
 import { defineConfig } from "@rspress/core";
-import { markdown, canvas, graphview } from "rspress-plugin-obsidian";
-
-const vaultRoot = path.join(import.meta.dirname, "Obsidian Vault");
+import { pluginObsidian } from "rspress-plugin-obsidian";
 
 export default defineConfig({
   root: path.join(import.meta.dirname, "docs"),
-  plugins: [
-    markdown({
-      // Publish this vault's notes alongside your docs. Omit `vaultRoot` and
-      // only `root` is published.
-      vaultRoot,
+  plugins: pluginObsidian(
+    {
+      // Shared by every feature: publish this vault's notes under
+      // `vaultRoutePrefix`, alongside your docs; canvas reads its boards from
+      // it and links their cards to those notes. Omit `vaultRoot` and only
+      // `root` is published.
+      vaultRoot: path.join(import.meta.dirname, "Obsidian Vault"),
       vaultRoutePrefix: "/vault",
-
-      enableCallouts: true,
-      enableBacklinks: true,
-      enableDefaultStyles: true, // the stylesheet the above two need
-    }),
-    canvas({
-      vaultRoot,
-      routePrefix: "/canvas",
-      // Must match `vaultRoutePrefix` above. Without it a canvas file card
-      // links to `/Note`, which the vault build never publishes.
-      fileRoutePrefix: "/vault",
-    }),
-    graphview(),
-  ],
+    },
+    (markdown, canvas, graphview) => [
+      markdown({
+        enableCallouts: true,
+        enableBacklinks: true,
+        enableDefaultStyles: true, // the stylesheet the above two need
+      }),
+      canvas({ routePrefix: "/canvas" }),
+      graphview(),
+    ],
+  ),
 });
 ```
 
-`pluginObsidian((markdown, canvas, graphview) => [...])` composes the same three
-in one call — the form this repository's own `rspress.config.ts` uses — and each
-feature is importable on its own.
+An option passed to a feature itself (`markdown({ vaultRoot })`) wins over the
+shared one. Each feature is also importable on its own —
+`plugins: [markdown({ vaultRoot }), graphview()]` — and the graph view and
+canvas find the site's markdown plugin in any order; outside `pluginObsidian`,
+give `canvas` the same `vaultRoot` and a `fileRoutePrefix` matching
+`vaultRoutePrefix`. Helpers such as the content index and the wikilink resolver
+come from `rspress-plugin-obsidian/markdown`.
 
 ## The three features
 
@@ -118,7 +121,7 @@ feature is importable on its own.
 | --- | --- | --- | --- |
 | Markdown | `markdown` | wikilinks, embeds, callouts, backlinks, transclusion, media embeds, tags + tag pages, daily notes, Dataview, Tasks, Kanban, Excalidraw, Bases, Templater, math, Mermaid — see below | `rspress-plugin-obsidian/markdown/styles.css` |
 | Canvas | `canvas` | `.canvas` boards as interactive pages, with an in-browser editor | `rspress-plugin-obsidian/canvas/styles.css` |
-| Graph view | `graphview` | the interactive link graph, local and global, and Obsidian's Page preview of linked notes on hover (`enableHoverPreviews`) | `rspress-plugin-obsidian/styles.css` (aggregate) |
+| Graph view | `graphview` | the interactive link graph, local and global, and Obsidian's Page preview of linked notes on hover (`enableHoverPreviews`) | `rspress-plugin-obsidian/graph/styles.css` |
 
 ## What `markdown()` turns on
 
@@ -211,8 +214,9 @@ content, and anything that can write to it can write to the published site.
 
 Canvas diagrams are the one sink the plugin owns itself, and raw HTML there is
 escaped and URL-scheme-checked before insertion. Mermaid diagrams inside a
-canvas board always render at `securityLevel: "strict"`; `mermaidSecurityLevel`
-configures the Markdown pipeline only.
+canvas board, including a board embedded in a note, always render at
+`securityLevel: "strict"`; `mermaidSecurityLevel` configures the diagrams in
+notes only.
 
 ## Development
 
@@ -225,7 +229,7 @@ bun install
 bun run typecheck
 bun run lint           # Biome; `bun run lint:fix` applies safe fixes
 bun test               # unit tests only
-bun run test:coverage  # the same suite under the coverage gate CI enforces
+bun run test:coverage  # the same suite under the coverage gate CI enforces (minus test/publish, which test:publish runs)
 bun run build          # tsup → dist/ (ESM+CJS, d.ts/d.cts, css)
 bun run test:publish   # packs the tarball and checks every exports entry (after build)
 bun run test:types     # publint against the package's exports and files (after build)
@@ -264,7 +268,7 @@ first: what it lists as unsupported is a known boundary, not a bug.
 Write commit messages as Conventional Commits (`fix:`, `feat:`, `perf:`, …),
 since semantic-release reads them to pick the next version, and run
 `bun run lint`, `bun run typecheck` and `bun test` before pushing. CI runs on
-every pull request into `main`.
+every pull request into `main` and `dev`.
 
 ## Releases
 

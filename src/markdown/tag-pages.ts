@@ -1,3 +1,4 @@
+import { escapeMarkdownDestination } from "../shared/escape.js";
 import { encodeTagPathSegment, tagRoutePath } from "../shared/paths.js";
 import { normalizeUnicode } from "../shared/slug.js";
 import type { ContentIndex, ContentPage } from "./types.js";
@@ -91,10 +92,6 @@ function escapeMarkdownText(value: string): string {
 		.replace(/>/g, "&gt;")
 		.replace(/[[\]]/g, "\\$&")
 		.replace(/\r?\n/g, " ");
-}
-
-function escapeMarkdownDestination(value: string): string {
-	return value.replace(/[()]/g, "\\$&").replace(/\s/g, "%20");
 }
 
 function generateTagPageContent(displayName: string, pages: ContentPage[]): string {

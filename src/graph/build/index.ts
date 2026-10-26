@@ -34,7 +34,12 @@ export async function buildGraphModules(
 	options: GraphBuildOptions,
 ): Promise<GraphBuildResult> {
 	const totalStart = performance.now();
-	const plan = await planGraphDocuments(routes, options.docsRoot);
+	const plan = await planGraphDocuments(
+		routes,
+		options.docsRoot,
+		options.published,
+		options.canvasBoards,
+	);
 	const key = JSON.stringify([
 		routes.map((route) => [route.routePath, route.absolutePath]),
 		plan.untrackedSignature,

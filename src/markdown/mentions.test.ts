@@ -52,6 +52,20 @@ describe("stripMentionText", () => {
 		expect(text.match(/Backlink target/g)).toHaveLength(1);
 	});
 
+	test("drops text the page hides in HTML and unclosed comments", () => {
+		const source = [
+			"Backlink target appears here.",
+			"<!-- Backlink target in an HTML comment -->",
+			"Before <!-- Backlink target inline --> after.",
+			"",
+			"%%",
+			"Backlink target after an unclosed block comment",
+		].join("\n");
+
+		const text = stripMentionText(source);
+		expect(text).toBe("Backlink target appears here. Before after.");
+	});
+
 	test("keeps a markdown link's label but not its destination", () => {
 		expect(stripMentionText("See [Widget Notes](./widget-notes.md) for more.")).toBe(
 			"See Widget Notes for more.",

@@ -11,7 +11,7 @@ import {
 	momentUnitSpan,
 	normalizeMomentUnit,
 	startOf,
-} from "../../date-math.js";
+} from "../../../shared/date-math.js";
 import type { KanbanDateColor } from "./options.js";
 
 /**

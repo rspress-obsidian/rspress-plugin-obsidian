@@ -10,6 +10,8 @@
  * so it must not import that module's fence helpers back.
  */
 import { normalizeUnicode } from "../shared/slug.js";
+import { blankAllComments } from "./comments.js";
+import { baseIndexOf } from "./linked-indexes.js";
 import type { ContentIndex, ContentPage } from "./types.js";
 
 /** One page that mentions the target, with the surrounding text. */
@@ -48,12 +50,16 @@ function stripLeadingFrontmatter(markdown: string): string {
 /** A table's `|---|:---:|` delimiter row: layout, not prose. */
 const TABLE_DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/;
 
-/** Strip frontmatter, fenced blocks, inline code, comments and table syntax; keep prose. */
+/**
+ * Strip frontmatter, fenced blocks, inline code, comments and table syntax; keep
+ * prose. Comments are the page's own (`%%` and `<!-- -->`, see
+ * {@link blankAllComments}), so commented-out text never becomes a snippet.
+ */
 export function stripMentionText(markdown: string): string {
 	const kept: string[] = [];
 	let fence: string | null = null;
 
-	for (const line of stripLeadingFrontmatter(markdown).split(/\r?\n/)) {
+	for (const line of stripLeadingFrontmatter(blankAllComments(markdown)).split(/\r?\n/)) {
 		const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
 		if (fenceMatch) {
 			const marker = fenceMatch[1] ?? "";
@@ -70,7 +76,6 @@ export function stripMentionText(markdown: string): string {
 	return (
 		kept
 			.join("\n")
-			.replace(/%%[\s\S]*?%%/g, " ")
 			.replace(/`[^`\n]*`/g, " ")
 			// A markdown link's label is prose a reader sees; its destination is not.
 			.replace(/\[([^\]]*)\]\([^)\s]*(?:\s+["'][^)]*["'])?\)/g, "$1")
@@ -266,7 +271,7 @@ export function getMentions(index: ContentIndex): Map<string, MentionRef[]> {
 	const cached = mentionsByIndex.get(index);
 	if (cached) return cached;
 
-	const sources = sourcesByIndex.get(index) ?? [];
+	const sources = sourcesByIndex.get(baseIndexOf(index)) ?? [];
 	const mentions = buildMentionsIndex(sources);
 
 	for (const [targetRoute, entries] of mentions) {

@@ -33,8 +33,10 @@ And so is this paragraph.
 %% Still visible.
 ```
 
-Inside frontmatter, fenced code and inline code, `%%` is plain text. A `%%`
-with no closing `%%` stays as written.
+Inside frontmatter, fenced code and inline code, `%%` is plain text. A
+comment left open follows Obsidian's Reading view: a line that begins with `%%`
+starts a block comment, and if nothing closes it the rest of the note is
+hidden; a `%%` written mid-line with no closing `%%` stays as written.
 
 ## Highlights
 

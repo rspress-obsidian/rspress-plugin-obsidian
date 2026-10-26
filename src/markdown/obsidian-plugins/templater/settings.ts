@@ -1,4 +1,4 @@
-import { parseMomentDate } from "../../daily-notes.js";
+import { parseMomentDate } from "../../../shared/moment-format.js";
 import type { NormalizedPluginOptions } from "../../types.js";
 import { readObsidianPluginSettings } from "../settings.js";
 import type { TemplaterFileTemplate, TemplaterFolderTemplate } from "./options.js";

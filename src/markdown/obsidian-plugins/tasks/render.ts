@@ -4,7 +4,7 @@
  * Obsidian styles the published page too. Checkboxes are disabled: a static
  * page cannot edit the note a task lives in.
  */
-import { escapeHtmlAttribute, escapeHtmlText } from "../../../shared/escape.js";
+import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shared/escape.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentPage, ParsedWikiLink, ResolvedWikiLink } from "../../types.js";
 import { type Day, isoDay, type TaskDate } from "./dates.js";
@@ -16,7 +16,7 @@ import {
 	type TaskGroup,
 	taskCountText,
 } from "./query.js";
-import { escapeRegExp, type SearchInfo } from "./query-model.js";
+import type { SearchInfo } from "./query-model.js";
 import {
 	closestParentTask,
 	fileBaseName,

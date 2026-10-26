@@ -75,7 +75,7 @@ const distEntry = path.join(root, "dist", "index.js");
 const distExists = existsSync(distEntry);
 
 if (!distExists) {
-	console.info("[publish] skipped — `bun run test:publish` builds dist/ first.");
+	console.info("[publish] skipped — no dist/; run `bun run build`, then `bun run test:publish`.");
 }
 
 /** Every subpath the package advertises, and whether it must load. */
@@ -96,8 +96,26 @@ const EXPORTS: Array<{ subpath: string; load: "esm" | "cjs" | "css" | null }> = 
 	{ subpath: "rspress-plugin-obsidian/package.json", load: null },
 ];
 
-/** Package entry subpaths, exercised in both module formats. */
-const ENTRIES = ["", "/markdown", "/canvas", "/graph"];
+/**
+ * Package entry subpaths, exercised in both module formats, with the runtime
+ * exports each must carry. The root is exactly the factories and
+ * `pluginObsidian`; helpers live on the feature entries.
+ */
+const ENTRIES: Array<{ name: string; exports: string[]; exact?: true }> = [
+	{ name: "", exports: ["canvas", "graphview", "markdown", "pluginObsidian"], exact: true },
+	{ name: "/markdown", exports: ["markdown", "resolveWikiLink", "buildContentIndex"] },
+	{ name: "/canvas", exports: ["canvas", "parseCanvas"] },
+	{ name: "/graph", exports: ["graphview"] },
+];
+
+function expectEntryExports(
+	loaded: Record<string, unknown>,
+	entry: (typeof ENTRIES)[number],
+): void {
+	const names = Object.keys(loaded).sort();
+	if (entry.exact) expect(names).toEqual([...entry.exports].sort());
+	else expect(names).toEqual(expect.arrayContaining(entry.exports));
+}
 
 test.skipIf(!distExists)(
 	"packed artifact",
@@ -180,21 +198,22 @@ test.skipIf(!distExists)(
 			//    relative to this test file, i.e. through the repository's package
 			//    self-reference rather than the tarball. Dynamic import is the point
 			//    here — the test exercises module loading of runtime-chosen files.
-			for (const name of ENTRIES) {
-				const loaded = require(`rspress-plugin-obsidian${name}`) as Record<string, unknown>;
-				expect(Object.keys(loaded).length).toBeGreaterThan(0);
+			for (const entry of ENTRIES) {
+				const loaded = require(`rspress-plugin-obsidian${entry.name}`) as Record<string, unknown>;
+				expectEntryExports(loaded, entry);
 			}
 			const unpackedExports = (
 				JSON.parse(readFileSync(path.join(installDir, "package.json"), "utf-8")) as {
 					exports: Record<string, { import: { default: string } }>;
 				}
 			).exports;
-			for (const name of ENTRIES) {
+			for (const entry of ENTRIES) {
+				const { name } = entry;
 				const target = unpackedExports[name === "" ? "." : `.${name}`]?.import.default;
 				if (!target) throw new Error(`no import condition for "${name || "."}"`);
 				const file = path.join(installDir, target);
 				const loaded = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
-				expect(Object.keys(loaded).length).toBeGreaterThan(0);
+				expectEntryExports(loaded, entry);
 			}
 
 			// 5. The aggregate stylesheet carries all three features.

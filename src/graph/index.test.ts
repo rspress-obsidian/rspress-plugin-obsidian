@@ -8,7 +8,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
 import { markdown } from "../markdown/index.js";
-import { setPublishedContent } from "../shared/published-content.js";
 import { decodeGraphPayload } from "./graph-payload.js";
 import { graphview } from "./index.js";
 import type { GraphData, GraphPayload } from "./types.js";
@@ -16,7 +15,6 @@ import type { GraphData, GraphPayload } from "./types.js";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-	setPublishedContent(undefined);
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -53,14 +51,17 @@ async function createDocs(
 	return { root, routes };
 }
 
-/** Run the hooks Rspress runs, in its order, for every plugin given. */
+/**
+ * Run the hooks Rspress runs, in its order, for every plugin given. Like
+ * Rspress, every hook sees a config whose `plugins` lists them all.
+ */
 async function runRspress(
 	plugins: RspressPlugin[],
 	routes: RouteMeta[],
 	config: UserConfig,
 	isProd = true,
 ): Promise<{ modules: Record<string, string>; config: UserConfig }> {
-	let current = config;
+	let current: UserConfig = { ...config, plugins };
 	for (const plugin of plugins) {
 		current =
 			(await plugin.config?.(current, { addPlugin: () => {}, removePlugin: () => {} }, isProd)) ??

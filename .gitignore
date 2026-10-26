@@ -29,3 +29,6 @@ skills-lock.json
 
 # Scratch written by scripts/check-doc-examples.ts (removed on exit, belt-and-braces)
 .doc-examples-*
+
+# Scratch written by test/clean.test.ts (removed after the test)
+.clean-test-*

@@ -457,10 +457,35 @@ describe("GraphView canvas painters", () => {
 		ref.current?.zoomToFit();
 		expect(calls.at(-1)).toEqual(["zoomToFit", 300, 16]);
 
-		ref.current?.centerOnCurrent();
-		expect(calls.at(-1)).toEqual(["centerAt", 0, 0, 0]);
-
 		expect(ref.current?.getStats()).toMatchObject({ nodes: 3, links: 2 });
+	});
+
+	test("centerOnCurrent pans to the current page's node, or to the origin before layout", async () => {
+		const ref = createRef<GraphViewHandle>();
+		render(<GraphView ref={ref} width={400} height={300} />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		const centered: unknown[][] = [];
+		const forceRef = capturedProps?.ref as { current: unknown } | undefined;
+		if (!forceRef) throw new Error("GraphView did not attach a ref to the force graph");
+		forceRef.current = { centerAt: (...args: unknown[]) => centered.push(args) };
+
+		// No simulated position yet: the layout's origin.
+		ref.current?.centerOnCurrent();
+		expect(centered.at(-1)).toEqual([0, 0, 300]);
+
+		// force-graph writes positions onto the node objects it was handed.
+		const graphData = capturedProps?.graphData as { nodes: Array<{ id: string }> } | undefined;
+		const nodes = graphData?.nodes ?? [];
+		for (const [index, node] of nodes.entries()) Object.assign(node, { x: index * 10, y: 5 });
+		const currentNode = nodes.find((node) => node.id === "/guide");
+		if (!currentNode) throw new Error("the current page was not rendered");
+		Object.assign(currentNode, { x: 120, y: -40 });
+
+		ref.current?.centerOnCurrent();
+		expect(centered.at(-1)).toEqual([120, -40, 300]);
 	});
 
 	test("reports a click on a navigable node, and ignores an unresolved one", async () => {

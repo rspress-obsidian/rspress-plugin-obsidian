@@ -1,7 +1,7 @@
 /**
  * The small tree passes of the remark pipeline, each over typed nodes.
  *
- * `remark-wikilink.ts` runs them in a documented order; none of them reads
+ * `render/transform.ts` runs them in a documented order; none of them reads
  * syntax out of text that the tokenizer could have claimed (see `syntax.ts`),
  * so their order only matters where one creates nodes another must skip.
  */

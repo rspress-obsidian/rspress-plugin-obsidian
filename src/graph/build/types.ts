@@ -1,4 +1,6 @@
 import type { ContentIndex } from "../../markdown/types.js";
+import type { CanvasBoards } from "../../shared/canvas-routes.js";
+import type { PublishedContentConfig } from "../../shared/published-content.js";
 import type { GraphData } from "../types.js";
 import type { PageTextCache } from "./page-content.js";
 
@@ -10,8 +12,19 @@ export interface CollectedRoute {
 }
 
 export interface GraphBuildOptions {
-	/** Rspress `root`, used when `markdown()` has not published its own roots. */
+	/** Rspress `root`, used when the site has no `markdown()` plugin. */
 	docsRoot: string;
+	/**
+	 * What the site's `markdown()` plugin publishes, so the graph indexes the
+	 * same roots with the same options; absent when the site has none.
+	 */
+	published?: PublishedContentConfig;
+	/**
+	 * The boards the site's `canvas()` plugin published, so a board's route is
+	 * graphed from its `.canvas` file and links to boards resolve; absent when
+	 * the site has none.
+	 */
+	canvasBoards?: CanvasBoards;
 	/** Rspress `base` (`/…/`); attachment nodes need it. */
 	base: string;
 	profile?: boolean;

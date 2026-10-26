@@ -12,7 +12,7 @@
  * anchor is injected instead and the assertions below fail.
  */
 
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
 import * as mermaidModule from "mermaid";
 import {
 	disposeMermaid,
@@ -21,7 +21,6 @@ import {
 	renderMermaidBlocks,
 	retainMermaid,
 	setMermaidLoader,
-	setMermaidSecurityLevel,
 } from "./blocks";
 import {
 	MERMAID_BLOCK_CLASS,
@@ -29,6 +28,7 @@ import {
 	MERMAID_INSTALL_HINT,
 	MERMAID_RENDERED_CLASS,
 	MERMAID_SECURITY_ATTRIBUTE,
+	MERMAID_STRICT_SCOPE_ATTRIBUTE,
 	MERMAID_UNAVAILABLE_ATTRIBUTE,
 } from "./classes";
 
@@ -132,9 +132,6 @@ afterEach(() => {
 	document.documentElement.classList.remove("dark");
 	document.body.innerHTML = "";
 	disposeMermaid();
-	// Mermaid's configuration is global, so a level applied by one test has to be
-	// dropped or the strict assertions in the others stop meaning anything.
-	setMermaidSecurityLevel("strict");
 });
 
 test("injects no javascript: URL for a hostile click directive", async () => {
@@ -145,6 +142,22 @@ test("injects no javascript: URL for a hostile click directive", async () => {
 	expect(injected().toLowerCase()).not.toContain("<script");
 	// The sanitized SVG, or nothing when the environment drops `<style>`-in-`<svg>`.
 	expect(injected() === "" || injected().includes("<svg")).toBe(true);
+});
+
+test("renders in a browser without Promise.withResolvers (Safari before 17.4)", async () => {
+	const rendered = createBlock("flowchart TD\n  A --> B");
+	const settled = waitForSettled(rendered.block);
+	const withResolvers = Promise.withResolvers;
+	// @ts-expect-error -- simulate an engine that predates the method
+	delete Promise.withResolvers;
+	try {
+		renderMermaidBlocks(rendered.root);
+		await settled;
+	} finally {
+		Promise.withResolvers = withResolvers;
+	}
+
+	expect(rendered.block.classList.contains(MERMAID_RENDERED_CLASS)).toBe(true);
 });
 
 test("applies a security level stamped on the placeholder", async () => {
@@ -184,6 +197,58 @@ test("does not let a loose stamp leak into the next route's unstamped blocks", a
 
 	expect(block.classList.contains(MERMAID_ERROR_CLASS)).toBe(false);
 	expect(injected()).not.toContain("javascript:");
+});
+
+test("renders an embedded canvas diagram strict while the page around it is loose", async () => {
+	// `MermaidBlocks` scans the whole body, canvas embeds included. The page's
+	// level comes from plugin configuration for notes; a canvas board's diagrams
+	// never take it, whether they stamp nothing (what the canvas emits) or a level.
+	const page = createBlock(HOSTILE_DIAGRAM, true, "loose");
+	const board = createBlock(HOSTILE_DIAGRAM);
+	board.root.setAttribute(MERMAID_STRICT_SCOPE_ATTRIBUTE, "");
+	const stamped = createBlock(HOSTILE_DIAGRAM, true, "loose");
+	stamped.root.setAttribute(MERMAID_STRICT_SCOPE_ATTRIBUTE, "");
+	const settled = Promise.all([page, board, stamped].map(({ block }) => waitForSettled(block)));
+
+	renderMermaidBlocks(document.body);
+	await settled;
+
+	expect(page.injected()).toContain("javascript:");
+	for (const canvas of [board, stamped]) {
+		expect(canvas.block.classList.contains(MERMAID_RENDERED_CLASS)).toBe(true);
+		expect(canvas.injected()).not.toContain("javascript:");
+	}
+});
+
+test("renders an unstamped diagram strict beside a loose one in the same scan", async () => {
+	const loose = createBlock(HOSTILE_DIAGRAM, true, "loose");
+	const unstamped = createBlock(HOSTILE_DIAGRAM);
+	const settled = Promise.all([waitForSettled(loose.block), waitForSettled(unstamped.block)]);
+
+	renderMermaidBlocks(document.body);
+	await settled;
+
+	expect(loose.injected()).toContain("javascript:");
+	expect(unstamped.injected()).not.toContain("javascript:");
+});
+
+test("renders each diagram at its own level when scans at different levels overlap", async () => {
+	// Each scan starts before the previous one's import resolves: a level read
+	// when the render begins, rather than when its scan ran, would let the last
+	// scan's level decide every diagram's.
+	const strict = createBlock(HOSTILE_DIAGRAM, true, "strict");
+	const unstamped = createBlock(HOSTILE_DIAGRAM);
+	const loose = createBlock(HOSTILE_DIAGRAM, true, "loose");
+	const settled = Promise.all([strict, unstamped, loose].map(({ block }) => waitForSettled(block)));
+
+	renderMermaidBlocks(strict.root);
+	renderMermaidBlocks(unstamped.root);
+	renderMermaidBlocks(loose.root);
+	await settled;
+
+	expect(strict.injected()).not.toContain("javascript:");
+	expect(unstamped.injected()).not.toContain("javascript:");
+	expect(loose.injected()).toContain("javascript:");
 });
 
 test("does not re-render a block that already holds a diagram", () => {
@@ -341,5 +406,63 @@ describe("without the optional mermaid peer", () => {
 		expect(() => mermaidFromModule(undefined)).toThrow(MermaidUnavailableError);
 		const real = mermaidFromModule(mermaidModule);
 		expect(typeof real.render).toBe("function");
+	});
+});
+
+describe("a render that times out", () => {
+	afterEach(() => {
+		jest.useRealTimers();
+		setMermaidLoader(null);
+	});
+
+	test("holds the queue until mermaid finishes it, and discards its late result", async () => {
+		jest.useFakeTimers();
+		const events: string[] = [];
+		const slowStarted = Promise.withResolvers<void>();
+		const slowResult = Promise.withResolvers<{ svg: string }>();
+		setMermaidLoader(() =>
+			Promise.resolve({
+				default: {
+					initialize: (config: { securityLevel: string }) => {
+						events.push(`initialize ${config.securityLevel}`);
+					},
+					render: (_id: string, code: string) => {
+						events.push(`render ${code}`);
+						if (code !== "slow") return Promise.resolve({ svg: `<svg>${code}</svg>` });
+						slowStarted.resolve();
+						return slowResult.promise.finally(() => events.push("slow settled"));
+					},
+				},
+			}),
+		);
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const slow = createBlock("slow");
+			const fast = createBlock("fast", true, "loose");
+			renderMermaidBlocks(document.body);
+			await slowStarted.promise;
+
+			jest.advanceTimersByTime(10_000);
+			await waitForSettled(slow.block);
+			expect(slow.block.classList.contains(MERMAID_ERROR_CLASS)).toBe(true);
+			for (let turn = 0; turn < 50; turn += 1) await nextMicrotask();
+			// Still inside mermaid: re-initializing it for the loose diagram now
+			// would change the config under the running render.
+			expect(events).toEqual(["initialize strict", "render slow"]);
+
+			slowResult.resolve({ svg: "<svg>late</svg>" });
+			await waitForSettled(fast.block);
+			expect(events).toEqual([
+				"initialize strict",
+				"render slow",
+				"slow settled",
+				"initialize loose",
+				"render fast",
+			]);
+			expect(fast.injected()).toBe("<svg>fast</svg>");
+			expect(slow.injected()).toBe("");
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });

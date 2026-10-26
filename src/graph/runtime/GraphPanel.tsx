@@ -86,9 +86,40 @@ function readFilterSettings(value: unknown): GraphFilterSettings {
 	};
 }
 
+/** A stored JSON value; `undefined` when missing, unreadable or not valid JSON. */
 function readStoredJson(key: string): unknown {
-	const raw = localStorage.getItem(key);
-	return raw ? JSON.parse(raw) : undefined;
+	try {
+		const raw = localStorage.getItem(key);
+		return raw ? JSON.parse(raw) : undefined;
+	} catch {
+		// Unavailable storage (private mode, storage disabled) or a corrupt value.
+		return undefined;
+	}
+}
+
+interface PanelPosition {
+	x: number;
+	y: number;
+}
+
+const DEFAULT_PANEL_POSITION: PanelPosition = { x: 0, y: 0 };
+
+/** Stored panel offset; anything but a pair of finite numbers keeps the default. */
+function readPanelPosition(value: unknown): PanelPosition {
+	const stored: Record<string, unknown> = value && typeof value === "object" ? { ...value } : {};
+	const { x, y } = stored;
+	return typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)
+		? { x, y }
+		: DEFAULT_PANEL_POSITION;
+}
+
+/** Writes one key; storage may be unavailable (private mode, SSR, storage disabled). */
+function writeStored(key: string, value: string): void {
+	try {
+		localStorage.setItem(key, value);
+	} catch {
+		// Nothing to persist to; the panel keeps working from memory.
+	}
 }
 
 function injectKeyframes() {
@@ -134,7 +165,7 @@ export default function GraphPanel({
 	const pathname = usePathname();
 	const [isHydrated, setIsHydrated] = useState(false);
 	const [isOpen, setIsOpen] = useState(defaultOpen);
-	const [pos, setPos] = useState({ x: 0, y: 0 });
+	const [pos, setPos] = useState(DEFAULT_PANEL_POSITION);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [windowSize, setWindowSize] = useState({ width: 1000, height: 800 });
 	const [panelSize, setPanelSize] = useState({ width: 320, height: 252 });
@@ -163,25 +194,26 @@ export default function GraphPanel({
 
 	useEffect(() => {
 		setIsHydrated(true);
+		let storedOpen: string | null = null;
 		try {
-			const storedOpen = localStorage.getItem(LOCAL_STORAGE_KEY_OPEN);
-			if (storedOpen !== null) setIsOpen(storedOpen === "true");
-			// On a phone the open panel covers about half the article, so
-			// `defaultOpen` does not apply there; the reader opens it from the FAB
-			// or `g`, and that choice is remembered as on any screen.
-			else if (!readerOpenedRef.current && window.matchMedia?.(NARROW_VIEWPORT_QUERY).matches) {
-				setIsOpen(false);
-			}
-
-			const storedPos = localStorage.getItem(LOCAL_STORAGE_KEY_POS);
-			if (storedPos) setPos(JSON.parse(storedPos));
-
-			setFilterSettings(readFilterSettings(readStoredJson(LOCAL_STORAGE_KEY_FILTERS)));
-			setDisplay(readDisplaySettings(readStoredJson(LOCAL_STORAGE_KEY_DISPLAY)));
-			setForces(readForceSettings(readStoredJson(LOCAL_STORAGE_KEY_FORCES)));
+			storedOpen = localStorage.getItem(LOCAL_STORAGE_KEY_OPEN);
 		} catch {
-			// localStorage may be unavailable (private mode, SSR, storage disabled)
+			// localStorage may be unavailable (private mode, storage disabled)
 		}
+		if (storedOpen !== null) setIsOpen(storedOpen === "true");
+		// On a phone the open panel covers about half the article, so
+		// `defaultOpen` does not apply there; the reader opens it from the FAB
+		// or `g`, and that choice is remembered as on any screen.
+		else if (!readerOpenedRef.current && window.matchMedia?.(NARROW_VIEWPORT_QUERY).matches) {
+			setIsOpen(false);
+		}
+
+		// Each key is read and validated on its own, so one corrupt value falls
+		// back to its default without discarding the others.
+		setPos(readPanelPosition(readStoredJson(LOCAL_STORAGE_KEY_POS)));
+		setFilterSettings(readFilterSettings(readStoredJson(LOCAL_STORAGE_KEY_FILTERS)));
+		setDisplay(readDisplaySettings(readStoredJson(LOCAL_STORAGE_KEY_DISPLAY)));
+		setForces(readForceSettings(readStoredJson(LOCAL_STORAGE_KEY_FORCES)));
 	}, []);
 
 	useEffect(() => {
@@ -189,18 +221,22 @@ export default function GraphPanel({
 		setPanelVisible(isOpen);
 	}, [isHydrated, isOpen]);
 
+	// One effect per key: a key is written only when its own value changes.
 	useEffect(() => {
-		if (!isHydrated) return;
-		try {
-			localStorage.setItem(LOCAL_STORAGE_KEY_OPEN, String(isOpen));
-			localStorage.setItem(LOCAL_STORAGE_KEY_POS, JSON.stringify(pos));
-			localStorage.setItem(LOCAL_STORAGE_KEY_FILTERS, JSON.stringify(filterSettings));
-			localStorage.setItem(LOCAL_STORAGE_KEY_DISPLAY, JSON.stringify(display));
-			localStorage.setItem(LOCAL_STORAGE_KEY_FORCES, JSON.stringify(forces));
-		} catch {
-			// localStorage may be unavailable (private mode, SSR, storage disabled)
-		}
-	}, [isOpen, pos, filterSettings, display, forces, isHydrated]);
+		if (isHydrated) writeStored(LOCAL_STORAGE_KEY_OPEN, String(isOpen));
+	}, [isHydrated, isOpen]);
+	useEffect(() => {
+		if (isHydrated) writeStored(LOCAL_STORAGE_KEY_POS, JSON.stringify(pos));
+	}, [isHydrated, pos]);
+	useEffect(() => {
+		if (isHydrated) writeStored(LOCAL_STORAGE_KEY_FILTERS, JSON.stringify(filterSettings));
+	}, [isHydrated, filterSettings]);
+	useEffect(() => {
+		if (isHydrated) writeStored(LOCAL_STORAGE_KEY_DISPLAY, JSON.stringify(display));
+	}, [isHydrated, display]);
+	useEffect(() => {
+		if (isHydrated) writeStored(LOCAL_STORAGE_KEY_FORCES, JSON.stringify(forces));
+	}, [isHydrated, forces]);
 
 	// Note text loads only once a query (or a colour group) reads it.
 	const needsSearchText = useMemo(
@@ -254,9 +290,12 @@ export default function GraphPanel({
 	const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
 		if (!isDragging.current) return;
 		isDragging.current = false;
+		// The live position lived only on the wrapper's style; commit it once.
 		const dx = e.clientX - dragStart.current.x;
 		const dy = e.clientY - dragStart.current.y;
-		setPos({ x: dragStart.current.posX + dx, y: dragStart.current.posY + dy });
+		if (dx !== 0 || dy !== 0) {
+			setPos({ x: dragStart.current.posX + dx, y: dragStart.current.posY + dy });
+		}
 		if (wrapperRef.current) {
 			wrapperRef.current.style.transition =
 				"bottom 0.4s cubic-bezier(0.25, 1, 0.5, 1), right 0.4s cubic-bezier(0.25, 1, 0.5, 1), width 0.4s cubic-bezier(0.25, 1, 0.5, 1), height 0.4s cubic-bezier(0.25, 1, 0.5, 1), transform 0.4s cubic-bezier(0.25, 1, 0.5, 1)";

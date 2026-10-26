@@ -148,7 +148,7 @@ Edges are the links each page makes, resolved by the Markdown plugin's resolver,
 | Tags, inline and frontmatter | One tag node per tag, matched without regard to case or Unicode normalization (`#Project` and `#project` are one node; `#日本語` and `#café` are whole tags). The node opens the tag page when the Markdown plugin generates it. |
 | Attachments: `![[diagram.png]]`, `[spec](assets/spec.pdf)` | Attachment nodes, shown when **Attachments** is on |
 | Links to missing notes | Unresolved nodes, shown when **Existing files only** is off and reported per [`onUnresolvedLink`](./configuration.md#handle-unresolved-links) |
-| Canvas boards | A board links to each file card's note or file and to the links and tags in its text cards. Link cards (web pages) and canvas-only arrows add nothing. |
+| Canvas boards | A board links to each file card's note or file and to the links and tags in its text cards. Link cards (web pages) and canvas-only arrows add nothing; neither does a file card showing a `publish: false` note, which the board itself publishes without the note's name. |
 | Daily notes | Ordinary notes |
 | Headings and block IDs | No nodes of their own; they are parts of their page |
 

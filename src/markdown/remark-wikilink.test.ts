@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,10 +9,16 @@ import remarkStringify from "remark-stringify";
 import { unified } from "unified";
 import { VFile } from "vfile";
 import { toMarkdownMathHandlers } from "../../test/markdown/math-element";
-import { setCanvasRoutes } from "../shared/canvas-routes.js";
+import { createCanvasBoards } from "../shared/canvas-routes.js";
 import { normalizeLookupValue } from "../shared/slug.js";
 import { remarkWikilink } from "./remark-wikilink.ts";
-import type { ContentAsset, ContentIndex, ContentPage, NormalizedPluginOptions } from "./types.ts";
+import type {
+	ContentAsset,
+	ContentIndex,
+	ContentPage,
+	NormalizedPluginOptions,
+	RemarkWikiLinkPluginOptions,
+} from "./types.ts";
 
 const basicRoot = path.resolve(process.cwd(), "test/markdown/fixtures/basic");
 const assetsRoot = path.resolve(process.cwd(), "test/markdown/fixtures/assets");
@@ -67,12 +74,14 @@ function makeProcessor(
 	docsRoot: string,
 	optionOverrides: Partial<NormalizedPluginOptions> = {},
 	getContentIndex?: (filePath: string) => Promise<ContentIndex>,
+	pluginOverrides: Partial<RemarkWikiLinkPluginOptions> = {},
 ) {
 	return unified()
 		.use(remarkParse)
 		.use(remarkWikilink, {
 			getDocsRoot: () => docsRoot,
 			...(getContentIndex ? { getContentIndex } : {}),
+			...pluginOverrides,
 			options: { ...DEFAULT_OPTIONS, ...optionOverrides },
 		})
 		.use(remarkStringify, { handlers: toMarkdownMathHandlers });
@@ -335,14 +344,109 @@ describe("wikilink diagnostics", () => {
 		const processor = makeProcessor(basicRoot, {}, async () => {
 			throw new Error("index unavailable");
 		});
-		const file = await processor.process({
-			value: "See [[guide/getting-started]] here.",
-			path: path.resolve(basicRoot, "index.md"),
-		});
+		const warn = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const file = await processor.process({
+				value: "See [[guide/getting-started]] here.",
+				path: path.resolve(basicRoot, "index.md"),
+			});
 
-		expect(file.messages).toHaveLength(1);
-		expect(String(file.messages[0])).toContain("Unexpected error processing");
-		expect(String(file.messages[0])).toContain("index unavailable");
+			expect(file.messages).toHaveLength(1);
+			expect(String(file.messages[0])).toContain("Unexpected error processing");
+			expect(String(file.messages[0])).toContain("index unavailable");
+			// The error itself travels with the message and the printed warning,
+			// so its stack is not lost.
+			expect((file.messages[0]?.cause as Error | undefined)?.message).toBe("index unavailable");
+			const printed = warn.mock.calls.flat().find((arg) => arg instanceof Error) as
+				| Error
+				| undefined;
+			expect(printed?.stack).toContain("index unavailable");
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	test("an unexpected error after a broken link still fails an error-mode build, naming both", async () => {
+		const currentPage = makePage({ filePathKey: "index" });
+		// A page whose block list cannot be read: the pass reaches it only after
+		// every link has been resolved, standing in for any internal fault there.
+		Object.defineProperty(currentPage, "blocks", {
+			get() {
+				throw new Error("block list unavailable");
+			},
+		});
+		const processor = makeProcessor("/vault", { onBrokenLink: "error" }, async () =>
+			makeIndex([currentPage]),
+		);
+
+		const failure = await processor
+			.process({ value: "See [[nonexistent]].", path: "/vault/index.md" })
+			.then(
+				() => undefined,
+				(error: unknown) => error as { message: string; fatal?: boolean; cause?: unknown },
+			);
+
+		expect(failure?.fatal).toBe(true);
+		expect(failure?.message).toContain("failed to resolve");
+		expect(failure?.message).toContain("[[nonexistent]]");
+		expect(failure?.message).toContain("block list unavailable");
+		expect((failure?.cause as Error | undefined)?.message).toBe("block list unavailable");
+	});
+
+	test('mathEngine "mathjax" without mathjax-full fails the build with the install hint, loading once', () => {
+		// Run in a child process: the resolver hook that hides the package, and
+		// the engine state it leaves behind, must not leak into other tests. The
+		// child imports dynamically so the hook is registered before anything loads.
+		const script = `
+			let lookups = 0;
+			Bun.plugin({
+				name: "without-mathjax",
+				setup(build) {
+					build.onResolve({ filter: /^mathjax-full(\\/|$)/ }, (args) => {
+						lookups += 1;
+						throw new Error("Cannot find package '" + args.path + "'");
+					});
+				},
+			});
+			const { unified } = await import("unified");
+			const { default: remarkParse } = await import("remark-parse");
+			const { default: remarkStringify } = await import("remark-stringify");
+			const { remarkWikilink } = await import(${JSON.stringify(path.resolve("src/markdown/remark-wikilink.ts"))});
+			const { normalizePluginOptions } = await import(${JSON.stringify(path.resolve("src/markdown/normalize-options.ts"))});
+			const processor = unified()
+				.use(remarkParse)
+				.use(remarkWikilink, {
+					getDocsRoot: () => ${JSON.stringify(basicRoot)},
+					options: normalizePluginOptions({ enableMath: true, mathEngine: "mathjax" }),
+				})
+				.use(remarkStringify);
+			const results = [];
+			for (const name of ["index.md", "guide/advanced.md"]) {
+				const outcome = await processor
+					.process({ value: "Energy is $E = mc^2$.", path: ${JSON.stringify(basicRoot)} + "/" + name })
+					.then(() => ({ failed: false }), (error) => ({ failed: true, fatal: error.fatal === true, message: String(error.message) }));
+				results.push({ ...outcome, lookups });
+			}
+			console.log(JSON.stringify(results));
+		`;
+		const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8" });
+		const results = JSON.parse(child.stdout.trim().split("\n").at(-1) ?? "[]") as Array<{
+			failed: boolean;
+			fatal?: boolean;
+			message?: string;
+			lookups: number;
+		}>;
+
+		expect(results).toHaveLength(2);
+		for (const result of results) {
+			expect(result.failed).toBe(true);
+			expect(result.fatal).toBe(true);
+			expect(result.message).toContain('needs the optional "mathjax-full" package');
+			expect(result.message).toContain("bun add mathjax-full");
+		}
+		// The second page reuses the first page's outcome instead of retrying.
+		expect(results[0]?.lookups).toBeGreaterThan(0);
+		expect(results[1]?.lookups).toBe(results[0]?.lookups);
 	});
 });
 
@@ -582,6 +686,49 @@ describe("transclusion diagnostics", () => {
 
 		expect(file.messages.some((m) => String(m).includes("Failed to read"))).toBe(true);
 		expect(String(file)).toContain('data-obsidian-embed="true"');
+	});
+
+	// The index still lists the section, but the file no longer has it (edited
+	// since it was indexed, as in `rspress dev`): the embed falls back to a link
+	// to the page and the diagnostic names the sections the index knows.
+	test.each([
+		["#Gone", 'Heading "Gone" not found in "target.md"', "available: Kept, Gone;"],
+		["#^gone", 'Block "gone" not found in "target.md"', "available: ^kept, ^gone;"],
+	])("reports a section %s the file no longer has", async (subpath, notFound, available) => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stale-section-"));
+		try {
+			const targetPath = path.join(dir, "target.md");
+			fs.writeFileSync(targetPath, "# Kept\n\nText ^kept\n");
+			const kept = { rawText: "Kept", slug: "kept" };
+			const gone = { rawText: "Gone", slug: "gone" };
+			const byKey = new Map([
+				["kept", kept],
+				["gone", gone],
+			]);
+			const target = makePage({
+				filePathKey: "target",
+				absolutePath: targetPath,
+				headings: [kept, gone],
+				headingBySlug: byKey,
+				headingByText: byKey,
+				blocks: [{ id: "kept" }, { id: "gone" }],
+			});
+			const index = makeIndex([makePage({ filePathKey: "index" }), target]);
+			const processor = makeProcessor("/vault", { enableTransclusion: true }, async () => index);
+
+			const file = await processor.process({
+				value: `![[target${subpath}]]`,
+				path: "/vault/index.md",
+			});
+
+			const message = file.messages.map(String).find((m) => m.includes("not found in"));
+			expect(message).toContain(notFound);
+			expect(message).toContain(available);
+			expect(String(file)).not.toContain('class="obsidian-transclusion"');
+			expect(String(file)).toContain("/target");
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -832,9 +979,12 @@ describe("callout restoration guards", () => {
 });
 
 describe("canvas boards in wikilinks", () => {
-	afterEach(() => {
-		setCanvasRoutes([]);
-	});
+	const published = {
+		getCanvasBoards: async () =>
+			createCanvasBoards([
+				{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
+			]),
+	};
 
 	function canvasFixture() {
 		const currentPage = makePage({ filePathKey: "index" });
@@ -848,11 +998,13 @@ describe("canvas boards in wikilinks", () => {
 	}
 
 	test("embeds a published board as the CanvasEmbed component", async () => {
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
 		const { index } = canvasFixture();
-		const processor = makeProcessor("/vault", { enableMediaEmbeds: true }, async () => index);
+		const processor = makeProcessor(
+			"/vault",
+			{ enableMediaEmbeds: true },
+			async () => index,
+			published,
+		);
 
 		// The component only exists in an MDX-compiled tree, so assert on the
 		// AST: `remarkStringify` has no handler for a JSX node.
@@ -869,11 +1021,8 @@ describe("canvas boards in wikilinks", () => {
 	});
 
 	test("links a published board when media embeds are off", async () => {
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
 		const { index } = canvasFixture();
-		const processor = makeProcessor("/vault", {}, async () => index);
+		const processor = makeProcessor("/vault", {}, async () => index, published);
 
 		const file = await processor.process({
 			value: "![[Demo.canvas]]",
@@ -887,11 +1036,8 @@ describe("canvas boards in wikilinks", () => {
 	});
 
 	test("links a plain board wikilink to the viewer route", async () => {
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
 		const { index } = canvasFixture();
-		const processor = makeProcessor("/vault", {}, async () => index);
+		const processor = makeProcessor("/vault", {}, async () => index, published);
 
 		const file = await processor.process({
 			value: "See [[Demo.canvas]] for the plan.",

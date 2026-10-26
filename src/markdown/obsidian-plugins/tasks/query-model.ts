@@ -143,8 +143,3 @@ export function makeFilter(
 		},
 	};
 }
-
-/** `text` as a literal inside a regular expression. */
-export function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
-}

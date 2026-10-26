@@ -1,13 +1,18 @@
 ---
 title: API Reference
-description: Every markdown() option with its type and default, plus the helpers and types rspress-plugin-obsidian exports for building your own pipeline.
+description: Every markdown() option with its type and default, plus the helpers and types the rspress-plugin-obsidian/markdown entry exports for building your own pipeline.
 ---
 
 # API Reference
 
 This page lists every option `markdown()` accepts, then the helpers and types
-the package exports. To learn how a feature works, read its guide. Come here
-when you need an option's exact name, type or default.
+for building your own pipeline. To learn how a feature works, read its guide.
+Come here when you need an option's exact name, type or default.
+
+The package root, `rspress-plugin-obsidian`, exports the three plugins,
+`pluginObsidian` and the types of their options. The helpers and the index
+types below come from the Markdown feature's own entry,
+`rspress-plugin-obsidian/markdown`.
 
 ## Options
 
@@ -35,15 +40,18 @@ export default defineConfig({
 ```
 
 To combine Markdown with Canvas and Graph View, register all three through
-`pluginObsidian((markdown, canvas, graphview) => [...])`. The options below are
-the same either way.
+`pluginObsidian`. Its optional first argument takes the options every feature
+shares, `vaultRoot` and `vaultRoutePrefix`, so the vault is named once:
+`pluginObsidian({ vaultRoot }, (markdown, canvas, graphview) => [...])`. An
+option passed to `markdown()` itself wins over the shared one. The options
+below are the same either way.
 
 ### Vault and routes
 
 | Option | Type | Default | What it does |
 |--------|------|---------|--------------|
 | `vaultRoot` | `string` | unset | Path to an Obsidian vault, published alongside `docs/`. A relative path resolves from the working directory. When unset, the plugin publishes only the docs directory. See [Publishing a vault](./advanced.md#publishing-a-vault). |
-| `vaultRoutePrefix` | `string` | `"/vault"` | Route prefix for vault pages and attachments. `Notes/Setup.md` publishes at `/vault/Notes/Setup`. If you use Canvas, its `fileRoutePrefix` must match this value. |
+| `vaultRoutePrefix` | `string` | `"/vault"` | Route prefix for vault pages and attachments. `Notes/Setup.md` publishes at `/vault/Notes/Setup`. If you use Canvas, its `fileRoutePrefix` must match this value; set both at once with `pluginObsidian`'s shared `vaultRoutePrefix`. |
 
 ### Link resolution
 
@@ -147,6 +155,13 @@ It takes the plugin's runtime context:
 - `getPublishedIndexes()` (optional): every published index, read by Tasks and Bases.
 - `getSiteBase()` (optional): the site `base`, used to build media URLs.
 - `getKatexStylesheetHref()` (optional): where KaTeX's stylesheet is served. When unset, pages link no KaTeX stylesheet.
+- `getCanvasBoards()` (optional): a promise of the boards the site's
+  `canvas()` plugin published, so `[[Board.canvas]]` links to the board's
+  viewer route and `![[Board.canvas]]` renders `<CanvasEmbed>`. It settles
+  once the canvas scan running beside it has finished. `markdown()` sets it
+  from the canvas plugin listed in the same site, and then a `.canvas` file
+  that plugin did not publish is a broken link rather than an attachment.
+  When unset, a board link is a plain attachment link.
 - `options`: a complete `NormalizedPluginOptions`. This is every option above
   with its default filled in, `vaultRoot` made absolute, and `dailyNotes` fully
   populated.
@@ -165,7 +180,7 @@ It rescans on every call. The scan skips hidden files and folders,
 | `unlinkedMentions` | `boolean` | `false` | Keeps a stripped copy of each page body so `getMentions` can find pages that name another page. |
 
 ```ts
-import { buildContentIndex } from "rspress-plugin-obsidian";
+import { buildContentIndex } from "rspress-plugin-obsidian/markdown";
 
 const index = await buildContentIndex("/path/to/docs");
 console.log(index.pages.length);
@@ -193,7 +208,7 @@ frontmatter properties. `tags` holds frontmatter and inline tags without the
 Finds every wikilink and embed in a string.
 
 ```ts
-import { findWikilinkMatches } from "rspress-plugin-obsidian";
+import { findWikilinkMatches } from "rspress-plugin-obsidian/markdown";
 
 const matches = findWikilinkMatches("Check [[Page1]] and ![[Page2|Embed]].");
 // matches[0] → { fullMatch: "[[Page1]]", inner: "Page1", start: 6, end: 15 }
@@ -207,7 +222,7 @@ const matches = findWikilinkMatches("Check [[Page1]] and ![[Page2|Embed]].");
 Splits a wikilink into its target, alias and subpath.
 
 ```ts
-import { parseWikiLink } from "rspress-plugin-obsidian";
+import { parseWikiLink } from "rspress-plugin-obsidian/markdown";
 
 const parsed = parseWikiLink(
   "guide/getting-started#Install|Install guide",
@@ -237,7 +252,7 @@ import {
   findWikilinkMatches,
   parseWikiLink,
   resolveWikiLink,
-} from "rspress-plugin-obsidian";
+} from "rspress-plugin-obsidian/markdown";
 
 const index = await buildContentIndex("/path/to/docs");
 const currentPage = index.byPathKey.get("guide/intro")!;
@@ -265,7 +280,7 @@ for an index from `buildContentIndex` or `getCachedContentIndex` this call just
 reads a property. Indexes you build by hand go through a fallback cache.
 
 ```ts
-import { getCachedBacklinksIndex, getCachedContentIndex } from "rspress-plugin-obsidian";
+import { getCachedBacklinksIndex, getCachedContentIndex } from "rspress-plugin-obsidian/markdown";
 
 const index = await getCachedContentIndex("/path/to/docs");
 const backlinks = await getCachedBacklinksIndex(index);
@@ -291,7 +306,7 @@ be built with `unlinkedMentions: true`; otherwise the map is empty. A page that
 also links to the target appears only as a backlink, not as a mention.
 
 ```ts
-import { getCachedContentIndex, getMentions } from "rspress-plugin-obsidian";
+import { getCachedContentIndex, getMentions } from "rspress-plugin-obsidian/markdown";
 
 const index = await getCachedContentIndex("/path/to/docs", { unlinkedMentions: true });
 console.log(getMentions(index).get("/guide/getting-started"));
@@ -318,7 +333,7 @@ Returns one `{ routePath, content }` page per tag, in the shape that the Rspress
 `addPages` hook expects.
 
 ```ts
-import { buildContentIndex, generateTagPages } from "rspress-plugin-obsidian";
+import { buildContentIndex, generateTagPages } from "rspress-plugin-obsidian/markdown";
 
 const index = await buildContentIndex("/path/to/docs");
 const pages = generateTagPages(index);
@@ -331,7 +346,7 @@ Encodes a tag for use in a URL path. It keeps Unicode letters, `-`, `_` and the
 nested-tag `/`, and encodes whitespace and reserved characters.
 
 ```ts
-import { encodeTagPathSegment } from "rspress-plugin-obsidian";
+import { encodeTagPathSegment } from "rspress-plugin-obsidian/markdown";
 
 encodeTagPathSegment("hello world");  // "hello%20world"
 encodeTagPathSegment("parent/child"); // "parent/child"
@@ -352,7 +367,7 @@ Fills in the defaults listed in [`dailyNotes`](#dailynotes) and trims leading an
 trailing slashes from `folder` and `template`.
 
 ```ts
-import { normalizeDailyNoteConfig } from "rspress-plugin-obsidian";
+import { normalizeDailyNoteConfig } from "rspress-plugin-obsidian/markdown";
 
 const config = normalizeDailyNoteConfig({ folder: "Daily" });
 ```
@@ -367,6 +382,12 @@ exist, such as `2026-02-30`.
 
 Formats a local date with Moment.js tokens (`YYYY`, `MM`, `Do`, `dddd`, `ww`,
 `W`, `gggg`, `HH`, `mm`, `A`, `[literal]`, …).
+
+```ts
+import { formatDailyNoteDate } from "rspress-plugin-obsidian/markdown";
+
+formatDailyNoteDate(new Date(2026, 0, 5), "dddd, MMMM Do YYYY"); // "Monday, January 5th 2026"
+```
 
 ### `expandDailyTemplateText(value: string, date: Date, format?: string, now?: Date): string`
 
@@ -406,9 +427,11 @@ scope, as Dataview does. Returns a `<span>` or an `error`.
 
 ## Types
 
-All of these are exported as types from `rspress-plugin-obsidian`. The
-declarations ship with doc comments in `dist/index.d.ts`, so your editor shows
-the same information.
+All of these are exported as types from `rspress-plugin-obsidian/markdown`.
+The declarations ship with doc comments in `dist/markdown/index.d.ts`, so your
+editor shows the same information. The option types —
+`RspressPluginMarkdownOptions`, `DailyNotesOptions`, `DiagnosticMode` and the
+plugin option objects — are exported from the package root as well.
 
 `RspressPluginMarkdownOptions` is the options object described in
 [Options](#options). `NormalizedPluginOptions` is the same object with every
@@ -450,7 +473,9 @@ interface ResolveContext {
   fallbackIndexes?: ContentIndex[]; // Default: index.linkedIndexes
   options?: Partial<
     Pick<NormalizedPluginOptions, "enableFuzzyMatching" | "enableCaseInsensitiveLookup">
-  >;
+  > & {
+    canvasBoards?: CanvasBoards; // The site's published boards; unset, a board is an attachment
+  };
 }
 
 type ResolveStatus = "ok" | "broken-page" | "broken-anchor" | "ambiguous-page";

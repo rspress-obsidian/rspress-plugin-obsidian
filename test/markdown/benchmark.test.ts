@@ -29,9 +29,9 @@ Keep linking: [[another-page]] [[third-page]] [[fourth]] [[fifth]]
  * Wall-clock budgets only hold on an idle dev box: `< 100 ms` for 10k iterations
  * is a different number on a 2-vCPU CI runner, and one miss used to abort the
  * whole run — so the coverage step never executed. Asserting a budget therefore
- * requires `RUN_BENCH_TESTS=1` (the same shape as `RUN_PUBLISH_TESTS` in
- * test/publish/dist.test.ts); the timings are still measured and logged, and the
- * correctness assertions in these tests run either way.
+ * requires `RUN_BENCH_TESTS=1` (the same opt-in shape as `RUN_DOCS_BUILD_TESTS`
+ * in test/markdown/integration.test.ts); the timings are still measured and
+ * logged, and the correctness assertions in these tests run either way.
  */
 const runBenchmarks = process.env.RUN_BENCH_TESTS === "1";
 

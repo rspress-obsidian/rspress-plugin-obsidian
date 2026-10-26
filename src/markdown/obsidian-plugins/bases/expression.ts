@@ -10,7 +10,7 @@
  * rejects object literals (`{"a": 1}`), unary `+`, and a method on a bare
  * number (`1.isTruthy()`; `(1).isTruthy()` is fine), so this one does too.
  */
-import { assertSafeRegex, UnsafeRegexError } from "../../safe-regex.js";
+import { assertSafeRegex, UnsafeRegexError } from "../../../shared/safe-regex.js";
 
 export type Expr =
 	| { kind: "literal"; value: null | boolean | number | string }
@@ -196,7 +196,7 @@ function readRegex(source: string, start: number): [string, string, number] {
 	while (end < source.length && /[dgimsuyv]/.test(source[end] ?? "")) end += 1;
 	const flags = source.slice(at + 1, end);
 	try {
-		assertSafeRegex(pattern);
+		assertSafeRegex(pattern, flags);
 		new RegExp(pattern, flags);
 	} catch (error) {
 		throw new ExpressionSyntaxError(

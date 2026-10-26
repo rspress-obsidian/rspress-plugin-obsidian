@@ -47,6 +47,27 @@ then links to `/vault/Welcome`, the page the markdown plugin publishes. Without
 it the card links to `/Welcome`, which no page serves, and the build logs a
 warning.
 
+With [`pluginObsidian`](/getting-started#canvas-and-the-graph-view), name the vault once in
+its shared options instead. `canvas()` then scans the shared `vaultRoot`, and
+its `fileRoutePrefix` defaults to the shared `vaultRoutePrefix` (`"/vault"`
+unless you set one):
+
+```ts
+import path from "node:path";
+import { defineConfig } from "@rspress/core";
+import { pluginObsidian } from "rspress-plugin-obsidian";
+
+export default defineConfig({
+  root: "docs",
+  plugins: pluginObsidian(
+    { vaultRoot: path.join(import.meta.dirname, "Obsidian Vault"), vaultRoutePrefix: "/vault" },
+    (markdown, canvas) => [markdown(), canvas({ routePrefix: "/canvas" })],
+  ),
+});
+```
+
+An option passed to `canvas()` itself wins over the shared one.
+
 The canvas stylesheet is injected for you. Every other option is described in
 [Configuration](./configuration.md).
 

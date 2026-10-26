@@ -5,12 +5,12 @@
  * link, tag, formula or embed in a card behaves as it does in a note.
  */
 import fs from "node:fs";
-import { escapeHtmlAttribute, escapeHtmlText } from "../../../shared/escape.js";
+import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shared/escape.js";
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
+import { formatMomentDate, parseMomentDate } from "../../../shared/moment-format.js";
 import { tagRoutePath } from "../../../shared/paths.js";
-import { formatDailyNoteDate, parseMomentDate } from "../../daily-notes.js";
 import type { InlineField } from "../../dataview-metadata.js";
-import { DataviewLink, escapeRegExp, valueToString } from "../../dataview-values.js";
+import { DataviewLink, valueToString } from "../../dataview-values.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentIndex, ContentPage } from "../../types.js";
 import type { PluginRenderContext } from "../types.js";
@@ -116,7 +116,7 @@ function boardKey(page: ContentPage): string {
 
 /** The ISO-like local timestamp Kanban puts in `data-date`, without the build's time zone. */
 function dataDate(date: Date): string {
-	return formatDailyNoteDate(date, "YYYY-MM-DD[T]HH:mm:ss");
+	return formatMomentDate(date, "YYYY-MM-DD[T]HH:mm:ss");
 }
 
 export class BoardRenderer {
@@ -183,14 +183,14 @@ export class BoardRenderer {
 					const date = this.readDate(content, dateFormat);
 					if (!date) return match;
 					lastDate = date;
-					const display = formatDailyNoteDate(date, dateDisplayFormat);
+					const display = formatMomentDate(date, dateDisplayFormat);
 					return `${space}${wrap(date, "kanban-plugin__preview-date-wrapper kanban-plugin__date kanban-plugin__preview-date-link", `[[${content}|${display}]]`)}`;
 				})
 				.replace(dateBraces, (match, space: string, content: string) => {
 					const date = this.readDate(content, dateFormat);
 					if (!date) return match;
 					lastDate = date;
-					const display = escapeHtmlText(formatDailyNoteDate(date, dateDisplayFormat));
+					const display = escapeHtmlText(formatMomentDate(date, dateDisplayFormat));
 					return `${space}${wrap(date, "kanban-plugin__preview-date-wrapper kanban-plugin__date", `<span class="kanban-plugin__preview-date kanban-plugin__item-metadata-date">${display}</span>`)}`;
 				})
 				.replace(time, (match, space: string, content: string) => {
@@ -205,7 +205,7 @@ export class BoardRenderer {
 						clock.getMinutes(),
 						clock.getSeconds(),
 					);
-					const display = escapeHtmlText(formatDailyNoteDate(clock, timeFormat));
+					const display = escapeHtmlText(formatMomentDate(clock, timeFormat));
 					return `${space}${wrap(at, "kanban-plugin__preview-time-wrapper kanban-plugin__date", `<span class="kanban-plugin__preview-time kanban-plugin__item-metadata-time">${display}</span>`)}`;
 				});
 		// Code spans and fences keep their text; everything between them is decorated.
@@ -238,10 +238,10 @@ export class BoardRenderer {
 		const { className, style } = dateStyle(this.colorFor(target));
 		let inner = "";
 		if (dates.date) {
-			const display = formatDailyNoteDate(target, this.input.settings.dateDisplayFormat);
+			const display = formatMomentDate(target, this.input.settings.dateDisplayFormat);
 			let date = escapeHtmlText(display);
 			if (this.input.settings.linkDateToDailyNote) {
-				const day = formatDailyNoteDate(target, this.input.settings.dateFormat);
+				const day = formatMomentDate(target, this.input.settings.dateFormat);
 				const link = parseWikiLink(day, `[[${day}]]`);
 				const resolved = await ctx.resolve(link);
 				date =
@@ -252,7 +252,7 @@ export class BoardRenderer {
 			inner += `<span class="kanban-plugin__item-metadata-date">${date}</span> `;
 		}
 		if (dates.time) {
-			const time = formatDailyNoteDate(target, this.input.settings.timeFormat);
+			const time = formatMomentDate(target, this.input.settings.timeFormat);
 			inner += `<span class="kanban-plugin__item-metadata-time">${escapeHtmlText(time)}</span>`;
 		}
 		return `<span class="kanban-plugin__item-metadata-date-wrapper kanban-plugin__date${className}"${style}>${inner}</span>`;
@@ -284,7 +284,7 @@ export class BoardRenderer {
 				? this.input.settings.dateDisplayFormat
 				: this.input.settings.dateTimeDisplayFormat;
 			const { className, style } = dateStyle(this.colorFor(date));
-			return `<span class="kanban-plugin__date${className}"${style}><span class="kanban-plugin__item-metadata-date">${escapeHtmlText(formatDailyNoteDate(date, format))}</span></span>`;
+			return `<span class="kanban-plugin__date${className}"${style}><span class="kanban-plugin__item-metadata-date">${escapeHtmlText(formatMomentDate(date, format))}</span></span>`;
 		}
 		if (value instanceof DataviewLink) {
 			return ctx.renderInline(`[[${value.path}${value.display ? `|${value.display}` : ""}]]`);

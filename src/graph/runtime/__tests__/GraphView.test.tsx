@@ -55,6 +55,7 @@ function textIn(container: HTMLElement, text: string): boolean {
 	return [...container.querySelectorAll("*")].some((el) => el.textContent === text);
 }
 
+/** A child that always fails to render. */
 function Boom(): never {
 	throw new Error("render failure");
 }

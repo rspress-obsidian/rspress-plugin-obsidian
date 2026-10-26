@@ -1,6 +1,5 @@
 import path from "node:path";
 import GithubSlugger from "github-slugger";
-import { findCanvasBoard, findCanvasBoardByPath } from "../shared/canvas-routes.js";
 import { findPublishedFileRoute } from "../shared/file-routes.js";
 import { normalizeLookupValue, normalizeUnicode } from "../shared/slug.js";
 import { headingAnchorText } from "./heading-text.js";
@@ -80,7 +79,8 @@ export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext)
 			: caseInsensitive
 				? pickMany(index.byAssetPathCI.get(relativePathKey.toLowerCase()), parsed, source)
 				: undefined;
-		if (asset) return withAmbiguity(resolveAgainstAsset(asset.found, parsed), asset.ambiguity);
+		if (asset)
+			return withAmbiguity(resolveAgainstAsset(asset.found, parsed, context), asset.ambiguity);
 		return {
 			status: "broken-page",
 			message: `Unable to resolve relative wikilink target "${parsed.target}" from ${context.currentPage.relativePath}.`,
@@ -98,14 +98,14 @@ export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext)
 		const exactPage = index.byFilePathKey.get(exactPathKey);
 		if (exactPage) return resolveAgainstPage(exactPage, parsed);
 		const exactAsset = index.byAssetPath.get(exactPathKey);
-		if (exactAsset) return resolveAgainstAsset(exactAsset, parsed);
+		if (exactAsset) return resolveAgainstAsset(exactAsset, parsed, context);
 
-		// Before the name fan-out, consult the canvas registry directly: a page
-		// whose index does not contain vault files would otherwise match stray
-		// `.canvas` copies in that tree and pick the wrong one. The registry holds
-		// the one board the canvas feature actually publishes.
+		// Before the name fan-out, consult the site's published boards directly:
+		// a page whose index does not contain vault files would otherwise match
+		// stray `.canvas` copies in that tree and pick the wrong one. The canvas
+		// feature publishes exactly one board per source path.
 		if (position === 0) {
-			const canvasBoard = findCanvasBoard(parsed.target, caseInsensitive);
+			const canvasBoard = context.options?.canvasBoards?.bySource(parsed.target, caseInsensitive);
 			if (canvasBoard) {
 				return {
 					status: "ok",
@@ -151,7 +151,8 @@ function resolveByName(
 	};
 
 	const asset = pickMany(suffixFilter(index.byAssetBaseName.get(baseName), false), parsed, source);
-	if (asset) return withAmbiguity(resolveAgainstAsset(asset.found, parsed), asset.ambiguity);
+	if (asset)
+		return withAmbiguity(resolveAgainstAsset(asset.found, parsed, context), asset.ambiguity);
 
 	const page = pickMany(suffixFilter(index.byBaseName.get(baseName), false), parsed, source);
 	if (page) return withAmbiguity(resolveAgainstPage(page.found, parsed), page.ambiguity);
@@ -168,7 +169,7 @@ function resolveByName(
 			source,
 		);
 		if (ciAsset)
-			return withAmbiguity(resolveAgainstAsset(ciAsset.found, parsed), ciAsset.ambiguity);
+			return withAmbiguity(resolveAgainstAsset(ciAsset.found, parsed, context), ciAsset.ambiguity);
 
 		const ciPage = pickMany(
 			index.byFilePathKeyCI.get(normalizeLookupValue(pathKey)) ??
@@ -373,19 +374,33 @@ function resolveAgainstPage(page: ContentPage, parsed: ParsedWikiLink): Resolved
 	};
 }
 
-function resolveAgainstAsset(asset: ContentAsset, parsed: ParsedWikiLink): ResolvedWikiLink {
+function resolveAgainstAsset(
+	asset: ContentAsset,
+	parsed: ParsedWikiLink,
+	context: ResolveContext,
+): ResolvedWikiLink {
 	// A board the canvas feature published routes to its viewer page instead of
 	// the raw JSON attachment, and carries its vault-relative path for the embed
 	// syntax. A `#heading`/`#^block` subpath is dropped rather than appended: a
 	// `.canvas` has no headings or block ids, and a dead anchor on the viewer
 	// page would be worse than opening the board.
-	const board = findCanvasBoardByPath(asset.absolutePath);
+	const boards = context.options?.canvasBoards;
+	const board = boards?.byPath(asset.absolutePath);
 	if (board) {
 		return {
 			status: "ok",
 			href: board.routePath,
 			label: wikiLinkDisplayText(parsed),
 			canvasSrc: board.source,
+		};
+	}
+	// With a canvas feature on the site, a board it left out (an excluded or
+	// `_`-folder one) is not served raw either: the file still holds the
+	// comments and private paths its published JSON would have dropped.
+	if (boards && /\.canvas$/i.test(asset.relativePath)) {
+		return {
+			status: "broken-page",
+			message: `Wikilink target "${parsed.target}" is a board the canvas feature does not publish.`,
 		};
 	}
 	// A file a feature publishes as a page (a `.base` view, a drawing) opens

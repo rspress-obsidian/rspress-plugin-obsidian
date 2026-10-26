@@ -84,7 +84,7 @@ function opensByDefault(): boolean {
  * FAB click or the documented `g` shortcut — the panel's own key handler
  * cannot answer `g` until it is loaded.
  */
-export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelProps) {
+export default function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelProps) {
 	// `undefined` while a `defaultOpen` panel is undecided: the answer depends on
 	// localStorage and the viewport, which the server render cannot see.
 	const [isPanelRequested, setIsPanelRequested] = useState<boolean | undefined>(
@@ -170,4 +170,3 @@ export function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGraphPanelPr
 		</Suspense>
 	);
 }
-export default LazyGraphPanel;

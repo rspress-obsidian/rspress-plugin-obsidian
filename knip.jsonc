@@ -1,0 +1,48 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+	// Entry points no enabled knip plugin finds: the docs site Rspress builds
+	// from this repo (config, theme, MDX pages), the scripts package.json and
+	// the docs run by path, the consumer-site fixture CI copies out and builds,
+	// MDX test fixtures, and the Playwright suite (below).
+	"entry": [
+		"rspress.config.ts",
+		"theme/index.tsx",
+		"docs/**/*.mdx",
+		"scripts/*.ts",
+		"test/consumer-site/rspress.config.ts",
+		"test/consumer-site/smoke.mjs",
+		"test/markdown/fixtures/**/*.mdx",
+		"test/e2e/**/*.playwright.ts"
+	],
+	// The plugin executes playwright.config.ts, which refuses to load while
+	// doc_build/ is older than src/ (most of the time during development), so
+	// the specs are a plain entry above instead.
+	"playwright": false,
+	"ignoreDependencies": [
+		// Rspress virtual modules the graph plugin generates at build time
+		// (src/graph/runtime/virtual-modules.d.ts).
+		"virtual-graph-data",
+		"virtual-graph-search-data",
+		// Started by playwright.config.ts's `webServer.command` (`bunx serve`),
+		// which only the disabled plugin reads.
+		"serve",
+		// Optional peer the source imports; the devDependency installs it so
+		// tests exercise the real fonts instead of the fallback.
+		"@excalidraw/excalidraw",
+		// Optional peers on purpose: every site already has them through
+		// @rspress/core, so declaring them required only adds install warnings.
+		"react",
+		"react-dom",
+		// Named in package.json `release.plugins`, but semantic-release ships all
+		// four as its own dependencies, so knip reports them unused. They are
+		// declared to pin floors at or above semantic-release's own ranges
+		// (trusted publishing needs a recent @semantic-release/npm) and so
+		// Dependabot keeps them current.
+		"@semantic-release/commit-analyzer",
+		"@semantic-release/github",
+		"@semantic-release/npm",
+		"@semantic-release/release-notes-generator"
+	],
+	// Only scripts/generate-media-fixtures.ts calls it, on a maintainer's machine.
+	"ignoreBinaries": ["ffmpeg"]
+}

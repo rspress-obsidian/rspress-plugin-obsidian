@@ -198,7 +198,13 @@ describe("docs tree", () => {
 			for (const block of blocks) {
 				// A Canvas file node resolves through fileRoutePrefix, which must name the
 				// same prefix as the markdown plugin's vaultRoutePrefix or every card 404s.
+				// A prefix given once in pluginObsidian's shared options reaches canvas as
+				// its default, so only a per-feature vaultRoutePrefix needs the pin.
 				if (!/\bvaultRoutePrefix\b/.test(block) || !/\bcanvas\(/.test(block)) continue;
+				const sharedOnly =
+					/pluginObsidian\(\s*\{[^{}]*\bvaultRoutePrefix\b[^{}]*\}/.test(block) &&
+					block.match(/\bvaultRoutePrefix\b/g)?.length === 1;
+				if (sharedOnly) continue;
 				expect(
 					block,
 					`${path.relative(REPO, page.file)} configures canvas() without fileRoutePrefix`,

@@ -187,6 +187,21 @@ describe("daily notes", () => {
 			"<p>Written {{date}} by hand.</p>",
 		);
 	});
+
+	test("a template edited between builds is read again, as in watch mode", async () => {
+		const templatePath = path.join(root, "templates/Daily.md");
+		const original = FILES["templates/Daily.md"] ?? "";
+		expect(await daily("daily/2026-08-20.md", "")).toContain("<mark>Review</mark>");
+		try {
+			writeFileSync(templatePath, "# {{title}}\n\nEdited template.\n");
+			const edited = await daily("daily/2026-08-20.md", "");
+			expect(edited).toContain("<p>Edited template.</p>");
+			expect(edited).not.toContain("Review");
+		} finally {
+			writeFileSync(templatePath, original);
+		}
+		expect(await daily("daily/2026-08-20.md", "")).toContain("<mark>Review</mark>");
+	});
 });
 
 describe("a vault reached through a symlink", () => {

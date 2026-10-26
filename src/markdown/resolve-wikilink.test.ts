@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import path from "node:path";
-import { setCanvasRoutes } from "../shared/canvas-routes.js";
+import { createCanvasBoards } from "../shared/canvas-routes.js";
 import { setPublishedFileRoutes } from "../shared/file-routes.js";
 import { normalizeLookupValue } from "../shared/slug.js";
 import { buildContentIndex } from "./content-index.ts";
@@ -554,9 +554,11 @@ describe("resolveWikiLink Unicode normalization", () => {
 });
 
 describe("resolveWikiLink canvas boards", () => {
-	afterEach(() => {
-		setCanvasRoutes([]);
-	});
+	const options = {
+		canvasBoards: createCanvasBoards([
+			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
+		]),
+	};
 
 	function canvasFixture() {
 		const currentPage = makePage({ filePathKey: "index" });
@@ -570,12 +572,9 @@ describe("resolveWikiLink canvas boards", () => {
 	}
 
 	test("links a published board to its viewer route instead of the raw file", () => {
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
 		const { currentPage, index } = canvasFixture();
 
-		const result = resolve("Demo.canvas", { currentPage, index });
+		const result = resolve("Demo.canvas", { currentPage, index, options });
 
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/canvas/demo");
@@ -584,12 +583,9 @@ describe("resolveWikiLink canvas boards", () => {
 	});
 
 	test("keeps an alias as the label and still marks the canvas source", () => {
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
 		const { currentPage, index } = canvasFixture();
 
-		const result = resolve("Demo.canvas|My board", { currentPage, index });
+		const result = resolve("Demo.canvas|My board", { currentPage, index, options });
 
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/canvas/demo");
@@ -598,12 +594,9 @@ describe("resolveWikiLink canvas boards", () => {
 	});
 
 	test("drops a heading subpath on a board link", () => {
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
 		const { currentPage, index } = canvasFixture();
 
-		const result = resolve("Demo.canvas#Heading", { currentPage, index });
+		const result = resolve("Demo.canvas#Heading", { currentPage, index, options });
 
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/canvas/demo");
@@ -625,10 +618,7 @@ describe("resolveWikiLink canvas boards", () => {
 
 		expect(resolve("Demo.canvas", { currentPage, index }).href).not.toBe("/canvas/demo");
 
-		setCanvasRoutes([
-			{ absolutePath: "/vault/Demo.canvas", routePath: "/canvas/demo", source: "Demo.canvas" },
-		]);
-		const result = resolve("Demo.canvas", { currentPage, index });
+		const result = resolve("Demo.canvas", { currentPage, index, options });
 		expect(result.status).toBe("ok");
 		expect(result.href).toBe("/canvas/demo");
 		expect(result.label).toBe("Demo.canvas");

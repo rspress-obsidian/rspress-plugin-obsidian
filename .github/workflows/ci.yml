@@ -46,6 +46,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Every job reads the Bun version from `packageManager` in package.json:
       # the committed `bun.lock` is lockfileVersion 2, which Bun < 1.4 cannot
@@ -107,8 +109,10 @@ jobs:
       # per src/ module (no exceptions) and 97% overall. bunfig's
       # coverageThreshold is only a backstop — Bun applies it per file and has no
       # exception mechanism, so it cannot express either floor. This is also the
-      # only unit-test run: `bun test --coverage` runs the whole suite, so a
-      # separate plain `bun test` step would run every test twice.
+      # only unit-test run: `bun test --coverage` runs the whole suite except
+      # `test/publish/`, which `test:publish` above already ran against the packed
+      # tarball (it measures `dist/`, never `src/`, so the floors lose nothing).
+      # A separate plain `bun test` step would run every test twice.
       - name: Coverage gate
         # Same command a contributor runs locally, so "green here" and "green
         # there" cannot mean different floors.
@@ -167,6 +171,8 @@ jobs:
         node-version: ['22.14.0', 24.x]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -207,6 +213,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -233,11 +241,12 @@ jobs:
     #
     # `rspress` is the Rspress the site builds with: `min` is the version the
     # fixture pins, the floor of the `^2.0.21` peer range; `latest` is the
-    # newest 2.x. The plugin reaches into Rspress and Rspack internals (the dev
-    # invalidation hold, the page modules hover previews render), so a new
-    # release can break it with no change here. That leg is advisory, like the
-    # benchmark step above: it reports the break without stopping a release for
-    # an upstream change this commit did not make.
+    # newest 2.x at least 3 days old. The plugin reaches into Rspress and
+    # Rspack internals (the dev invalidation hold, the page modules hover
+    # previews render), so a new release can break it with no change here.
+    # That leg is advisory, like the benchmark step above: it reports the break
+    # without stopping a release for an upstream change this commit did not
+    # make.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     continue-on-error: ${{ matrix.rspress == 'latest' }}
@@ -253,6 +262,8 @@ jobs:
             graph: absent
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -272,6 +283,14 @@ jobs:
 
       - name: Pack
         run: npm pack --pack-destination "$RUNNER_TEMP"
+
+      # The installs below resolve the newest versions in each range, so hold
+      # npm to releases at least 3 days old, the same window as bunfig.toml's
+      # `minimumReleaseAge` and Dependabot's `cooldown`: a compromised or broken
+      # release is usually yanked within it. `--before` (as `npm_config_before`)
+      # because Node 22's npm 10 has no `min-release-age`.
+      - name: Hold npm to releases at least 3 days old
+        run: echo "npm_config_before=$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       # npm, not bun: this is the install a consumer runs, and npm installs
       # required peers but leaves optional ones (mermaid, mathjax-full) out.
@@ -305,7 +324,7 @@ jobs:
         run: npm install --no-audit --no-fund "mermaid@$MERMAID_RANGE"
 
       # Within the peer range the tarball declares, so npm resolves the newest
-      # 2.x instead of the fixture's pinned floor.
+      # 2.x old enough for the gate above instead of the fixture's pinned floor.
       - name: Use the latest Rspress 2.x
         if: matrix.rspress == 'latest'
         working-directory: ${{ runner.temp }}/site
@@ -335,6 +354,8 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

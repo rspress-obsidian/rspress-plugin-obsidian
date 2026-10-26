@@ -43,18 +43,30 @@ module that only one caller uses is just a misplaced private helper.
 
 ## The markdown pipeline
 
-`src/markdown/remark-wikilink.ts` is one file, and stays one file. Its
-`remarkWikilinkInner` runs the document through ~19 stages, and the stages are
-named functions in pipeline order at the top of the file, with the orchestrator
-below them reading as the ordered list.
+`src/markdown/remark-wikilink.ts` is the remark attacher and the per-file
+entry: it builds the render context for the compiled page and catches what the
+pass did not anticipate. The stages live in `src/markdown/render/`, and
+`transformContent` in `render/transform.ts` runs them in pipeline order, so it
+reads as the ordered list:
+
+- `context.ts` — the `RenderContext` every stage reads;
+- `wikilinks.ts`, `markdown-links.ts` — `[[links]]`, `![[embeds]]`, and
+  `[label](Page.md)` / `obsidian://` links into the vault;
+- `transclusion.ts` — inlined note embeds, with cycle and depth limits;
+- `fences.ts`, `plugin-context.ts` — Mermaid and plugin fences, and what a
+  reproduced plugin sees of the document;
+- `html.ts` — nested documents (callout titles, feature blocks) rendered to HTML;
+- `page.ts` — what only the compiled page gets: title, backlinks, `cssclasses`,
+  math styles.
+
+Imports run one way, from `transform.ts` down. The stages that render a nested
+document (an embed, a callout title, a feature block) call back into the stage
+order through `ctx.transform` rather than importing `transform.ts`.
 
 The order is load-bearing in at least one place: callout content is rebuilt
 from raw source and so carries no source positions, which is the only reason
 `processCommentValues` exists. Running it before the callout stage publishes
 hidden comment text. Other neighbouring pairs are not coupled — do not assume
 they are. `pipeline ordering` in `remark-wikilink.test.ts` holds the composed
-behaviour, and the comment above the stages says which pair is a real pin.
-
-Splitting the stages into `passes/` was considered and rejected: together they
-reach 17 helpers that all live in the same module, so a split exports 17
-internals and leaves `passes/` importing back from the file that imports it.
+behaviour, and the comment above `transformContent` says which pair is a real
+pin.

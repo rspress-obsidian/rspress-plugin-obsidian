@@ -48,6 +48,40 @@ export const CASUAL_UNIT_MS: Record<DurationUnit, number> = {
 	milliseconds: 1,
 };
 
+/** The `en` names moment and Luxon both write. */
+export const MONTH_NAMES = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+];
+export const WEEKDAY_NAMES = [
+	"Sunday",
+	"Monday",
+	"Tuesday",
+	"Wednesday",
+	"Thursday",
+	"Friday",
+	"Saturday",
+];
+
+/**
+ * `value` zero-filled to `length` digits, its sign before the zeros
+ * (`-0005`), as moment's `zeroFill` and Luxon's `padStart` write a number.
+ */
+export function zeroPad(value: number, length = 2): string {
+	const digits = String(Math.abs(value)).padStart(length, "0");
+	return value < 0 ? `-${digits}` : digits;
+}
+
 /** Days in month `monthIndex` (0-based, may overflow into other years) of `year`. */
 export function daysInMonth(year: number, monthIndex: number): number {
 	const month = ((monthIndex % 12) + 12) % 12;

@@ -34,6 +34,9 @@ export default function MermaidBlocks() {
 			// that have no diagram at all.
 			const { renderMermaidBlocks } = await import("../../mermaid/blocks.js");
 			if (cancelled) return;
+			// The whole body, canvas embeds included: the renderer gives each
+			// diagram its own security level, so a canvas board's diagrams stay
+			// strict whatever level the page's notes were configured with.
 			renderMermaidBlocks(document.body);
 		};
 		const schedule = () => {

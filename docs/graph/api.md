@@ -25,13 +25,15 @@ Returns an Rspress plugin. `graphview` is a named export of the package entry (a
 | `onUnresolvedLink` | `"warn" \| "error" \| "ignore"` | `"warn"` | What the build does about a link that resolves to nothing: report it, fail the build, or stay quiet. |
 | `profileBuild` | `boolean` | `RSPRESS_GRAPH_VIEW_PROFILE === "1"` | Log each graph build's counts and timings. Unset, it follows the environment variable, so `RSPRESS_GRAPH_VIEW_PROFILE=1` turns it on without a config change. |
 
-The options interface is exported as a type:
+The options interface and the types of its `colors` and `groups` are exported
+as types, from the package entry and from `rspress-plugin-obsidian/graph`:
 
 ```ts
-import type { RspressPluginGraphViewOptions } from "rspress-plugin-obsidian";
-
-type GraphViewColors = NonNullable<RspressPluginGraphViewOptions["colors"]>;
-type GraphViewGroup = NonNullable<RspressPluginGraphViewOptions["groups"]>[number];
+import type {
+  GraphViewColors,
+  GraphViewGroup,
+  RspressPluginGraphViewOptions,
+} from "rspress-plugin-obsidian";
 ```
 
 The graph keeps no cache on disk. The `cacheDir` option of `rspress-plugin-graph-view` no longer exists.

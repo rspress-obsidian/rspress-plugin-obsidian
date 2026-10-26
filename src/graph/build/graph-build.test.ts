@@ -7,8 +7,7 @@ import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { getCachedContentIndex } from "../../markdown/content-index.js";
-import { setCanvasRoutes } from "../../shared/canvas-routes.js";
-import { setPublishedContent } from "../../shared/published-content.js";
+import { createCanvasBoards } from "../../shared/canvas-routes.js";
 import { deriveRoutePath } from "../../shared/route-path.js";
 import { decodeGraphPayload } from "../graph-payload.js";
 import type { GraphData, GraphPayload } from "../types.js";
@@ -17,8 +16,6 @@ import { buildGraphModules, type CollectedRoute, type GraphBuildOptions } from "
 const roots: string[] = [];
 
 afterEach(async () => {
-	setPublishedContent(undefined);
-	setCanvasRoutes([]);
 	await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -200,7 +197,7 @@ describe("vault publishing", () => {
 		const docsFiles = { "index.md": "[[Setup]]\n" };
 		const vaultRoot = await writeTree(vaultFiles);
 		const docsRoot = await writeTree(docsFiles);
-		setPublishedContent({
+		const published = {
 			docsRoot,
 			vaultRoot,
 			vaultRoutePrefix: "/vault",
@@ -208,13 +205,13 @@ describe("vault publishing", () => {
 			vaultIndexOptions: { routePrefix: "/vault" },
 			enableCaseInsensitiveLookup: true,
 			enableFuzzyMatching: false,
-		});
+		};
 		const routes = [
 			...routesFor(docsRoot, docsFiles),
 			...routesFor(vaultRoot, vaultFiles, "/vault"),
 		];
 
-		const { graph } = await build(routes, docsRoot);
+		const { graph } = await build(routes, docsRoot, { published });
 
 		expect(edgesFrom(graph, "/vault/Daily/d1")).toEqual(["/vault/Notes/Setup"]);
 		expect(edgesFrom(graph, "/")).toEqual(["/vault/Notes/Setup"]);
@@ -349,7 +346,7 @@ describe("canvas boards", () => {
 			}),
 		};
 		const root = await writeTree(files);
-		setCanvasRoutes([
+		const canvasBoards = createCanvasBoards([
 			{
 				absolutePath: path.join(root, "Board.canvas"),
 				routePath: "/canvas/board",
@@ -371,7 +368,7 @@ describe("canvas boards", () => {
 			},
 		];
 
-		const { graph } = await build(routes, root);
+		const { graph } = await build(routes, root, { canvasBoards });
 
 		expect(edgesFrom(graph, "/canvas/board")).toEqual([
 			"/Epsilon",
@@ -385,7 +382,7 @@ describe("canvas boards", () => {
 	test("[[Board.canvas]] links to the board's route", async () => {
 		const files = { "a.md": "[[Board.canvas]]\n", "Board.canvas": '{"nodes":[]}' };
 		const root = await writeTree(files);
-		setCanvasRoutes([
+		const canvasBoards = createCanvasBoards([
 			{
 				absolutePath: path.join(root, "Board.canvas"),
 				routePath: "/canvas/board",
@@ -401,8 +398,109 @@ describe("canvas boards", () => {
 				pageName: "canvas_board",
 			},
 		];
-		const { graph } = await build(routes, root);
+		const { graph } = await build(routes, root, { canvasBoards });
 		expect(edgesFrom(graph, "/a")).toEqual(["/canvas/board"]);
+	});
+
+	test("a card showing a private note adds no node naming it", async () => {
+		const files = {
+			"Private lawyer.md": "---\npublish: false\n---\nx\n",
+			"Board.canvas": JSON.stringify({
+				nodes: [
+					{ id: "1", type: "file", file: "Private lawyer.md" },
+					{ id: "2", type: "file", file: "Not Yet Written.md" },
+				],
+				edges: [],
+			}),
+		};
+		const root = await writeTree(files);
+		const canvasBoards = createCanvasBoards([
+			{
+				absolutePath: path.join(root, "Board.canvas"),
+				routePath: "/canvas/board",
+				source: "Board.canvas",
+			},
+		]);
+		const routes = [
+			...routesFor(root, files).filter((route) => route.routePath !== "/Private lawyer"),
+			{
+				routePath: "/canvas/board",
+				absolutePath: path.join(root, "node_modules/.rspress/runtime/temp-0.mdx"),
+				relativePath: "canvas/board.mdx",
+				pageName: "canvas_board",
+			},
+		];
+		const { graph, modules } = await build(routes, root, { canvasBoards });
+		// A missing note is still a ghost, as in Obsidian; a private one is not.
+		expect(edgesFrom(graph, "/canvas/board")).toEqual(["?not yet written"]);
+		expect(Object.values(modules).join("\n")).not.toContain("lawyer");
+	});
+
+	test("a card showing a private attachment or board adds no node naming it", async () => {
+		const files = {
+			".hidden/Passport-scan.png": "png",
+			"_drafts/Salary-review.pdf": "pdf",
+			".hidden/Secret-board.canvas": JSON.stringify({ nodes: [], edges: [] }),
+			"Board.canvas": JSON.stringify({
+				nodes: [
+					{ id: "1", type: "file", file: ".hidden/Passport-scan.png" },
+					{ id: "2", type: "file", file: "_drafts/Salary-review.pdf" },
+					{ id: "3", type: "file", file: ".hidden/Secret-board.canvas" },
+				],
+				edges: [],
+			}),
+		};
+		const root = await writeTree(files);
+		const canvasBoards = createCanvasBoards([
+			{
+				absolutePath: path.join(root, "Board.canvas"),
+				routePath: "/canvas/board",
+				source: "Board.canvas",
+			},
+		]);
+		const routes = [
+			{
+				routePath: "/canvas/board",
+				absolutePath: path.join(root, "node_modules/.rspress/runtime/temp-0.mdx"),
+				relativePath: "canvas/board.mdx",
+				pageName: "canvas_board",
+			},
+		];
+		const { graph, modules } = await build(routes, root, { canvasBoards });
+		expect(edgesFrom(graph, "/canvas/board")).toEqual([]);
+		const everything = Object.values(modules).join("\n");
+		for (const name of ["Passport", "Salary", "Secret-board"]) {
+			expect(everything).not.toContain(name);
+		}
+	});
+
+	test("a card naming a published note in another case links to it, as the board shows it", async () => {
+		const files = {
+			"Notes/Welcome.md": "# Welcome\n",
+			"Board.canvas": JSON.stringify({
+				nodes: [{ id: "1", type: "file", file: "notes/welcome.md" }],
+				edges: [],
+			}),
+		};
+		const root = await writeTree(files);
+		const canvasBoards = createCanvasBoards([
+			{
+				absolutePath: path.join(root, "Board.canvas"),
+				routePath: "/canvas/board",
+				source: "Board.canvas",
+			},
+		]);
+		const routes = [
+			...routesFor(root, files),
+			{
+				routePath: "/canvas/board",
+				absolutePath: path.join(root, "node_modules/.rspress/runtime/temp-0.mdx"),
+				relativePath: "canvas/board.mdx",
+				pageName: "canvas_board",
+			},
+		];
+		const { graph } = await build(routes, root, { canvasBoards });
+		expect(edgesFrom(graph, "/canvas/board")).toEqual(["/Notes/Welcome"]);
 	});
 });
 
@@ -497,7 +595,7 @@ describe("routes no content index holds", () => {
 		};
 		const vaultRoot = await writeTree(vaultFiles);
 		const docsRoot = await writeTree({ "index.md": "x\n" });
-		setPublishedContent({
+		const published = {
 			docsRoot,
 			vaultRoot,
 			vaultRoutePrefix: "/vault",
@@ -505,8 +603,8 @@ describe("routes no content index holds", () => {
 			vaultIndexOptions: { routePrefix: "/vault" },
 			enableCaseInsensitiveLookup: true,
 			enableFuzzyMatching: false,
-		});
-		setCanvasRoutes([
+		};
+		const canvasBoards = createCanvasBoards([
 			{
 				absolutePath: path.join(vaultRoot, "Boards/Plan.canvas"),
 				routePath: "/vault/Boards/Plan",
@@ -523,7 +621,7 @@ describe("routes no content index holds", () => {
 				pageName: "plan",
 			},
 		];
-		const { graph } = await build(routes, docsRoot);
+		const { graph } = await build(routes, docsRoot, { published, canvasBoards });
 		expect(edgesFrom(graph, "/vault/Boards/Plan")).toEqual(["/vault/Notes/Setup"]);
 		expect(labelOf(graph, "/vault/Boards/Plan")).toBe("Plan.canvas");
 		// A vault note keeps Obsidian's file-name label even with an H1.

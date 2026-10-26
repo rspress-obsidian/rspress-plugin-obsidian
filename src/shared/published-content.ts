@@ -1,10 +1,18 @@
 /**
  * What the markdown plugin publishes, for the other features that have to
- * agree with it (the graph resolves links with the same indexes and options).
+ * agree with it (the graph resolves links with the same indexes and options,
+ * canvas cards link the routes the notes are published at).
  *
- * Node-free and import-only-types so any bundle can read it; the markdown
- * plugin writes it from its `config` hook (and again from `addPages`, which
- * sees the final `root`). Without `markdown()` in the site it stays `undefined`.
+ * There is no module state: the markdown plugin object carries a reader for
+ * its own configuration, and a sibling feature finds it in the `plugins` of
+ * the site config Rspress hands every hook. Each site therefore sees its own
+ * markdown plugin, however many sites a process builds, and the order the
+ * plugins are listed in does not matter: readers look it up in `addPages` and
+ * later hooks, after every `config` hook has run. A markdown plugin another
+ * plugin adds with `utils.addPlugin` is not in that list on its own — Rspress
+ * keeps the registered plugins private — so its `config` hook lists it there.
+ *
+ * Node-free and import-only-types so any bundle can read it.
  */
 import type { DocsRouteLocales } from "./route-path.js";
 
@@ -20,6 +28,7 @@ interface PublishedIndexOptions {
 	dataview?: boolean;
 	enableCaseInsensitiveLookup?: boolean;
 	enableFuzzyMatching?: boolean;
+	excludeFolders?: string[];
 }
 
 export interface PublishedContentConfig {
@@ -40,12 +49,34 @@ export interface PublishedContentConfig {
 	enableFuzzyMatching: boolean;
 }
 
-let published: PublishedContentConfig | undefined;
+// `Symbol.for`, not `Symbol()`: the per-feature entries may be loaded as
+// separate bundle copies (an ESM and a CJS entry side by side), and each copy
+// has to recognise a markdown plugin built by another.
+const PUBLISHED_CONTENT = Symbol.for("rspress-plugin-obsidian:published-content");
 
-export function setPublishedContent(config: PublishedContentConfig | undefined): void {
-	published = config;
+type PublishedContentReader = () => PublishedContentConfig;
+
+/** Attach the reader a sibling feature calls to learn what `plugin` publishes. */
+export function attachPublishedContent<Plugin extends object>(
+	plugin: Plugin,
+	read: PublishedContentReader,
+): Plugin {
+	return Object.assign(plugin, { [PUBLISHED_CONTENT]: read });
 }
 
-export function getPublishedContent(): PublishedContentConfig | undefined {
-	return published;
+/**
+ * What the markdown plugin of this site publishes, found among the site's
+ * `plugins` (where its `config` hook makes sure it is listed); `undefined`
+ * when the site has no markdown plugin. Rspress refuses two plugins with one
+ * name, so a site has at most one.
+ */
+export function findPublishedContent(config: {
+	plugins?: readonly unknown[];
+}): PublishedContentConfig | undefined {
+	for (const plugin of config.plugins ?? []) {
+		if (typeof plugin !== "object" || plugin === null || !(PUBLISHED_CONTENT in plugin)) continue;
+		const read = plugin[PUBLISHED_CONTENT];
+		if (typeof read === "function") return read();
+	}
+	return undefined;
 }

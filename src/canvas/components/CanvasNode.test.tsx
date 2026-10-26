@@ -133,6 +133,17 @@ describe("CanvasNodeComponent file nodes", () => {
 		expect(frame.hasAttribute("sandbox")).toBe(false);
 	});
 
+	test("links a PDF on another site instead of framing it unsandboxed", () => {
+		const container = renderNode(
+			fileNode("doc.pdf", { resolvedFile: { kind: "pdf", key: "doc.pdf" } }),
+			{ assets: { "doc.pdf": "https://evil.example/x.pdf" } },
+		);
+		expect(container.querySelector("iframe")).toBeNull();
+		const link = container.querySelector(".canvas-file-pdf-card a") as HTMLAnchorElement;
+		expect(link.getAttribute("href")).toBe("https://evil.example/x.pdf");
+		expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+	});
+
 	test("offers a download for a file type it cannot show", () => {
 		const container = renderNode(
 			fileNode("archive.zip", { resolvedFile: { kind: "file", key: "archive.zip" } }),
@@ -190,14 +201,20 @@ describe("CanvasNodeComponent file nodes", () => {
 		expect(container.querySelector(".canvas-file-notice")?.textContent).toContain("Nope");
 	});
 
-	test("shows a private or missing note the same way, without its content", () => {
-		for (const kind of ["private", "missing"] as const) {
-			const container = renderNode(fileNode("Secret.md", { resolvedFile: { kind } }));
-			expect(container.querySelector(".canvas-file-error-text")?.textContent).toContain(
-				"Secret.md",
-			);
-			cleanup();
-		}
+	test("names a missing file and shows no content", () => {
+		const container = renderNode(fileNode("Gone.md", { resolvedFile: { kind: "missing" } }));
+		expect(container.querySelector(".canvas-file-error-text")?.textContent).toContain("Gone.md");
+	});
+
+	test("shows a private file under a stand-in name, since the build ships no path", () => {
+		// The published board carries `file: ""` for a private file of any kind.
+		const node = fileNode("", { resolvedFile: { kind: "private" } });
+		const container = renderNode(node);
+		expect(container.querySelector(".canvas-file-error-text")?.textContent).toBe(
+			"“Private file” is not available.",
+		);
+		expect(container.querySelector(".canvas-node-label")?.textContent).toBe("Private file");
+		expect(cardLabel(node)).toBe("Private file");
 	});
 
 	test("without build data, links a note to its route and names anything else", () => {
@@ -225,6 +242,13 @@ describe("CanvasNodeComponent link nodes", () => {
 		expect(frame.getAttribute("sandbox")).toBe("allow-forms");
 		expect(frame.getAttribute("loading")).toBe("lazy");
 		expect(container.querySelector(".canvas-node-label")?.textContent).toBe("example.com/page");
+	});
+
+	test("leaves allow-same-origin out of the default sandbox", () => {
+		const container = renderNode({ id: "l4", type: "link", ...base, url: "https://example.com/" });
+		expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe(
+			"allow-scripts allow-popups",
+		);
 	});
 
 	test("renders a plain external anchor when previews are off", () => {

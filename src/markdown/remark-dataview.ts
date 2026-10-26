@@ -5,9 +5,9 @@ import type { Node, Parent } from "unist";
 import type { VFile } from "vfile";
 import { escapeHtmlText } from "../shared/escape.js";
 import { stripFrontmatter } from "../shared/frontmatter.js";
+import { formatMomentDate } from "../shared/moment-format.js";
 import {
 	expandDailyTemplateTokens,
-	formatDailyNoteDate,
 	isEmptyDailyNoteBody,
 	parseDailyNoteDate,
 	renderDailyNavigation,
@@ -190,6 +190,11 @@ function renderInlineFields(parent: Parent): void {
 	parent.children = next;
 }
 
+// Each template's body, with the mtime and size it was read at (the content
+// index's reuse rule): every empty daily note of a build shares one read, and
+// a template edited in watch mode is read again.
+const templateCache = new Map<string, { mtimeMs: number; size: number; body: string }>();
+
 /**
  * Read the configured daily-note template, if it exists.
  *
@@ -198,13 +203,21 @@ function renderInlineFields(parent: Parent): void {
  * error: the option is a convenience, and a template that has not been written
  * yet should not fail the build.
  */
-function readDailyNoteTemplate(template: string, docsRoot: string): string | undefined {
+async function readDailyNoteTemplate(
+	template: string,
+	docsRoot: string,
+): Promise<string | undefined> {
 	const relative =
 		template.endsWith(".md") || template.endsWith(".mdx") ? template : `${template}.md`;
 	const absolute = path.join(docsRoot, relative);
 	try {
-		if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) return undefined;
-		return stripFrontmatter(fs.readFileSync(absolute, "utf8"));
+		const stats = await fs.promises.stat(absolute);
+		if (!stats.isFile()) return undefined;
+		const cached = templateCache.get(absolute);
+		if (cached?.mtimeMs === stats.mtimeMs && cached.size === stats.size) return cached.body;
+		const body = stripFrontmatter(await fs.promises.readFile(absolute, "utf8"));
+		templateCache.set(absolute, { mtimeMs: stats.mtimeMs, size: stats.size, body });
+		return body;
 	} catch {
 		return undefined;
 	}
@@ -241,13 +254,13 @@ export async function processDailyNoteNodes(
 	if (!date) return;
 
 	if (options.dailyNotes.template && isEmptyDailyNoteBody(stripFrontmatter(source))) {
-		const template = readDailyNoteTemplate(options.dailyNotes.template, docsRoot);
+		const template = await readDailyNoteTemplate(options.dailyNotes.template, docsRoot);
 		if (template) {
 			const format = options.dailyNotes.dateFormat;
 			const tokensExpanded = expandDailyTemplateTokens(
 				template,
 				date,
-				formatDailyNoteDate(date, format),
+				formatMomentDate(date, format),
 				{ format, now },
 			);
 			const filled = expandTemplate ? await expandTemplate(tokensExpanded) : tokensExpanded;

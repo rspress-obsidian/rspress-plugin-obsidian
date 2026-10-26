@@ -276,6 +276,86 @@ describe("GraphPanel accessibility", () => {
 		});
 	});
 
+	test("moves the panel live during a drag but writes storage only once, on release", () => {
+		const container = openPanel();
+		fireEvent.keyDown(window, { key: "g" });
+
+		const header = container.querySelector("#rspress-graph-view-title")?.parentElement;
+		const wrapper = container.querySelector("#rspress-graph-view-panel")?.parentElement;
+		if (!header || !wrapper) throw new Error("panel header not found");
+		const handle = header as HTMLElement & {
+			setPointerCapture: () => void;
+			releasePointerCapture: () => void;
+		};
+		handle.setPointerCapture = () => {};
+		handle.releasePointerCapture = () => {};
+
+		// Record every write through a stand-in for the global storage; happy-dom's
+		// own `localStorage` hands out bound methods, so it cannot be spied on.
+		const storage = localStorage;
+		const writes: Array<[string, string]> = [];
+		const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: {
+				getItem: (key: string) => storage.getItem(key),
+				setItem: (key: string, value: string) => {
+					writes.push([key, value]);
+					storage.setItem(key, value);
+				},
+			},
+		});
+		try {
+			fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+			for (let step = 1; step <= 5; step++) {
+				fireEvent.pointerMove(handle, { clientX: 100 + step * 12, clientY: 100 + step * 6 });
+			}
+			expect(wrapper.style.transform).toBe("translate(60px, 30px)");
+			expect(writes).toEqual([]);
+
+			fireEvent.pointerUp(handle, { clientX: 160, clientY: 130, pointerId: 1 });
+			expect(writes).toEqual([["rspress-graph-view-pos", JSON.stringify({ x: 60, y: 30 })]]);
+		} finally {
+			if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
+		}
+	});
+
+	test("restores each stored setting on its own when another is corrupt", async () => {
+		localStorage.setItem("rspress-graph-view-pos", "null");
+		localStorage.setItem("rspress-graph-view-filters", "{not json");
+		localStorage.setItem("rspress-graph-view-display", JSON.stringify({ arrows: true }));
+		localStorage.setItem("rspress-graph-view-forces", JSON.stringify({ linkDistance: 120 }));
+
+		render(<GraphPanel defaultOpen />);
+		await act(async () => {
+			await Promise.resolve();
+		});
+
+		// The corrupt position and filters fall back to their defaults...
+		expect(JSON.parse(localStorage.getItem("rspress-graph-view-pos") ?? "null")).toEqual({
+			x: 0,
+			y: 0,
+		});
+		expect(JSON.parse(localStorage.getItem("rspress-graph-view-filters") ?? "null")).toMatchObject({
+			scope: "local",
+			depth: 1,
+		});
+		// ...while the valid display and force settings are still restored.
+		expect(capturedGraphProps?.linkDirectionalArrowLength).toBeGreaterThan(0);
+		expect(JSON.parse(localStorage.getItem("rspress-graph-view-forces") ?? "null")).toMatchObject({
+			linkDistance: 120,
+		});
+	});
+
+	test("ignores a stored position that is not a pair of finite numbers", () => {
+		localStorage.setItem("rspress-graph-view-pos", JSON.stringify({ x: "40", y: 10 }));
+		const container = openPanel();
+		fireEvent.keyDown(window, { key: "g" });
+
+		const wrapper = container.querySelector("#rspress-graph-view-panel")?.parentElement;
+		expect(wrapper?.style.transform).toBe("translate(0px, 0px)");
+	});
+
 	test("does not start a drag from a control in the header", () => {
 		const container = openPanel();
 		fireEvent.keyDown(window, { key: "g" });

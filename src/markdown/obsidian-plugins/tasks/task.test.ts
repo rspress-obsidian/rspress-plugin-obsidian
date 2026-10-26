@@ -184,6 +184,14 @@ describe("which lines are tasks", () => {
 		]);
 	});
 
+	test("a task inside an HTML comment is not on the page, so not a task", () => {
+		const source =
+			"<!--\n- [ ] in a block comment\n-->\n- [ ] kept <!-- - [ ] inline --> too\n<!-- open\n- [ ] in an unclosed comment";
+		expect(tasksIn(source).map((task) => task.description)).toEqual([
+			"kept <!-- - [ ] inline --> too",
+		]);
+	});
+
 	test("the global filter decides; its tag is not one of the task's tags", () => {
 		const tasks = tasksIn("- [ ] #task Ship #release\n- [ ] Not a task\n- [x] #task done", "#task");
 		expect(tasks.map((task) => task.description)).toEqual(["#task Ship #release", "#task done"]);

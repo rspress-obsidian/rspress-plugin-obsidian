@@ -3,13 +3,16 @@ import { normalizeRoutePrefix } from "../shared/route-path.js";
 import { normalizeDailyNoteConfig } from "./daily-notes.js";
 import type { NormalizedPluginOptions, RspressPluginMarkdownOptions } from "./types.js";
 
+/** Where vault pages are published when `vaultRoutePrefix` is unset. */
+export const DEFAULT_VAULT_ROUTE_PREFIX = "/vault";
+
 /** Every option with its default applied — the one object each stage reads. */
 export function normalizePluginOptions(
 	options: RspressPluginMarkdownOptions = {},
 ): NormalizedPluginOptions {
 	return {
 		vaultRoot: options.vaultRoot ? path.resolve(process.cwd(), options.vaultRoot) : undefined,
-		vaultRoutePrefix: normalizeRoutePrefix(options.vaultRoutePrefix, "/vault"),
+		vaultRoutePrefix: normalizeRoutePrefix(options.vaultRoutePrefix, DEFAULT_VAULT_ROUTE_PREFIX),
 		onBrokenLink: options.onBrokenLink ?? "error",
 		// Obsidian always resolves a name several files share (same folder, then
 		// shortest path), so an ambiguous link is a warning, not a failed build.

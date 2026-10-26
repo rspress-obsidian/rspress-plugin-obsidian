@@ -11,11 +11,16 @@ import path from "node:path";
 // before enabling it.
 const DOC_BUILD = path.resolve(import.meta.dir, "..", "..", "doc_build");
 
-const hasBuildOutput =
-	process.env.RUN_DOCS_BUILD_TESTS === "1" && fs.existsSync(path.join(DOC_BUILD, "index.html"));
-if (!hasBuildOutput) {
+const enabled = process.env.RUN_DOCS_BUILD_TESTS === "1";
+if (!enabled) {
 	console.info(
 		"[integration] skipped — run `bun run docs:build`, then RUN_DOCS_BUILD_TESTS=1 bun test test/markdown/integration.test.ts.",
+	);
+} else if (!fs.existsSync(path.join(DOC_BUILD, "index.html"))) {
+	// Asked for and impossible: skipping here would let the CI step go green
+	// having checked nothing.
+	throw new Error(
+		"[integration] RUN_DOCS_BUILD_TESTS=1 but doc_build/index.html is missing — run `bun run docs:build` first.",
 	);
 }
 
@@ -45,7 +50,7 @@ function htmlFiles(dir: string): string[] {
 	});
 }
 
-describe.skipIf(!hasBuildOutput)("rspress build integration", () => {
+describe.skipIf(!enabled)("rspress build integration", () => {
 	test("emits docs, vault, canvas and tag pages", () => {
 		for (const relativePath of [
 			"index.html",

@@ -8,9 +8,10 @@
  * A failure is a value ({@link ErrorValue}) that flows through the rest of
  * the formula and shows in its cell, as Obsidian shows it.
  */
+
+import { momentFrom } from "../../../shared/date-math.js";
 import { escapeHtmlAttribute } from "../../../shared/escape.js";
-import { formatDailyNoteDate } from "../../daily-notes.js";
-import { momentFrom } from "../../date-math.js";
+import { formatMomentDate } from "../../../shared/moment-format.js";
 import {
 	checkSize,
 	checkTextLength,
@@ -735,8 +736,8 @@ const NUMBER_METHODS: Record<string, Method<number>> = {
 const DATE_METHODS: Record<string, Method<DateValue>> = {
 	date: (receiver) => startOfDay(receiver.ms),
 	format: (receiver, [format]) =>
-		formatDailyNoteDate(new Date(receiver.ms), format === undefined ? "YYYY-MM-DD" : text(format)),
-	time: (receiver) => formatDailyNoteDate(new Date(receiver.ms), "HH:mm:ss"),
+		formatMomentDate(new Date(receiver.ms), format === undefined ? "YYYY-MM-DD" : text(format)),
+	time: (receiver) => formatMomentDate(new Date(receiver.ms), "HH:mm:ss"),
 	relative: (receiver, _args, { env }) => momentFrom(new Date(receiver.ms), env.now),
 };
 

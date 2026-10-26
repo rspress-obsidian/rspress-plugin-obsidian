@@ -19,8 +19,14 @@ import path from "node:path";
 import type { Image, PhrasingContent, Root } from "mdast";
 import type { Parent } from "unist";
 import { escapeHtmlAttribute, sanitizeUrl } from "../shared/escape.js";
+import { EMBED_SIZE_PATTERN } from "../shared/inline-syntax.js";
 import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
-import { parsePdfSubpath, pdfEmbedHtml, webEmbedHtml } from "../shared/media-html.js";
+import {
+	isSameSiteUrl,
+	parsePdfSubpath,
+	pdfEmbedHtml,
+	webEmbedHtml,
+} from "../shared/media-html.js";
 import { humanizeBaseName } from "../shared/slug.js";
 import { assetUrlPath } from "./content-index.js";
 import type { ContentIndex, ParsedWikiLink } from "./types.js";
@@ -37,6 +43,14 @@ export interface MediaContext {
 	siteBase: string;
 	/** `enableMediaEmbeds`: markdown-syntax audio, video, PDFs and web pages embed. */
 	embedMedia: boolean;
+	/**
+	 * Disk answers for the page being compiled — whether a path is a regular
+	 * file — so the page asks the disk about a path once. Not kept longer, nor
+	 * keyed by content index: the index survives edits its signature ignores
+	 * (`_`-prefixed files and folders, excluded folders, paths outside the
+	 * root), and those are exactly the files only the disk knows about.
+	 */
+	fileChecks: Map<string, boolean>;
 }
 
 export interface MediaResolveResult {
@@ -66,6 +80,20 @@ function decodePath(url: string): string {
 	} catch {
 		return url;
 	}
+}
+
+/** Whether `absolutePath` is a regular file, asked of the disk once per page. */
+function isFileOnDisk(absolutePath: string, checks: Map<string, boolean>): boolean {
+	let isFile = checks.get(absolutePath);
+	if (isFile === undefined) {
+		try {
+			isFile = fs.statSync(absolutePath).isFile();
+		} catch {
+			isFile = false;
+		}
+		checks.set(absolutePath, isFile);
+	}
+	return isFile;
 }
 
 /**
@@ -108,7 +136,7 @@ export function resolveMediaSrc(target: string, ctx: MediaContext): MediaResolve
 	};
 
 	// A disk check is not authoritative about spelling: on a case-insensitive
-	// filesystem (macOS, Windows) `existsSync("document.pdf")` is true for a file
+	// filesystem (macOS, Windows) the file `document.pdf` exists when it is
 	// actually named `Document.pdf`, and returning the name as typed emits a URL
 	// the site never publishes. The index recorded the real casing, so ask it
 	// first and fall back to the request only when it has no entry.
@@ -122,7 +150,7 @@ export function resolveMediaSrc(target: string, ctx: MediaContext): MediaResolve
 		path.resolve(path.dirname(ctx.currentFilePath), target),
 		path.resolve(docsRoot, target.replace(/^\/+/, "")),
 	]) {
-		if (fs.existsSync(candidate)) {
+		if (isFileOnDisk(candidate, ctx.fileChecks)) {
 			const url = canonicalOrTyped(candidate);
 			if (url) return { url, found: true, absolutePath: candidate };
 		}
@@ -190,7 +218,7 @@ function splitImageSize(
 ): { alt: string; width: string; height?: string } | undefined {
 	const separator = caption.lastIndexOf("|");
 	const sizePart = separator === -1 ? caption : caption.slice(separator + 1);
-	const match = sizePart.trim().match(/^(\d+)(?:x(\d+))?$/);
+	const match = sizePart.trim().match(EMBED_SIZE_PATTERN);
 	if (!match?.[1]) return undefined;
 	return {
 		alt: separator === -1 ? "" : caption.slice(0, separator).trim(),
@@ -343,7 +371,9 @@ function markdownMediaNode(
 	}
 	const fallbackText = label || (web ? url : altFromImageUrl(file));
 	if (!src) return { type: "text", value: fallbackText };
-	if (!ctx.embedMedia) {
+	// A PDF on another site is a link even when media embeds are on: the PDF
+	// frame cannot be sandboxed, so it only shows the site's own files.
+	if (!ctx.embedMedia || (playable === "PDF" && !isSameSiteUrl(src))) {
 		// The link opens the file; a PDF keeps its page, not the frame height.
 		const page = playable === "PDF" ? parsePdfSubpath(subpath).page : undefined;
 		const fragment =
@@ -453,7 +483,7 @@ function locateImage(
 ): { kind: "local"; importPath: string } | { kind: "published"; resolved: MediaResolveResult } {
 	const decoded = decodePath(url.split(/[?#]/)[0] ?? url);
 	const absolute = path.resolve(path.dirname(ctx.currentFilePath), decoded);
-	if (fs.existsSync(absolute) && fs.statSync(absolute).isFile()) {
+	if (isFileOnDisk(absolute, ctx.fileChecks)) {
 		return { kind: "local", importPath: relativeImportPath(ctx.currentFilePath, absolute) };
 	}
 	return { kind: "published", resolved: resolveMediaSrc(decoded, ctx) };

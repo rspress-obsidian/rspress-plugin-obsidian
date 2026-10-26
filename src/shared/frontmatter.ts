@@ -1,4 +1,5 @@
 import matter from "gray-matter";
+import { frontmatterLength } from "./content-flags.js";
 
 /**
  * Frontmatter parsing shared by the content index and the graph builder.
@@ -92,25 +93,12 @@ export function parseFrontmatter(markdown: string): ParsedFrontmatter {
 }
 
 /**
- * A leading frontmatter block: `---` alone on line one, a matching `---` line
- * somewhere after it. Deliberately byte-exact and regex-based — the callers
- * (transclusion, canvas note reading, the graph's masked link scan) want the
- * body back untouched, not a parsed document. Accepts CRLF checkouts and an
- * empty block (`---\n---\n`); anything unbalanced (no closing line, `---js`
- * opening, `----` thematic break) returns the input unchanged, which is also
- * what a document with no frontmatter gets.
- */
-const FRONTMATTER_BLOCK = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
-
-/**
- * Drop a leading frontmatter block and return the body byte-for-byte.
- *
- * Shared by the three call sites that used to keep their own copy — each with
- * a different edge case (the canvas one trimmed, the wikilink one `trimStart`ed,
- * the graph one could not see an empty block), so one implementation now pins
- * the common contract instead of three drifting ones.
+ * Drop a leading frontmatter block (see {@link frontmatterLength}) and return
+ * the body byte-for-byte; a document without one is returned unchanged.
+ * Deliberately byte-exact — the callers (transclusion, canvas note reading, the
+ * graph's masked link scan) want the body back untouched, not a parsed
+ * document.
  */
 export function stripFrontmatter(markdown: string): string {
-	const match = FRONTMATTER_BLOCK.exec(markdown);
-	return match ? markdown.slice(match[0].length) : markdown;
+	return markdown.slice(frontmatterLength(markdown));
 }
