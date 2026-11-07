@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { docsRootOf } from "../docs-root.js";
 import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
 import { mermaidBuilderConfig } from "../mermaid/install.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
@@ -274,7 +275,7 @@ function rewriteOutline(page: {
  */
 export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlugin {
 	const normalizedOptions = normalizePluginOptions(options);
-	let docsRoot = path.resolve(process.cwd(), "docs");
+	let docsRoot = docsRootOf(undefined);
 	let siteBase = "/";
 
 	let locales: DocsRouteLocales = {};
@@ -537,7 +538,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 
 		config(siteConfig) {
 			const config = withPluginListed(siteConfig, plugin);
-			docsRoot = path.resolve(process.cwd(), config.root ?? "docs");
+			docsRoot = docsRootOf(config);
 			sitePlugins = config.plugins;
 			siteBase = `/${(config.base ?? "/").replace(/^\/+|\/+$/g, "")}/`.replace(/\/{2,}/g, "/");
 			// Docs routes follow Rspress's rules, which drop the default
@@ -631,7 +632,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		},
 
 		async addPages(config: { root?: string; plugins?: readonly unknown[] }): Promise<VaultPage[]> {
-			docsRoot = path.resolve(process.cwd(), config.root ?? "docs");
+			docsRoot = docsRootOf(config);
 			sitePlugins = config.plugins;
 			resetGeneration();
 			// The indexes built here seed this generation's memo, so the remark

@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { docsRootOf } from "../docs-root.js";
 import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
 import { removeAllComments } from "../markdown/comments.js";
 import {
@@ -712,8 +713,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			// `config.root` rule `rootDir` uses below. `process.cwd()` was the
 			// old default, but that is usually the project root one level above
 			// the content, so an out-of-the-box `canvas()` found nothing.
-			const vaultRoot =
-				resolvedOptions.vaultRoot ?? path.resolve(process.cwd(), config.root ?? "docs");
+			const vaultRoot = resolvedOptions.vaultRoot ?? docsRootOf(config);
 			const published = findPublishedContent(config);
 			// A canvas scanning the vault the markdown plugin publishes links file
 			// cards through that plugin's prefix: the caller's own prefix only
@@ -742,7 +742,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			// Earlier versions wrote board JSON into the site's own `public/`; left
 			// there it would keep publishing deleted boards and, in dev, shadow
 			// the fresh copies.
-			const rootDir = path.resolve(process.cwd(), config.root ?? "docs");
+			const rootDir = docsRootOf(config);
 			await rm(path.join(rootDir, "public", CANVAS_JSON_DIR), { recursive: true, force: true });
 			// The output directory is rebuilt from scratch: a board or attachment
 			// removed from the vault must stop being published.

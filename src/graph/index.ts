@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import type { RouteMeta, RspressPlugin, UserConfig } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { docsRootOf } from "../docs-root.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { findCanvasBoards } from "../shared/canvas-routes.js";
 import { findPublishedContent } from "../shared/published-content.js";
@@ -107,7 +108,7 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 
 	const build = async (config: UserConfig) =>
 		buildGraphModules(collectRoutes(), state, {
-			docsRoot: path.resolve(config.root ?? "docs"),
+			docsRoot: docsRootOf(config),
 			published: findPublishedContent(config),
 			canvasBoards: await findCanvasBoards(config),
 			base: config.base ?? "/",
