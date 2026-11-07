@@ -3,9 +3,10 @@
  * presets and `{{query.file.*}}` placeholders included), run over the vault's
  * tasks, and explained, the way the Tasks plugin does each step.
  */
+
+import type { Day } from "../../../shared/day.js";
 import { isStackOverflow, STACK_OVERFLOW_MESSAGE } from "../../interpreter-limits.js";
 import { COMPONENT_OPTIONS, type TaskComponent } from "./components.js";
-import type { Day } from "./dates.js";
 import { DEFAULT_COMPARATORS, parseFilter, parseGrouper, parseSorter } from "./fields.js";
 import {
 	explainFilter,

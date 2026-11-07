@@ -5,6 +5,7 @@
  * peeled off right to left until only the description is left.
  */
 import * as rruleModule from "rrule";
+import { type Day, ISO_DAY_SHAPE } from "../../../shared/day.js";
 import {
 	extractInlineFields,
 	type InlineField,
@@ -13,7 +14,7 @@ import {
 	TASK_BOX,
 } from "../../dataview-metadata.js";
 import type { ContentPage } from "../../types.js";
-import { type Day, ISO_DAY_SHAPE, parseIsoDay, type TaskDate } from "./dates.js";
+import { parseIsoDay, type TaskDate } from "./dates.js";
 import { STATUS_TYPE_ORDER, statusFor, type TaskStatus } from "./settings.js";
 import {
 	PRIORITIES,

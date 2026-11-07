@@ -2,7 +2,7 @@
  * The pieces a Tasks query is built from — statements, filters, sorters,
  * groupers — and the text `explain` prints for them, worded as Tasks words it.
  */
-import type { Day } from "./dates.js";
+import type { Day } from "../../../shared/day.js";
 import type { Task } from "./task.js";
 
 /**

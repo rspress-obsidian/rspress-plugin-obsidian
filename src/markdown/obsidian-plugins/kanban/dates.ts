@@ -12,7 +12,7 @@ import {
 	normalizeMomentUnit,
 	startOf,
 } from "../../../shared/date-math.js";
-import { ISO_DAY, parseIsoDayParts } from "../tasks/dates.js";
+import { ISO_DAY, parseIsoDayParts } from "../../../shared/day.js";
 import type { KanbanDateColor } from "./options.js";
 
 /** A whole string that is an ISO day, read as local midnight like a card date. */

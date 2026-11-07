@@ -5,6 +5,7 @@
  * link, tag, formula or embed in a card behaves as it does in a note.
  */
 import fs from "node:fs";
+import { ISO_DAY, parseIsoDayParts } from "../../../shared/day.js";
 import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shared/escape.js";
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { formatMomentDate, parseMomentDate } from "../../../shared/moment-format.js";
@@ -14,7 +15,6 @@ import type { InlineField } from "../../dataview-metadata.js";
 import { DataviewLink, valueToString } from "../../dataview-values.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentIndex, ContentPage } from "../../types.js";
-import { ISO_DAY, parseIsoDayParts } from "../tasks/dates.js";
 import { isTaskField, priorityEmojiOfName, taskFieldOf } from "../tasks/task-fields.js";
 import type { PluginRenderContext } from "../types.js";
 import type { ResolvedKanbanSettings } from "./board-settings.js";

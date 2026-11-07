@@ -3,12 +3,13 @@
  * own order (more specific instructions first, Boolean combinations last), so
  * a line means here what it means in Obsidian.
  */
+
+import type { Day } from "../../../shared/day.js";
 import { escapeRegExp } from "../../../shared/escape.js";
 import { compileSafeRegex } from "../../../shared/safe-regex.js";
 import { BOOLEAN_LINE, parseBooleanFilter } from "./boolean.js";
 import {
 	compareTaskDates,
-	type Day,
 	type DayRange,
 	formatDay,
 	isoDay,
