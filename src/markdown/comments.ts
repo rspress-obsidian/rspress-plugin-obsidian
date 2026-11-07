@@ -24,8 +24,9 @@
 import { createHash } from "node:crypto";
 import type { Root } from "mdast";
 import type { Parent } from "unist";
-import { frontmatterLength } from "../shared/content-flags.js";
+import { frontmatterLength, getContentLineFlags } from "../shared/content-flags.js";
 import { slugifyHeading, stripMarkdownFormatting } from "../shared/slug.js";
+import { scanPageHeadings } from "./heading-text.js";
 import { parseObsidianMarkdown } from "./syntax.js";
 import { visit } from "./visit.js";
 
@@ -207,29 +208,31 @@ function isOffsetIn(offset: number, ranges: readonly CommentRange[]): boolean {
 	return ranges.some((range) => offset >= range.start && offset < range.end);
 }
 
-const HEADING_LINE = /^\s{0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$/;
-
-/** How often each heading text occurs in `source`, split by whether a comment hides it. */
+// How often each heading occurs in `source`, split by whether a comment hides
+// it. The heading grammar comes from `scanPageHeadings` — the owner of "what a
+// heading is" — so setext headings count too and a trailing `#` in `## C#`
+// stays part of the text.
 function countHeadings(
 	source: string,
 	ranges: CommentRange[],
 	commented: boolean,
 ): Map<string, number> {
 	const lines = source.split("\n");
+	const isContent = getContentLineFlags(lines);
 	const literal = literalRanges(source, false);
-	const counts = new Map<string, number>();
+	const offsets: number[] = [];
 	let offset = 0;
-
 	for (const line of lines) {
-		const lineStart = offset;
+		offsets.push(offset);
 		offset += line.length + 1;
-		const text = HEADING_LINE.exec(line)?.[1];
-		if (!text) continue;
-		const at = lineStart + line.indexOf(text);
-		if (isOffsetIn(at, literal) || isOffsetIn(at, ranges) !== commented) continue;
-		counts.set(text, (counts.get(text) ?? 0) + 1);
 	}
-
+	const counts = new Map<string, number>();
+	for (const heading of scanPageHeadings(lines, isContent)) {
+		const at = offsets[heading.line] ?? 0;
+		if (isOffsetIn(at, literal) || isOffsetIn(at, ranges) !== commented) continue;
+		if (!heading.text) continue;
+		counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
+	}
 	return counts;
 }
 

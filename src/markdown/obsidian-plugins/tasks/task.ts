@@ -13,9 +13,6 @@ import {
 	LIST_ITEM_PREFIX,
 	TASK_BOX,
 } from "../../dataview-metadata.js";
-import type { ContentPage } from "../../types.js";
-import { parseIsoDay, type TaskDate } from "./dates.js";
-import { STATUS_TYPE_ORDER, statusFor, type TaskStatus } from "./settings.js";
 import {
 	PRIORITIES,
 	PRIORITY_INLINE_NAMES,
@@ -26,7 +23,10 @@ import {
 	TASK_FIELDS,
 	type TaskDateField,
 	type TaskField,
-} from "./task-fields.js";
+} from "../../task-fields.js";
+import type { ContentPage } from "../../types.js";
+import { parseIsoDay, type TaskDate } from "./dates.js";
+import { STATUS_TYPE_ORDER, statusFor, type TaskStatus } from "./settings.js";
 
 // Node's ESM loader reads rrule's CommonJS `main`, so its exports arrive under
 // `default` there; Bun (which reads `module`) and the CJS build see them directly.

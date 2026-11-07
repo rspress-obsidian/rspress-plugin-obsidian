@@ -14,6 +14,7 @@
  *
  * Node-free and import-only-types so any bundle can read it.
  */
+import type { FileRoutes } from "./file-routes.js";
 import type { ContentIndexOptions } from "./index-options.js";
 import { attachPluginValue, findPluginValue } from "./plugin-channel.js";
 
@@ -58,6 +59,13 @@ export interface PublishedContentConfig {
 	 * the target lives in.
 	 */
 	resolveOptions: PublishedResolveOptions;
+	/**
+	 * Pages the build publishes for non-Markdown files (`.base` views, plain
+	 * `.excalidraw` drawings), by absolute path. A reader resolving links outside
+	 * the note pass hands this to the resolver, or `[[View.base]]` resolves to a
+	 * download URL instead of the page that exists.
+	 */
+	fileRoutes: FileRoutes;
 }
 
 /** Name the markdown plugin publishes under; see {@link attachPluginValue}. */

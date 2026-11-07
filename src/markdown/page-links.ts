@@ -98,8 +98,8 @@ function markdownCacheLink(
 function markdownDestinationAsWritten(destination: string): string | undefined {
 	let target = destination.trim();
 	if (target.startsWith("<") && target.endsWith(">")) target = target.slice(1, -1).trim();
-	if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || /^[/#]/.test(target)) return undefined;
 	if (/^obsidian:\/\//i.test(target)) return obsidianUriAsWritten(target);
+	if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || /^[/#]/.test(target)) return undefined;
 	const hash = target.indexOf("#");
 	const query = target.indexOf("?");
 	const end = Math.min(hash < 0 ? target.length : hash, query < 0 ? target.length : query);

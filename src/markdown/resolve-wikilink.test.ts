@@ -2,8 +2,7 @@ import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import { createCanvasBoards } from "../shared/canvas-routes.js";
 import { createFileRoutes } from "../shared/file-routes.js";
-import { normalizeLookupValue } from "../shared/slug.js";
-import { buildContentIndex } from "./content-index.ts";
+import { buildContentIndex, pushNamedPage } from "./content-index.ts";
 import { parseWikiLink } from "./parse-wikilink.ts";
 import { resolveWikiLink } from "./resolve-wikilink.ts";
 import type {
@@ -87,8 +86,8 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 			push(byBaseName, page.baseName, page);
 			push(byBaseNameCI, page.baseName.toLowerCase(), page);
 		}
-		if (page.title) push(byTitle, normalizeLookupValue(page.title), page);
-		for (const alias of page.aliases) push(byAlias, normalizeLookupValue(alias), page);
+		if (page.title) pushNamedPage(byTitle, page.title, page);
+		for (const alias of page.aliases) pushNamedPage(byAlias, alias, page);
 	}
 
 	const byAssetPath = new Map<string, ContentAsset>();

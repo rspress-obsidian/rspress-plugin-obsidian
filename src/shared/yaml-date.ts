@@ -6,9 +6,11 @@
  * dated `2024-05-01` shows that day wherever the site is built, not April 30
  * west of Greenwich. Every reader of a frontmatter `Date` goes through this.
  */
+import { localDate } from "./date-math.js";
+
 export function yamlDateAsLocal(value: Date): Date | undefined {
 	if (Number.isNaN(value.getTime())) return undefined;
-	return new Date(
+	return localDate(
 		value.getUTCFullYear(),
 		value.getUTCMonth(),
 		value.getUTCDate(),

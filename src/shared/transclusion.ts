@@ -10,8 +10,20 @@
  * patterns below (which end in `[ \t]*$`) match nothing.
  */
 
+import GithubSlugger from "github-slugger";
 import { getContentLineFlags } from "../shared/content-flags.js";
-import { headingKey, slugifyHeading } from "../shared/slug.js";
+import { headingKey, slugifyHeading, stripMarkdownFormatting } from "../shared/slug.js";
+
+/**
+ * Obsidian block ids: letters, digits, `_` and `-`. The content index and the
+ * transclusion slicer must select the same ids, so both read these patterns
+ * rather than keeping one copy each.
+ */
+const BLOCK_ID = "[A-Za-z0-9_-]+";
+/** `^id` alone on a line (trimmed). */
+export const STANDALONE_BLOCK_ID = new RegExp(`^\\^(${BLOCK_ID})$`);
+/** `text ^id` ending a line; group 1 is the text, group 2 the id. */
+export const INLINE_BLOCK_ID = new RegExp(`^(.*?)\\s+\\^(${BLOCK_ID})\\s*$`);
 
 /**
  * The note slice a `#subpath` selects: a `^block` id, a heading name or slug, or
@@ -44,32 +56,55 @@ interface SectionHeading {
 	line: number;
 	level: number;
 	text: string;
+	/** The id the rendered page gives it — explicit `{#id}`, else a slug. */
+	id: string;
 	explicitId?: string;
+	/** `false` for a heading inside a blockquote or callout. */
+	topLevel: boolean;
 }
 
-/** Every ATX and setext heading outside frontmatter and fences, in order. */
+/**
+ * Every ATX and setext heading outside frontmatter and fences, in order, with
+ * the ids the page gives them.
+ *
+ * Mirrors `scanPageHeadings` (`src/markdown/heading-text.ts`) without its
+ * remark dependency, which the browser card renderer must not pull in: the
+ * same blockquote headings, the same setext rule, and one slugger per note so
+ * a repeated heading gets `-1`, `-2`… and `![[Note#Details-1]]` selects the
+ * second one. The two differ only in how much inline markdown the text keeps
+ * (`stripMarkdownFormatting` here, a real parse there); both feed the same
+ * slugger, so their ids agree.
+ */
 function scanHeadings(lines: string[], isContent: boolean[]): SectionHeading[] {
 	const headings: SectionHeading[] = [];
-	const push = (line: number, level: number, raw: string): void => {
+	const slugger = new GithubSlugger();
+	const push = (line: number, level: number, raw: string, topLevel: boolean): void => {
 		const explicit = /\s*\{#([^{}]+)\}\s*$/.exec(raw);
+		const text = (explicit ? raw.slice(0, explicit.index) : raw).trim();
+		const explicitId = explicit?.[1]?.trim();
 		headings.push({
 			line,
 			level,
-			text: (explicit ? raw.slice(0, explicit.index) : raw).trim(),
-			explicitId: explicit?.[1]?.trim(),
+			text,
+			explicitId,
+			// An explicit id keeps its own and does not advance the counter, as in
+			// the page's `HeadingIdAllocator`.
+			id: explicitId ?? slugger.slug(stripMarkdownFormatting(text)),
+			topLevel,
 		});
 	};
 	for (let i = 0; i < lines.length; i++) {
 		if (!isContent[i]) continue;
 		const line = lines[i] ?? "";
-		const atx = line.match(/^\s{0,3}(#{1,6})[ \t]+(.+?)(?:\s+#+)?[ \t]*$/);
+		const atx = line.match(/^((?:\s{0,3}>)*)\s{0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/);
 		if (atx) {
-			push(i, (atx[1] ?? "").length, atx[2] ?? "");
+			push(i, (atx[2] ?? "").length, atx[3] ?? "", (atx[1] ?? "").trim() === "");
 			continue;
 		}
+		if (/^\s*>/.test(line)) continue;
 		const underline = isContent[i + 1] ? (lines[i + 1] ?? "").match(/^\s{0,3}(=+|-+)\s*$/) : null;
 		if (underline && line.trim().length > 0) {
-			push(i, (underline[1] ?? "").startsWith("=") ? 1 : 2, line);
+			push(i, (underline[1] ?? "").startsWith("=") ? 1 : 2, line, true);
 			i += 1;
 		}
 	}
@@ -97,6 +132,7 @@ export function extractHeadingSection(content: string, heading: string): string 
 
 	const matches = (entry: SectionHeading, part: string): boolean =>
 		entry.explicitId === part ||
+		entry.id === part.toLowerCase() ||
 		headingKey(entry.text) === headingKey(part) ||
 		slugifyHeading(entry.text) === part.toLowerCase();
 
@@ -111,7 +147,9 @@ export function extractHeadingSection(content: string, heading: string): string 
 			if (matches(ancestor, parts[wanted] ?? "")) wanted -= 1;
 		}
 		if (wanted >= 0) continue;
-		const end = headings.slice(position + 1).find((next) => next.level <= entry.level);
+		const end = headings
+			.slice(position + 1)
+			.find((next) => next.topLevel && next.level <= entry.level);
 		return lines
 			.slice(entry.line, end ? end.line : lines.length)
 			.join("\n")
@@ -153,7 +191,7 @@ export function extractBlockSection(content: string, blockId: string): string | 
 		}
 
 		// Inline block ID appended to a line: references that whole block.
-		const inlineMatch = line.match(/^(.*?)\s+\^([A-Za-z0-9_-]+)\s*$/);
+		const inlineMatch = line.match(INLINE_BLOCK_ID);
 		if (inlineMatch && inlineMatch[2]?.toLowerCase() === normalizedId) {
 			const text = (inlineMatch[1] ?? "").trimEnd();
 			return extractInlineBlock(lines, isContent, i, text) || undefined;

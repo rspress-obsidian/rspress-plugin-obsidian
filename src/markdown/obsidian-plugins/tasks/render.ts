@@ -8,6 +8,7 @@
 import type { Day } from "../../../shared/day.js";
 import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shared/escape.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
+import { priorityTitle } from "../../task-fields.js";
 import type { ContentPage, ParsedWikiLink, ResolvedWikiLink } from "../../types.js";
 import {
 	COMPONENTS,
@@ -19,7 +20,6 @@ import type { TaskDate } from "./dates.js";
 import { type Query, type QueryResult, type TaskGroup, taskCountText } from "./query.js";
 import type { SearchInfo } from "./query-model.js";
 import { closestParentTask, fileBaseName, type ListEntry, type Task, urgencyOf } from "./task.js";
-import { priorityTitle } from "./task-fields.js";
 
 /** What rendering needs from the page being built. */
 interface RenderTools {

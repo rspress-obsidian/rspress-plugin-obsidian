@@ -9,7 +9,7 @@ import type {
 	ParsedWikiLink,
 	ResolveContext,
 } from "../../markdown/types.js";
-import { isPrivateVaultFile } from "../../markdown/vault-files.js";
+import { findAssetByPath, findPageByPath, isPrivateVaultFile } from "../../markdown/vault-files.js";
 import type { CanvasBoardRoute, CanvasBoards } from "../../shared/canvas-routes.js";
 import { parseFrontmatter } from "../../shared/frontmatter.js";
 import { TAG_ROUTE_PREFIX } from "../../shared/paths.js";
@@ -133,6 +133,7 @@ export async function planGraphDocuments(
 		untrackedSignature: untracked.join("|"),
 		resolveOptions: {
 			...(published?.resolveOptions ?? DEFAULT_RESOLVE_OPTIONS),
+			...(published && { fileRoutes: published.fileRoutes }),
 			canvasBoards,
 		},
 		docsIndex,
@@ -213,16 +214,30 @@ export async function loadGraphDocuments(
 				} catch {
 					// A board removed mid-build keeps its node and loses its links.
 				}
-				// The canvas feature's rule (`isPrivateVaultFile`): a card naming a
-				// file of any kind that is on disk but not published adds no node.
-				const { outlinks, tags } = extractCanvasLinks(json, (file) =>
-					isPrivateVaultFile(
-						owner.index,
-						owner.root,
-						file,
-						(board) => plan.resolveOptions.canvasBoards?.bySource(board, true) !== undefined,
-					),
-				);
+				// The canvas feature's rule (`resolveFileNode`): a card links only a
+				// file the site publishes at exactly that path — a page, an asset, a
+				// board, or a file a feature gives a page. Privacy wins: a file on
+				// disk but unpublished adds no node, not even its name. A card naming
+				// a path nothing on disk has is drawn as an unresolved note, as
+				// Obsidian does, and never name-matched to a different file.
+				const { outlinks, tags } = extractCanvasLinks(json, (file) => {
+					if (
+						isPrivateVaultFile(
+							owner.index,
+							owner.root,
+							file,
+							(board) => plan.resolveOptions.canvasBoards?.bySource(board, true) !== undefined,
+						)
+					) {
+						return "none";
+					}
+					const published =
+						findPageByPath(owner.index, file) !== undefined ||
+						findAssetByPath(owner.index, file) !== undefined ||
+						plan.resolveOptions.canvasBoards?.bySource(file, true) !== undefined ||
+						plan.resolveOptions.fileRoutes?.find(path.join(owner.root, file)) !== undefined;
+					return published ? "link" : "ghost";
+				});
 				const boardPage = syntheticPage(board.absolutePath, relativePath, route.routePath);
 				return {
 					...base,

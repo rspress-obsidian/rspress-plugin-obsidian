@@ -328,6 +328,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 			: undefined,
 		docsIndexOptions: docsIndexOptions(),
 		resolveOptions,
+		fileRoutes,
 	});
 
 	// Attachments are staged outside the docs tree and served as an extra

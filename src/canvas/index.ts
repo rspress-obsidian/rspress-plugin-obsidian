@@ -12,7 +12,8 @@ import {
 } from "../markdown/content-index.js";
 import { linkContentIndexes } from "../markdown/linked-indexes.js";
 import { parseWikiLink } from "../markdown/parse-wikilink.js";
-import { resolveWikiLink } from "../markdown/resolve-wikilink.js";
+import { publicDirectoryPlugin } from "../markdown/public-dir.js";
+import { resolvePageSubpath, resolveWikiLink } from "../markdown/resolve-wikilink.js";
 import type { ContentAsset, ContentIndex, ContentPage, ResolveContext } from "../markdown/types.js";
 import {
 	type DirectoryListings,
@@ -39,7 +40,6 @@ import {
 	type PublishedContentConfig,
 } from "../shared/published-content.js";
 import { normalizeFsPath, normalizeRoutePrefix } from "../shared/route-path.js";
-import { extractBlockSection, extractHeadingSection } from "../shared/transclusion.js";
 import { CANVAS_JSON_DIR, DEFAULT_IFRAME_SANDBOX } from "./constants.js";
 import { parseCanvas } from "./parser.js";
 import type {
@@ -52,7 +52,7 @@ import type {
 } from "./types.js";
 import { canvasLinkKey, normalizeAssetKey } from "./utils/asset-key.js";
 import { normalizeSiteBase } from "./utils/base.js";
-import { anchorHref, collectMarkdownTargets } from "./utils/markdown.js";
+import { collectMarkdownTargets } from "./utils/markdown.js";
 
 const LOG_PREFIX = "[rspress-plugin-obsidian:canvas]";
 
@@ -359,19 +359,25 @@ async function resolveFileNode(
 		const key = await registerNote(page, context, maps);
 		if (!key) return { resolved: { kind: "missing" } };
 		const route = `/${page.routePath.replace(/^\/+/, "")}`;
-		const resolved: CanvasResolvedFile = { kind, key, href: anchorHref(route, node.subpath) };
-		if (node.subpath) {
+		// The card links the anchor the page actually renders (an explicit id, a
+		// duplicate heading's `-1` slug, a block id), not one the card derives.
+		const anchor = node.subpath?.replace(/^#/, "") ?? "";
+		const subpath = anchor
+			? {
+					kind: anchor.startsWith("^") ? ("block" as const) : ("heading" as const),
+					value: anchor.startsWith("^") ? anchor.slice(1) : anchor,
+				}
+			: undefined;
+		const section = subpath ? resolvePageSubpath(page, subpath) : undefined;
+		const resolved: CanvasResolvedFile = {
+			kind,
+			key,
+			href: section ? `${route}#${section.fragment}` : route,
+		};
+		if (subpath && !section) {
 			// The whole note stays on the card when the subpath names nothing (the
 			// documented fallback); the card says so and links to the note itself.
-			const anchor = node.subpath.replace(/^#/, "");
-			const body = maps.notes[key] ?? "";
-			const section = anchor.startsWith("^")
-				? extractBlockSection(body, anchor.slice(1))
-				: extractHeadingSection(body, anchor);
-			if (anchor && section === undefined) {
-				resolved.missingSubpath = true;
-				resolved.href = route;
-			}
+			resolved.missingSubpath = true;
 		}
 		return { resolved, note: page };
 	}
@@ -542,7 +548,9 @@ async function loadVaultIndex(
 	fileRoutePrefix: string | undefined,
 	published: PublishedContentConfig | undefined,
 ): Promise<{ index: ContentIndex; resolveOptions: ResolveContext["options"] }> {
-	const resolveOptions = published?.resolveOptions ?? DEFAULT_RESOLVE_OPTIONS;
+	const resolveOptions = published
+		? { ...published.resolveOptions, fileRoutes: published.fileRoutes }
+		: DEFAULT_RESOLVE_OPTIONS;
 	// Sharing the Markdown plugin's indexes (and its options) means a card link
 	// resolves to exactly the route the note page was published at, and — as on
 	// a note page — falls back to the site's other tree.
@@ -686,14 +694,15 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		...mermaidConfig,
 		// Cards typeset their math in the browser, which loads KaTeX's stylesheet
 		// from this public directory first.
-		plugins: [...(mermaidConfig.plugins ?? []), deferInvalidationPlugin, katexStylesheetPlugin()],
-		source: { ...mermaidConfig.source, define },
-		server: {
-			...mermaidConfig.server,
+		plugins: [
+			...(mermaidConfig.plugins ?? []),
+			deferInvalidationPlugin,
+			katexStylesheetPlugin(),
 			// Rsbuild concatenates this with Rspress's own `<root>/public`, serving
 			// both in dev and copying both into the build output.
-			publicDir: [{ name: resolvedOptions.outDir, copyOnBuild: true, watch: false }],
-		},
+			publicDirectoryPlugin("rspress-plugin-obsidian:canvas", resolvedOptions.outDir),
+		],
+		source: { ...mermaidConfig.source, define },
 	};
 
 	// The boards the latest scan published, read back by the markdown and graph

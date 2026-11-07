@@ -32,7 +32,9 @@ export function backlinkLabel(page: ContentPage): string {
 	if (page.title) {
 		return page.title;
 	}
-	const titleHeading = page.headings.find((heading) => (heading.depth ?? 1) === 1)?.rawText;
+	const titleHeading = page.headings.find(
+		(heading) => heading.topLevel !== false && (heading.depth ?? 1) === 1,
+	)?.rawText;
 	if (titleHeading) {
 		return titleHeading;
 	}

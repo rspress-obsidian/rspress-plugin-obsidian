@@ -72,12 +72,36 @@ export function buildGraphData(documents: GraphDocument[]): GraphBuildOutput {
 		return node.id;
 	};
 
+	const noteUnresolved = (source: GraphDocument, target: string, ghost: boolean) => {
+		const sourceId = source.route.routePath;
+		const bucket = unresolved.get(sourceId);
+		if (bucket) bucket.add(target);
+		else unresolved.set(sourceId, new Set([target]));
+		if (!ghost) return;
+		const ghostKey = normalizeLookupValue(target.replace(/\.mdx?$/i, ""));
+		addLink(
+			source,
+			ensureNode({
+				id: `?${ghostKey}`,
+				label: target,
+				kind: "unresolved",
+				navigable: false,
+				path: target,
+				ctime: 0,
+			}),
+		);
+	};
+
 	for (const document of documents) {
 		const context = document.context;
 		if (context) {
 			for (const outlink of document.outlinks) {
 				if (outlink.isCurrentPageReference || outlink.search) continue;
 				resolvedLinks += 1;
+				if (outlink.ghost) {
+					noteUnresolved(document, outlink.target, true);
+					continue;
+				}
 				// The graph links notes, not headings: a dead `#heading` still links
 				// the note, exactly as Obsidian draws it.
 				const resolved = resolveWikiLink({ ...outlink, subpath: undefined }, context);
@@ -91,6 +115,13 @@ export function buildGraphData(documents: GraphDocument[]): GraphBuildOutput {
 					if (resolved.canvasSrc) {
 						const board = documentByRoute.get(routeKey(safeDecode(hrefPath)));
 						if (board) addLink(document, board.route.routePath);
+						continue;
+					}
+					if (resolved.fileRoute) {
+						// A `.base` view or plain `.excalidraw` drawing has a page of
+						// its own; the file itself is never staged as a download.
+						const featurePage = documentByRoute.get(routeKey(resolved.fileRoute.routePath));
+						if (featurePage) addLink(document, featurePage.route.routePath);
 						continue;
 					}
 					if (!hrefPath) continue;
@@ -109,23 +140,7 @@ export function buildGraphData(documents: GraphDocument[]): GraphBuildOutput {
 					continue;
 				}
 
-				const sourceId = document.route.routePath;
-				const bucket = unresolved.get(sourceId);
-				if (bucket) bucket.add(outlink.target);
-				else unresolved.set(sourceId, new Set([outlink.target]));
-				if (resolved.status !== "broken-page") continue;
-				const ghostKey = normalizeLookupValue(outlink.target.replace(/\.mdx?$/i, ""));
-				addLink(
-					document,
-					ensureNode({
-						id: `?${ghostKey}`,
-						label: outlink.target,
-						kind: "unresolved",
-						navigable: false,
-						path: outlink.target,
-						ctime: 0,
-					}),
-				);
+				noteUnresolved(document, outlink.target, resolved.status === "broken-page");
 			}
 		}
 

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { getCachedContentIndex } from "../../markdown/content-index.js";
 import { createCanvasBoards } from "../../shared/canvas-routes.js";
+import { createFileRoutes } from "../../shared/file-routes.js";
 import { deriveRoutePath } from "../../shared/route-path.js";
 import { decodeGraphPayload } from "../graph-payload.js";
 import type { GraphData, GraphPayload } from "../types.js";
@@ -202,6 +203,7 @@ describe("vault publishing", () => {
 			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
 			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
 			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			fileRoutes: createFileRoutes(),
 		};
 		const routes = [
 			...routesFor(docsRoot, docsFiles),
@@ -597,6 +599,7 @@ describe("routes no content index holds", () => {
 			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
 			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
 			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			fileRoutes: createFileRoutes(),
 		};
 		const canvasBoards = createCanvasBoards([
 			{
@@ -620,6 +623,42 @@ describe("routes no content index holds", () => {
 		expect(labelOf(graph, "/vault/Boards/Plan")).toBe("Plan.canvas");
 		// A vault note keeps Obsidian's file-name label even with an H1.
 		expect(labelOf(graph, "/vault/Notes/Setup")).toBe("Setup");
+	});
+
+	test("a .base link resolves to the page the bases feature publishes", async () => {
+		const vaultFiles = { "Notes/Setup.md": "[[Views/Projects.base]]\n" };
+		const vaultRoot = await writeTree(vaultFiles);
+		const docsRoot = await writeTree({ "index.md": "x\n" });
+		const fileRoutes = createFileRoutes();
+		fileRoutes.set("bases", [
+			{
+				kind: "bases",
+				absolutePath: path.join(vaultRoot, "Views/Projects.base"),
+				routePath: "/vault/Views/Projects",
+				source: "Views/Projects.base",
+			},
+		]);
+		const published = {
+			docsRoot,
+			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
+			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			fileRoutes,
+		};
+		const routes = [
+			...routesFor(docsRoot, { "index.md": "" }),
+			...routesFor(vaultRoot, vaultFiles, "/vault"),
+			{
+				routePath: "/vault/Views/Projects",
+				absolutePath: path.join(docsRoot, "node_modules/temp-base.mdx"),
+				relativePath: "vault/Views/Projects.mdx",
+				pageName: "projects",
+			},
+		];
+		const { graph } = await build(routes, docsRoot, { published });
+		expect(edgesFrom(graph, "/vault/Notes/Setup")).toEqual(["/vault/Views/Projects"]);
+		// The `.base` file has a page, so it is never also a download.
+		expect(graph.nodes.some((node) => node.kind === "attachment")).toBe(false);
 	});
 });
 

@@ -3,9 +3,10 @@
  * each part for `hide`/`show`, giving it the class and `data-*` attribute it is
  * drawn with, and writing its text.
  */
+
+import { priorityEmoji, type TaskDateField, taskFieldEmoji } from "../../task-fields.js";
 import { isoDay, type TaskDate } from "./dates.js";
 import type { Task } from "./task.js";
-import { priorityEmoji, type TaskDateField, taskFieldEmoji } from "./task-fields.js";
 
 /** A component's text: what it shows, and the unabbreviated form a tooltip carries. */
 export interface ComponentText {

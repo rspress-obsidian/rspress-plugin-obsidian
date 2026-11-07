@@ -464,6 +464,7 @@ interface ParsedWikiLink {
   subpath?: WikiSubpath;           // After #
   search?: "heading" | "block";    // [[##query]] or [[^^query]]
   isCurrentPageReference: boolean; // [[#Heading]]
+  ghost?: boolean;                 // Known missing: draw as unresolved, never name-match
 }
 
 interface WikiSubpath {
@@ -533,6 +534,7 @@ interface ContentIndex {
   byAssetPathCI: Map<string, ContentAsset[]>;
   byAssetBaseNameCI: Map<string, ContentAsset[]>;
   backlinks: Map<string, BacklinkRef[]>;     // Built during indexing
+  unpublishedPaths: ReadonlySet<string>;      // Pages dropped for publish: false
   linkedIndexes?: ContentIndex[];            // The other tree on the site
 }
 ```
@@ -575,6 +577,7 @@ interface HeadingEntry {
   explicitId?: string;             // From {#custom-id}
   depth?: number;                  // 1–6
   sourceText?: string;             // Inline Markdown as written
+  topLevel?: boolean;              // false inside a blockquote or callout
   preview?: string;                // First ~200 characters of the section
 }
 

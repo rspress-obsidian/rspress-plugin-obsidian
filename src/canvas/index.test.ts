@@ -405,15 +405,35 @@ describe("canvas publishing", () => {
 		await writeFile(path.join(fixture.vault, "Board.canvas"), JSON.stringify({ nodes: [] }));
 		const plugin = vaultPlugin(fixture);
 		await plugin.addPages?.({ root: fixture.docs, base: "/docs/" }, false);
-		const server = plugin.builderConfig?.server as { publicDir?: { name: string }[] };
-		expect(server.publicDir?.map((entry) => entry.name)).toEqual([fixture.out]);
 		expect(plugin.builderConfig?.source?.define).toEqual({
 			__RSPRESS_OBSIDIAN_CANVAS_BASE__: JSON.stringify("/docs/"),
 			__RSPRESS_OBSIDIAN_KATEX_STYLESHEET__: JSON.stringify(KATEX_STYLESHEET_PATH),
 		});
+		// The public directory is registered when the bundler is configured, so
+		// constructing the plugin writes nothing and a build that never runs does
+		// not leave a directory behind.
+		const builderPlugins = (plugin.builderConfig?.plugins ?? []) as Array<{
+			name?: string;
+			setup?: (api: {
+				context: { rootPath: string };
+				modifyRsbuildConfig: (
+					fn: (config: { server?: { publicDir?: { name: string }[] } }) => void,
+				) => void;
+			}) => void;
+		}>;
+		const config: { server?: { publicDir?: { name: string }[] } } = {};
+		builderPlugins
+			.find((entry) => entry.name === "rspress-plugin-obsidian:canvas")
+			?.setup?.({
+				context: { rootPath: fixture.docs },
+				modifyRsbuildConfig: (fn) => fn(config),
+			});
+		expect(config.server?.publicDir?.map((entry) => entry.name)).toEqual([
+			path.join(fixture.docs, "public"),
+			fixture.out,
+		]);
 		// Cards typeset math in the browser, which loads KaTeX's stylesheet from
 		// the directory this plugin publishes rather than the global stylesheet.
-		const builderPlugins = (plugin.builderConfig?.plugins ?? []) as Array<{ name?: string }>;
 		expect(builderPlugins.map((builderPlugin) => builderPlugin.name)).toContain(
 			"rspress-plugin-obsidian:katex-stylesheet",
 		);

@@ -15,16 +15,15 @@ function fileCardLink(file: string): ParsedWikiLink {
  * and tags its markdown contains. Link cards (web pages) and groups add
  * nothing. Unparseable JSON yields no links rather than failing the build.
  *
- * A file card's target follows the canvas feature's rule — `resolveFileNode`
- * in `src/canvas/index.ts` — which links a card only when the site publishes
- * the file behind it. A private file (`publish: false`, a dot or `_` segment,
- * an excluded folder, outside the vault) publishes nothing, not even its name,
- * so it adds no link here either; a file that does not exist at all is not
- * private, and Obsidian draws it as an unresolved node.
+ * `publishedExactly` reports whether the site publishes that exact path — the
+ * same rule `resolveFileNode` in `src/canvas/index.ts` applies with
+ * `findPageByPath` / `findAssetByPath`. A card the canvas renders as missing
+ * or private adds no link, so the graph never connects `old/Note.md` to a
+ * `new/Note.md` that only the resolver's name fallback would find.
  */
 export function extractCanvasLinks(
 	json: string,
-	isPrivateFile: (file: string) => boolean,
+	cardState: (file: string) => "link" | "ghost" | "none",
 ): { outlinks: ParsedWikiLink[]; tags: string[] } {
 	let board: unknown;
 	try {
@@ -48,8 +47,11 @@ export function extractCanvasLinks(
 		}
 		if (type !== "file" || !("file" in card) || typeof card.file !== "string") continue;
 		if (!card.file.trim()) continue;
-		if (isPrivateFile(card.file)) continue;
-		outlinks.push(fileCardLink(card.file));
+		const state = cardState(card.file);
+		if (state === "none") continue;
+		const link = fileCardLink(card.file);
+		if (state === "ghost") link.ghost = true;
+		outlinks.push(link);
 	}
 	return { outlinks, tags: [...new Set(tags)] };
 }

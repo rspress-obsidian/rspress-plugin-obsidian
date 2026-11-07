@@ -7,6 +7,12 @@
 import type { Day } from "../../../shared/day.js";
 import { escapeRegExp } from "../../../shared/escape.js";
 import { compileSafeRegex } from "../../../shared/safe-regex.js";
+import {
+	PRIORITY_NONE,
+	PRIORITY_QUERY_NAMES,
+	priorityOfName,
+	priorityTitle,
+} from "../../task-fields.js";
 import { BOOLEAN_LINE, parseBooleanFilter } from "./boolean.js";
 import {
 	compareTaskDates,
@@ -37,12 +43,6 @@ import {
 	type Task,
 	urgencyOf,
 } from "./task.js";
-import {
-	PRIORITY_NONE,
-	PRIORITY_QUERY_NAMES,
-	priorityOfName,
-	priorityTitle,
-} from "./task-fields.js";
 
 /** What parsing a query line may depend on. */
 export interface ParseContext {

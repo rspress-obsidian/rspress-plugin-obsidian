@@ -4,18 +4,18 @@
  * too. Card text renders through the page's own pipeline (`renderBlock`), so a
  * link, tag, formula or embed in a card behaves as it does in a note.
  */
-import fs from "node:fs";
-import { ISO_DAY, parseIsoDayParts } from "../../../shared/day.js";
+
+import { localDate } from "../../../shared/date-math.js";
+import { dayFromParts, ISO_DAY, parseIsoDayParts } from "../../../shared/day.js";
 import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shared/escape.js";
-import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { formatMomentDate, parseMomentDate } from "../../../shared/moment-format.js";
 import { tagRoutePath } from "../../../shared/paths.js";
 import { yamlDateAsLocal } from "../../../shared/yaml-date.js";
 import type { InlineField } from "../../dataview-metadata.js";
 import { DataviewLink, valueToString } from "../../dataview-values.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
-import type { ContentIndex, ContentPage } from "../../types.js";
-import { isTaskField, priorityEmojiOfName, taskFieldOf } from "../tasks/task-fields.js";
+import { isTaskField, priorityEmojiOfName, taskFieldOf } from "../../task-fields.js";
+import type { ContentPage } from "../../types.js";
 import type { PluginRenderContext } from "../types.js";
 import type { ResolvedKanbanSettings } from "./board-settings.js";
 import { dateClass, dateColorMatcher, relativeDate } from "./dates.js";
@@ -293,7 +293,7 @@ export class BoardRenderer {
 		const resolved = await ctx.resolve(card.link);
 		const page = resolved.targetPage;
 		if (resolved.status !== "ok" || !page) return [];
-		const frontmatter = await noteFrontmatter(page, await ctx.indexFor(page.absolutePath));
+		const frontmatter = page.frontmatter ?? {};
 		const rows: Array<{ key: Required<KanbanMetadataKey>; value: unknown }> = [];
 		for (const key of this.input.settings.metadataKeys) {
 			let value: unknown =
@@ -685,7 +685,8 @@ function metadataDate(value: unknown): Date | undefined {
 	const match = METADATA_DAY.exec(value.trim());
 	if (!match) return undefined;
 	const { year, month, date } = parseIsoDayParts(match);
-	const local = new Date(
+	if (Number.isNaN(dayFromParts(year, month, date))) return undefined;
+	return localDate(
 		year,
 		month - 1,
 		date,
@@ -693,32 +694,4 @@ function metadataDate(value: unknown): Date | undefined {
 		Number(match[5] ?? 0),
 		Number(match[6] ?? 0),
 	);
-	return Number.isNaN(local.getTime()) ? undefined : local;
-}
-
-const frontmatterCache = new WeakMap<ContentIndex, Map<string, Promise<Record<string, unknown>>>>();
-
-/** A note's frontmatter, read once per index generation. */
-function noteFrontmatter(page: ContentPage, index: ContentIndex): Promise<Record<string, unknown>> {
-	let cache = frontmatterCache.get(index);
-	if (!cache) {
-		cache = new Map();
-		frontmatterCache.set(index, cache);
-	}
-	let pending = cache.get(page.absolutePath);
-	if (!pending) {
-		pending = fs.promises.readFile(page.absolutePath, "utf8").then(
-			(source) => {
-				try {
-					return parseFrontmatter(source).data;
-				} catch {
-					// The content index reports malformed frontmatter; the card shows none.
-					return {};
-				}
-			},
-			() => ({}),
-		);
-		cache.set(page.absolutePath, pending);
-	}
-	return pending;
 }

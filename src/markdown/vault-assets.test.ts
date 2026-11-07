@@ -69,4 +69,45 @@ describe("syncAssets", () => {
 			await fs.rm(workspace, { recursive: true, force: true });
 		}
 	});
+
+	test("stages an attachment but not a file that has a page", async () => {
+		const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "rspress-vault-assets-"));
+		const docsRoot = path.join(workspace, "docs");
+		const vaultRoot = path.join(workspace, "vault");
+		const stagingDir = path.join(workspace, "staging");
+		try {
+			await fs.mkdir(vaultRoot, { recursive: true });
+			await fs.mkdir(docsRoot, { recursive: true });
+			await fs.writeFile(path.join(vaultRoot, "photo.png"), "png");
+			await fs.writeFile(path.join(vaultRoot, "Projects.base"), "views:\n");
+			await fs.writeFile(path.join(vaultRoot, "v.md"), "![[Projects.base]] and [[photo.png]]\n");
+			const docs = await buildContentIndex(docsRoot);
+			const vault = await buildContentIndex(vaultRoot, { routePrefix: "/vault" });
+			const fileRoutes = createFileRoutes();
+			fileRoutes.set("bases", [
+				{
+					kind: "bases",
+					absolutePath: path.join(vaultRoot, "Projects.base"),
+					routePath: "/vault/Projects",
+					source: "Projects.base",
+				},
+			]);
+
+			await syncAssets({
+				stagingDir,
+				vaultRoot,
+				vaultRoutePrefix: "/vault",
+				docs,
+				vault,
+				resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+				canvasBoards: () => undefined,
+				fileRoutes,
+			});
+
+			expect(await fs.readFile(path.join(stagingDir, "vault/photo.png"), "utf8")).toBe("png");
+			expect(await fs.readdir(stagingDir)).toEqual(["vault"]);
+		} finally {
+			await fs.rm(workspace, { recursive: true, force: true });
+		}
+	});
 });

@@ -340,6 +340,13 @@ export interface ParsedWikiLink {
 	search?: "heading" | "block";
 	/** `true` for `[[#Heading]]` style links that stay on the current page. */
 	isCurrentPageReference: boolean;
+	/**
+	 * The target is known not to exist, so the graph draws it as an unresolved
+	 * node instead of looking for a page with a matching name. A `.canvas` file
+	 * card sets this: the canvas shows such a card as missing, while name
+	 * matching would connect it to some other note with the same basename.
+	 */
+	ghost?: boolean;
 }
 
 /** Raw match metadata produced by the tokenizer before parsing. */
@@ -376,6 +383,12 @@ export interface HeadingEntry {
 	explicitId?: string;
 	/** Heading level, 1–6. Absent on hand-built entries. */
 	depth?: number;
+	/**
+	 * `false` when the heading sits inside a blockquote or callout — a section of
+	 * the note, not its title. Absent means top-level (and is absent on
+	 * hand-built entries).
+	 */
+	topLevel?: boolean;
 	/** The heading's inline markdown as written, for `[[Note#**Bold** text]]`. */
 	sourceText?: string;
 	/** Short plain-text preview of the content following this heading

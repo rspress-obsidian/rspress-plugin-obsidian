@@ -15,9 +15,9 @@ import {
 } from "../../dataview-metadata.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import { parseObsidianMarkdown, plainText } from "../../syntax.js";
+import { isTaskField } from "../../task-fields.js";
 import type { ParsedWikiLink } from "../../types.js";
 import { visit } from "../../visit.js";
-import { isTaskField } from "../tasks/task-fields.js";
 import type { KanbanSettingsLayer, ResolvedKanbanSettings } from "./board-settings.js";
 
 /** One card: a top-level item of a lane's list, with everything under it. */

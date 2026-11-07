@@ -16,6 +16,7 @@ import {
 	normalizeRoutePrefix,
 } from "../shared/route-path.js";
 import { normalizeLookupValue, normalizeUnicode, stripMarkdownFormatting } from "../shared/slug.js";
+import { INLINE_BLOCK_ID, STANDALONE_BLOCK_ID } from "../shared/transclusion.js";
 import { collectBacklinks } from "./backlinks.js";
 import { blankCommentRanges, findCommentRanges, hasComments } from "./comments.js";
 import { extractDataviewMetadata } from "./dataview-metadata.js";
@@ -559,6 +560,7 @@ function extractHeadings(lines: string[], isContent: boolean[]): HeadingEntry[] 
 			sourceText: heading.source,
 		};
 		if (heading.explicitId) entry.explicitId = heading.explicitId;
+		if (!heading.topLevel) entry.topLevel = false;
 		if (previewLines.length > 0) entry.preview = previewLines.join(" ");
 		return entry;
 	});
@@ -575,16 +577,16 @@ function extractBlocks(lines: string[], isContent: boolean[]): BlockEntry[] {
 
 		const line = lines[index] ?? "";
 
-		const standaloneMatch = /^\^([A-Za-z0-9_-]+)\s*$/.exec(line.trim());
+		const standaloneMatch = STANDALONE_BLOCK_ID.exec(line.trim());
 		if (standaloneMatch?.[1]) {
 			pushBlock(blocks, seen, standaloneMatch[1]);
 			continue;
 		}
 
 		// Inline block ID: "Paragraph text ^block-id" appended at end of line
-		const inlineBlockMatch = /\s\^([A-Za-z0-9_-]+)\s*$/.exec(line);
-		if (inlineBlockMatch?.[1]) {
-			pushBlock(blocks, seen, inlineBlockMatch[1]);
+		const inlineBlockMatch = INLINE_BLOCK_ID.exec(line);
+		if (inlineBlockMatch?.[2]) {
+			pushBlock(blocks, seen, inlineBlockMatch[2]);
 		}
 	}
 
@@ -665,7 +667,16 @@ function extractFrontmatterMetadata(
 	}
 }
 
-function pushNamedPage(map: Map<string, ContentPage[]>, rawValue: string, page: ContentPage): void {
+/**
+ * Add `page` to a name→pages map under `rawValue`, folded the one way lookup
+ * keys are folded. Exported because a fixture that builds a lookup table by
+ * hand otherwise re-derives the key and stays green while real lookups fail.
+ */
+export function pushNamedPage(
+	map: Map<string, ContentPage[]>,
+	rawValue: string,
+	page: ContentPage,
+): void {
 	// Title/alias/tag/basename keys all funnel through here; fold to NFC so a
 	// decomposed macOS filename matches a composed frontmatter value.
 	const key = normalizeUnicode(normalizeLookupValue(rawValue));
