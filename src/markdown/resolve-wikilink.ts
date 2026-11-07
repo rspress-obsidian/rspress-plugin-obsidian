@@ -1,8 +1,5 @@
 import path from "node:path";
-import GithubSlugger from "github-slugger";
-import { findPublishedFileRoute } from "../shared/file-routes.js";
-import { normalizeLookupValue, normalizeUnicode } from "../shared/slug.js";
-import { headingAnchorText } from "./heading-text.js";
+import { headingKey, normalizeLookupValue, slugifyHeading } from "../shared/slug.js";
 import type {
 	ContentAsset,
 	ContentIndex,
@@ -405,7 +402,7 @@ function resolveAgainstAsset(
 	}
 	// A file a feature publishes as a page (a `.base` view, a drawing) opens
 	// that page; its `#subpath` (a base's view name) is kept as the fragment.
-	const fileRoute = findPublishedFileRoute(asset.absolutePath);
+	const fileRoute = context.options?.fileRoutes?.find(asset.absolutePath);
 	const fragment = parsed.subpath ? `#${parsed.subpath.value}` : "";
 	if (fileRoute) {
 		return {
@@ -438,15 +435,6 @@ function resolveSubpath(
 }
 
 /**
- * Obsidian's heading-name fold: link text cannot hold `#`, `|`, `^`, `:`, `%`,
- * `[`, `]` or `\`, so Obsidian writes a space in their place when it links a
- * heading containing them (`## Step 1: Setup` → `[[Note#Step 1 Setup]]`).
- */
-function headingKey(text: string): string {
-	return normalizeLookupValue(text.replace(/[#|^:%[\]\\]/g, " "));
-}
-
-/**
  * The heading an anchor names, matched exactly — by its id, its rendered text,
  * its source text, or the slug of the anchor — never by prefix or substring,
  * so a renamed heading is reported instead of silently landing elsewhere.
@@ -463,7 +451,7 @@ function findHeading(page: ContentPage, anchor: string): HeadingEntry | undefine
 	const keys = parts.map((part) => ({
 		raw: part,
 		key: headingKey(part),
-		slug: new GithubSlugger().slug(headingAnchorText(normalizeUnicode(part))),
+		slug: slugifyHeading(part),
 	}));
 	const matches = (heading: HeadingEntry, key: (typeof keys)[number]): boolean =>
 		heading.explicitId === key.raw ||

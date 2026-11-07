@@ -64,8 +64,8 @@ export interface GraphDocumentPlan {
 	untrackedSignature: string;
 	resolveOptions: NonNullable<ResolveContext["options"]>;
 	docsIndex: ContentIndex;
-	vaultIndex?: ContentIndex;
-	vaultRoot?: string;
+	/** The indexed vault, when the site publishes one. */
+	vault?: { root: string; index: ContentIndex };
 }
 
 /**
@@ -82,16 +82,16 @@ export async function planGraphDocuments(
 ): Promise<GraphDocumentPlan> {
 	const docsRoot = published?.docsRoot ?? fallbackDocsRoot;
 	const docsIndex = await getCachedContentIndex(docsRoot, published?.docsIndexOptions ?? {});
-	const vaultRoot = published?.vaultRoot;
-	const vaultIndex = vaultRoot
-		? await getCachedContentIndex(
-				vaultRoot,
-				published?.vaultIndexOptions ?? { routePrefix: published?.vaultRoutePrefix },
-			)
+	const publishedVault = published?.vault;
+	const vault = publishedVault
+		? {
+				root: publishedVault.root,
+				index: await getCachedContentIndex(publishedVault.root, publishedVault.indexOptions),
+			}
 		: undefined;
 
 	const pageByFile = new Map<string, { page: ContentPage; index: ContentIndex }>();
-	for (const index of vaultIndex ? [docsIndex, vaultIndex] : [docsIndex]) {
+	for (const index of vault ? [docsIndex, vault.index] : [docsIndex]) {
 		for (const page of index.pages) {
 			pageByFile.set(normalizeFsPath(page.absolutePath), { page, index });
 		}
@@ -126,17 +126,16 @@ export async function planGraphDocuments(
 	}
 
 	return {
-		indexes: vaultIndex ? [docsIndex, vaultIndex] : [docsIndex],
+		indexes: vault ? [docsIndex, vault.index] : [docsIndex],
 		plans,
 		untrackedSignature: untracked.join("|"),
 		resolveOptions: {
-			enableCaseInsensitiveLookup: published?.enableCaseInsensitiveLookup ?? true,
-			enableFuzzyMatching: published?.enableFuzzyMatching ?? false,
+			enableCaseInsensitiveLookup: published?.docsIndexOptions.enableCaseInsensitiveLookup ?? true,
+			enableFuzzyMatching: published?.docsIndexOptions.enableFuzzyMatching ?? false,
 			canvasBoards,
 		},
 		docsIndex,
-		vaultIndex,
-		vaultRoot,
+		vault,
 	};
 }
 
@@ -146,7 +145,7 @@ export async function loadGraphDocuments(
 ): Promise<{ documents: GraphDocument[]; filesRead: number }> {
 	let filesRead = 0;
 	const contextFor = (page: ContentPage, index: ContentIndex): ResolveContext => {
-		const other = index === plan.docsIndex ? plan.vaultIndex : plan.docsIndex;
+		const other = index === plan.docsIndex ? plan.vault?.index : plan.docsIndex;
 		return {
 			currentPage: page,
 			index,
@@ -155,8 +154,8 @@ export async function loadGraphDocuments(
 		};
 	};
 	const indexFor = (absolutePath: string): { index: ContentIndex; root: string } =>
-		plan.vaultIndex && plan.vaultRoot && isInside(absolutePath, plan.vaultRoot)
-			? { index: plan.vaultIndex, root: plan.vaultRoot }
+		plan.vault && isInside(absolutePath, plan.vault.root)
+			? { index: plan.vault.index, root: plan.vault.root }
 			: { index: plan.docsIndex, root: plan.docsIndex.rootDir };
 
 	const documents = await Promise.all(

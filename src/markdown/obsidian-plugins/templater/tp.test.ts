@@ -6,7 +6,6 @@ import {
 	expandWithTp,
 	INCLUDE_DEPTH_LIMIT,
 	RUN_MODE,
-	sliceSubpath,
 	type TemplaterHost,
 	VaultFile,
 } from "./tp.js";
@@ -278,7 +277,7 @@ describe("tp.file", () => {
 			"- item ^item",
 		);
 		expect(await run("<% tp.file.include('[[Notes/Sections#^para]]') %>")).toBe(
-			"last para\nline two\n^para",
+			"last para\nline two ^para",
 		);
 		// A subpath that is not there includes the whole note, as Templater does.
 		expect(await run("<% tp.file.include('[[Footer#Missing]]') %>")).toBe(
@@ -478,18 +477,5 @@ describe("tp.system, tp.web, tp.hooks and what a static site lacks", () => {
 		const { run } = harness({});
 		expect(await run("")).toBe("");
 		expect(await run("no commands {{date}}")).toBe("no commands {{date}}");
-	});
-});
-
-describe("sliceSubpath", () => {
-	const note = "```\n# Not a heading\n```\n# Real\ntext\n### Deep\nmore\n# Next\n";
-	test("headings inside code are not sections", () => {
-		expect(sliceSubpath(note, "Not a heading")).toBeUndefined();
-		expect(sliceSubpath(note, "Real")).toBe("# Real\ntext\n### Deep\nmore");
-		expect(sliceSubpath(note, "real#deep")).toBe("### Deep\nmore");
-		expect(sliceSubpath(note, "Next")).toBe("# Next\n");
-		expect(sliceSubpath(note, "^missing")).toBeUndefined();
-		expect(sliceSubpath(note, "^bad id!")).toBeUndefined();
-		expect(sliceSubpath(note, "")).toBeUndefined();
 	});
 });

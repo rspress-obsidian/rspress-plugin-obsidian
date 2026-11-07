@@ -45,10 +45,38 @@ export function dayFromParts(year: number, month: number, date: number): Day {
 	return ms / DAY_MS;
 }
 
+/** The year, month and day of an ISO day, as regex sources. */
+const ISO_YEAR = "[0-9]{4}";
+const ISO_MONTH = "[0-9]{2}";
+const ISO_DAY_OF_MONTH = "[0-9]{2}";
+
+/** A `YYYY-MM-DD` day as a regex source whose three groups are its year, month and day. */
+export const ISO_DAY = `(${ISO_YEAR})-(${ISO_MONTH})-(${ISO_DAY_OF_MONTH})`;
+
+/** The same day, as a regex source that captures nothing. */
+export const ISO_DAY_SHAPE = `${ISO_YEAR}-${ISO_MONTH}-${ISO_DAY_OF_MONTH}`;
+
+/** The same day written without separators (`20240515`), its three groups year, month and day. */
+export const COMPACT_DAY = `(${ISO_YEAR})(${ISO_MONTH})(${ISO_DAY_OF_MONTH})`;
+
+/** A whole string that is an ISO day. */
+const FULL_DAY = new RegExp(`^${ISO_DAY}$`, "u");
+
+/** The year, month and date a matched ISO day names. */
+export function parseIsoDayParts(match: RegExpExecArray): {
+	year: number;
+	month: number;
+	date: number;
+} {
+	return { year: Number(match[1]), month: Number(match[2]), date: Number(match[3]) };
+}
+
 /** The day an ISO `YYYY-MM-DD` string names, or `NaN`. */
 export function parseIsoDay(text: string): Day {
-	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-	return match ? dayFromParts(Number(match[1]), Number(match[2]), Number(match[3])) : Number.NaN;
+	const match = FULL_DAY.exec(text);
+	if (!match) return Number.NaN;
+	const { year, month, date } = parseIsoDayParts(match);
+	return dayFromParts(year, month, date);
 }
 
 /** The local calendar day of a `Date`. */

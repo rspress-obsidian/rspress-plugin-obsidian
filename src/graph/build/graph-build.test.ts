@@ -199,12 +199,8 @@ describe("vault publishing", () => {
 		const docsRoot = await writeTree(docsFiles);
 		const published = {
 			docsRoot,
-			vaultRoot,
-			vaultRoutePrefix: "/vault",
-			docsIndexOptions: {},
-			vaultIndexOptions: { routePrefix: "/vault" },
-			enableCaseInsensitiveLookup: true,
-			enableFuzzyMatching: false,
+			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
+			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
 		};
 		const routes = [
 			...routesFor(docsRoot, docsFiles),
@@ -597,12 +593,8 @@ describe("routes no content index holds", () => {
 		const docsRoot = await writeTree({ "index.md": "x\n" });
 		const published = {
 			docsRoot,
-			vaultRoot,
-			vaultRoutePrefix: "/vault",
-			docsIndexOptions: {},
-			vaultIndexOptions: { routePrefix: "/vault" },
-			enableCaseInsensitiveLookup: true,
-			enableFuzzyMatching: false,
+			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
+			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
 		};
 		const canvasBoards = createCanvasBoards([
 			{

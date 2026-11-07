@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import { createCanvasBoards } from "../shared/canvas-routes.js";
-import { setPublishedFileRoutes } from "../shared/file-routes.js";
+import { createFileRoutes } from "../shared/file-routes.js";
 import { normalizeLookupValue } from "../shared/slug.js";
 import { buildContentIndex } from "./content-index.ts";
 import { parseWikiLink } from "./parse-wikilink.ts";
@@ -638,6 +638,13 @@ describe("resolveWikiLink canvas boards", () => {
 });
 
 describe("resolveWikiLink files a feature publishes as pages", () => {
+	// One registry, as a build hands to its resolver.
+	const fileRoutes = createFileRoutes();
+	const resolveWithRoutes = (target: string, context: ResolveContext) =>
+		resolveWikiLink(parseWikiLink(target, `[[${target}]]`), {
+			...context,
+			options: { ...context.options, fileRoutes },
+		});
 	function baseFixture() {
 		const currentPage = makePage({ filePathKey: "index" });
 		const base = makeAsset({ pathKey: "Projects.base", urlPath: "/vault/Projects.base" });
@@ -651,11 +658,11 @@ describe("resolveWikiLink files a feature publishes as pages", () => {
 	};
 
 	test("opens the file's page, keeping a view subpath, instead of downloading it", () => {
-		setPublishedFileRoutes("bases", [route]);
+		fileRoutes.set("bases", [route]);
 		const { currentPage, index } = baseFixture();
 
-		const plain = resolve("Projects.base", { currentPage, index });
-		const view = resolve("Projects.base#Open tasks", { currentPage, index });
+		const plain = resolveWithRoutes("Projects.base", { currentPage, index });
+		const view = resolveWithRoutes("Projects.base#Open tasks", { currentPage, index });
 
 		expect(plain.href).toBe("/bases/Projects");
 		expect(plain.targetAsset).toBeUndefined();
@@ -664,11 +671,11 @@ describe("resolveWikiLink files a feature publishes as pages", () => {
 	});
 
 	test("falls back to the attachment once a rebuild no longer publishes the file", () => {
-		setPublishedFileRoutes("bases", [route]);
-		setPublishedFileRoutes("bases", []);
+		fileRoutes.set("bases", [route]);
+		fileRoutes.set("bases", []);
 		const { currentPage, index } = baseFixture();
 
-		const result = resolve("Projects.base", { currentPage, index });
+		const result = resolveWithRoutes("Projects.base", { currentPage, index });
 
 		expect(result.href).toBe("/vault/Projects.base");
 		expect(result.targetAsset?.pathKey).toBe("Projects.base");
@@ -676,11 +683,11 @@ describe("resolveWikiLink files a feature publishes as pages", () => {
 	});
 
 	test("keeps another feature's routes when one feature re-registers", () => {
-		setPublishedFileRoutes("bases", [route]);
-		setPublishedFileRoutes("excalidraw", []);
+		fileRoutes.set("bases", [route]);
+		fileRoutes.set("excalidraw", []);
 		const { currentPage, index } = baseFixture();
 
-		expect(resolve("Projects.base", { currentPage, index }).href).toBe("/bases/Projects");
+		expect(resolveWithRoutes("Projects.base", { currentPage, index }).href).toBe("/bases/Projects");
 	});
 });
 

@@ -11,30 +11,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type FontFile, readFontFile } from "./font-file.js";
-import { familyFolders } from "./fonts.js";
+import { averageAdvance, familyFolders } from "./fonts.js";
 
 export interface TextMeasurer {
 	/** The advance width of one line of text, in pixels. */
 	lineWidth(line: string, fontSize: number, fontFamily: number): number;
 }
 
-/** Average advance of a character, in ems, per font: the estimate without the peer. */
-const AVERAGE_ADVANCE: Record<number, number> = {
-	1: 0.55,
-	2: 0.5,
-	3: 0.6,
-	5: 0.55,
-	6: 0.52,
-	7: 0.5,
-	8: 0.6,
-	9: 0.5,
-};
-const DEFAULT_ADVANCE = 0.55;
-
 /** Widths by the per-font average: every character the same width. */
 export const estimateMeasurer: TextMeasurer = {
 	lineWidth: (line, fontSize, fontFamily) =>
-		[...line].length * (AVERAGE_ADVANCE[fontFamily] ?? DEFAULT_ADVANCE) * fontSize,
+		[...line].length * averageAdvance(fontFamily) * fontSize,
 };
 
 /** Every subset file of a folder, in the order the faces are declared. */
@@ -97,7 +84,7 @@ function fontMeasurer(fontsDir: string): TextMeasurer {
 				if (!placed || /\s/.test(char) || placed.file !== run?.file) endRun();
 				if (!placed) {
 					// A character none of the fonts has: the system's fallback font draws it.
-					width += (AVERAGE_ADVANCE[fontFamily] ?? DEFAULT_ADVANCE) * fontSize;
+					width += averageAdvance(fontFamily) * fontSize;
 					continue;
 				}
 				run ??= { file: placed.file, glyphs: [] };

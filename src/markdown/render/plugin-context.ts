@@ -23,6 +23,7 @@ export function pluginContext(
 		siteBase: ctx.siteBase,
 		mode: ctx.mode === "page" ? "page" : "embed",
 		wholeNote: ctx.wholeNote,
+		fileRoutes: ctx.resolveOptions.fileRoutes,
 		source: ctx.cleanSource,
 		idPrefix: ctx.idPrefix,
 		renderInline: async (markdown, page) =>

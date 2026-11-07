@@ -10,6 +10,7 @@
  */
 import type { Root } from "mdast";
 import type { VFile } from "vfile";
+import { blankComments } from "./comments.js";
 import { getCachedContentIndex } from "./content-index.js";
 import { enabledPluginFeatures } from "./obsidian-plugins/index.js";
 import {
@@ -18,7 +19,7 @@ import {
 	isFatalVFileMessage,
 	reportPluginDiagnostic,
 } from "./remark-diagnostics.js";
-import { blankComments, embedKey, type RspressPageMeta } from "./render/context.js";
+import { embedKey, type RspressPageMeta } from "./render/context.js";
 import { generatedPageFor } from "./render/page.js";
 import { transformContent } from "./render/transform.js";
 import { registerObsidianSyntax } from "./syntax.js";
@@ -85,6 +86,7 @@ async function renderPage(
 		getSiteBase,
 		getKatexStylesheetHref,
 		getCanvasBoards,
+		getFileRoutes,
 		options,
 	}: RemarkWikiLinkPluginOptions,
 	pageMeta: RspressPageMeta | undefined,
@@ -124,6 +126,7 @@ async function renderPage(
 			enableFuzzyMatching: options.enableFuzzyMatching,
 			enableCaseInsensitiveLookup: options.enableCaseInsensitiveLookup,
 			canvasBoards: await getCanvasBoards?.(),
+			fileRoutes: getFileRoutes?.(),
 		},
 		currentPage,
 		indexed: indexedPage !== undefined,
@@ -141,6 +144,7 @@ async function renderPage(
 		visited: new Set([embedKey(currentPage.absolutePath)]),
 		idPrefix: "",
 		embedCounter: { value: 0 },
+		mathCount: { value: 0 },
 		fileChecks: new Map(),
 		pageMeta,
 		katexStylesheetHref: getKatexStylesheetHref?.(),

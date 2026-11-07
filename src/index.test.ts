@@ -110,8 +110,7 @@ describe("pluginObsidian shared options", () => {
 			);
 
 			expect(findPublishedContent({ plugins: [markdownPlugin] })).toMatchObject({
-				vaultRoot: vault,
-				vaultRoutePrefix: "/notes",
+				vault: { root: vault, routePrefix: "/notes" },
 			});
 			// Canvas alone (no markdown plugin in this site) indexes the vault
 			// itself: its cards link notes under the shared prefix.
@@ -143,8 +142,7 @@ describe("pluginObsidian shared options", () => {
 		);
 
 		expect(findPublishedContent({ plugins: [markdownPlugin] })).toMatchObject({
-			vaultRoot: vault,
-			vaultRoutePrefix: "/kb",
+			vault: { root: vault, routePrefix: "/kb" },
 		});
 		expect(await cardHref(canvasPlugin, docs, out)).toBe("/kb/Note");
 	});

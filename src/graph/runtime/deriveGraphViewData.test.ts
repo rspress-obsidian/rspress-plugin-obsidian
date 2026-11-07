@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { routeKey } from "../../shared/route-path";
 import type { GraphData, GraphNode, GraphNodeKind } from "../types";
 import {
 	createGraphIndex,
@@ -8,7 +9,6 @@ import {
 	MAX_DEPTH,
 	MAX_GLOBAL_NODES,
 	MAX_NEIGHBORS,
-	normalizeClientRoutePath,
 } from "./deriveGraphViewData";
 
 function node(id: string, label = id, kind: GraphNodeKind = "page"): GraphNode {
@@ -330,36 +330,13 @@ describe("deriveGraphViewData global scope", () => {
 	});
 });
 
-describe("normalizeClientRoutePath", () => {
-	test("strips .html, trailing slashes and /index", () => {
-		expect(normalizeClientRoutePath("/guide/configuration.html")).toBe("/guide/configuration");
-		expect(normalizeClientRoutePath("/guide//")).toBe("/guide");
-		expect(normalizeClientRoutePath("/guide/index.html")).toBe("/guide");
-		expect(normalizeClientRoutePath("/index.html")).toBe("/");
-		expect(normalizeClientRoutePath("/")).toBe("/");
-	});
-
-	test("decodes the router's percent-encoded path, so spaces and CJK routes match", () => {
-		expect(normalizeClientRoutePath("/My%20Note")).toBe("/My Note");
-		expect(
-			normalizeClientRoutePath("/%E6%97%A5%E6%9C%AC%E8%AA%9E%E3%83%8E%E3%83%BC%E3%83%88"),
-		).toBe("/日本語ノート");
-	});
-
-	test("folds decomposed unicode to NFC, the form route ids use", () => {
-		expect(normalizeClientRoutePath("/Cafe\u0301")).toBe("/Caf\u00e9");
-	});
-
-	test("keeps a malformed escape as written", () => {
-		expect(normalizeClientRoutePath("/100%")).toBe("/100%");
-	});
-
+describe("route keys", () => {
 	test("an encoded route finds its node in the graph", () => {
 		const graphIndex = createGraphIndex({
 			nodes: [node("/Deep Note"), node("/日本語ノート")],
 			links: [{ source: "/Deep Note", target: "/日本語ノート" }],
 		});
-		const derived = deriveGraphViewData(graphIndex, normalizeClientRoutePath("/Deep%20Note"));
+		const derived = deriveGraphViewData(graphIndex, routeKey("/Deep%20Note"));
 		expect(idsOf(derived)).toEqual(["/Deep Note", "/日本語ノート"]);
 	});
 });

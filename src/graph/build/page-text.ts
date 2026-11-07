@@ -1,4 +1,4 @@
-import { blankAllComments } from "../../markdown/comments.js";
+import { blankComments } from "../../markdown/comments.js";
 import { stripFrontmatter } from "../../shared/frontmatter.js";
 
 /**
@@ -9,5 +9,5 @@ import { stripFrontmatter } from "../../shared/frontmatter.js";
  * found in the whole note, frontmatter included, the way the page finds them.
  */
 export function toVisibleSource(source: string): string {
-	return stripFrontmatter(blankAllComments(source));
+	return stripFrontmatter(blankComments(source));
 }

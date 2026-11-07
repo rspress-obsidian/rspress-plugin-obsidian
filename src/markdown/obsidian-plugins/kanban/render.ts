@@ -9,15 +9,18 @@ import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shar
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { formatMomentDate, parseMomentDate } from "../../../shared/moment-format.js";
 import { tagRoutePath } from "../../../shared/paths.js";
+import { yamlDateAsLocal } from "../../../shared/yaml-date.js";
 import type { InlineField } from "../../dataview-metadata.js";
 import { DataviewLink, valueToString } from "../../dataview-values.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentIndex, ContentPage } from "../../types.js";
+import { ISO_DAY, parseIsoDayParts } from "../tasks/dates.js";
+import { isTaskField, priorityEmojiOfName, taskFieldOf } from "../tasks/task-fields.js";
 import type { PluginRenderContext } from "../types.js";
 import type { ResolvedKanbanSettings } from "./board-settings.js";
 import { dateClass, dateColorMatcher, relativeDate } from "./dates.js";
 import type { KanbanDateColor, KanbanMetadataKey, KanbanTagColor } from "./options.js";
-import { type KanbanBoard, type KanbanCard, type KanbanLane, TASK_FIELDS } from "./parse.js";
+import type { KanbanBoard, KanbanCard, KanbanLane } from "./parse.js";
 
 /** What a board renders with, besides the board itself. */
 export interface BoardRenderContext {
@@ -41,41 +44,6 @@ interface CardDates {
 	/** What the date colour, the date line and the table sort by: the time, else the date. */
 	target?: Date;
 }
-
-/** Kanban's task-field labels (`lableToName`). */
-const TASK_FIELD_NAMES: Record<string, string> = {
-	priority: "Priority",
-	start: "Start",
-	created: "Created",
-	scheduled: "Scheduled",
-	due: "Due",
-	completion: "Done",
-	cancelled: "Cancelled",
-	recurrence: "Recurrence",
-	dependsOn: "Depends on",
-	id: "ID",
-};
-
-/** Kanban's task-field icons (`lableToIcon`), for fields written as emoji. */
-const TASK_FIELD_ICONS: Record<string, string> = {
-	start: "🛫",
-	created: "➕",
-	scheduled: "⏳",
-	due: "📅",
-	completion: "✅",
-	cancelled: "❌",
-	recurrence: "🔁",
-	dependsOn: "⛔",
-	id: "🆔",
-};
-
-const PRIORITY_ICONS: Record<string, string> = {
-	highest: "🔺",
-	high: "⏫",
-	medium: "🔼",
-	low: "🔽",
-	lowest: "⏬",
-};
 
 /** A colour from settings, or `undefined` when it is anything but a plain CSS colour. */
 function cssColor(value: unknown): string | undefined {
@@ -357,7 +325,7 @@ export class BoardRenderer {
 		}
 		if (this.input.settings.inlineMetadataPosition === "metadata-table") {
 			for (const field of card.inlineFields) {
-				if (field.wrapping === "emoji" || TASK_FIELDS[field.key] || seen.has(field.key)) continue;
+				if (field.wrapping === "emoji" || isTaskField(field.key) || seen.has(field.key)) continue;
 				seen.add(field.key);
 				const key = this.metadataKeyFor(field.key);
 				rows.push(
@@ -377,15 +345,16 @@ export class BoardRenderer {
 
 	/** One inline field under the card (Kanban's `InlineMetadata`). */
 	private async renderInlineField(field: InlineField): Promise<string> {
-		const isTask = field.wrapping === "emoji" || Boolean(TASK_FIELDS[field.key]);
+		const isTask = field.wrapping === "emoji" || isTaskField(field.key);
 		const isEmoji = field.wrapping === "emoji";
 		const isDate = metadataDate(field.value) !== undefined;
+		const spec = taskFieldOf(field.key);
 		let label = isEmoji
 			? field.key === "priority"
-				? (PRIORITY_ICONS[field.value] ?? field.value)
-				: (TASK_FIELD_ICONS[field.key] ?? field.key)
+				? priorityEmojiOfName(field.value) || field.value
+				: (spec?.emojis?.[0] ?? field.key)
 			: isTask
-				? (TASK_FIELD_NAMES[field.key] ?? field.key)
+				? (spec?.label ?? field.key)
 				: this.metadataKeyFor(field.key).label;
 		if (!isEmoji) label += ": ";
 		const slug = field.key.replace(/[^a-zA-Z0-9_]/g, "-");
@@ -438,7 +407,7 @@ export class BoardRenderer {
 		if (settings.showDateFooter) footer.push(await this.renderDateAndTime(dates));
 		const inline: string[] = [];
 		for (const field of card.inlineFields) {
-			const isTask = field.wrapping === "emoji" || Boolean(TASK_FIELDS[field.key]);
+			const isTask = field.wrapping === "emoji" || isTaskField(field.key);
 			if (isTask ? !settings.moveTaskMetadata : settings.inlineMetadataPosition !== "footer")
 				continue;
 			inline.push(await this.renderInlineField(field));
@@ -594,7 +563,7 @@ export class BoardRenderer {
 			header("List"),
 			showDate ? header("Date") : "",
 			showTags ? header("Tags") : "",
-			...inlineKeys.map((key) => header(TASK_FIELD_NAMES[key] ?? this.metadataKeyFor(key).label)),
+			...inlineKeys.map((key) => header(taskFieldOf(key)?.label ?? this.metadataKeyFor(key).label)),
 			...fileKeys.map((key) => header(this.metadataKeyFor(key).label)),
 		];
 		const body: string[] = [];
@@ -624,7 +593,7 @@ export class BoardRenderer {
 			if (showTags) cells.push(cell(card.tags.length > 0 ? this.renderTags(card.tags) : ""));
 			for (const key of inlineKeys) {
 				const field = card.inlineFields.find((candidate) => candidate.key === key);
-				const isTask = field && (field.wrapping === "emoji" || Boolean(TASK_FIELDS[field.key]));
+				const isTask = field && (field.wrapping === "emoji" || isTaskField(field.key));
 				const shown =
 					field &&
 					(isTask ? settings.moveTaskMetadata : settings.inlineMetadataPosition !== "body");
@@ -703,34 +672,28 @@ function propertyAt(data: Record<string, unknown>, key: string): unknown {
 	return current;
 }
 
+/** A string starting `YYYY-MM-DD`, with the time Kanban reads after it. */
+const METADATA_DAY = new RegExp(`^${ISO_DAY}(?:[T ]([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?)?`, "u");
+
 /**
  * A value Kanban shows as a date: a YAML date (read as UTC midnight, shown as
  * that calendar day) or a string starting `YYYY-MM-DD`.
  */
 function metadataDate(value: unknown): Date | undefined {
-	if (value instanceof Date) {
-		if (Number.isNaN(value.getTime())) return undefined;
-		return new Date(
-			value.getUTCFullYear(),
-			value.getUTCMonth(),
-			value.getUTCDate(),
-			value.getUTCHours(),
-			value.getUTCMinutes(),
-			value.getUTCSeconds(),
-		);
-	}
+	if (value instanceof Date) return yamlDateAsLocal(value);
 	if (typeof value !== "string") return undefined;
-	const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(value.trim());
+	const match = METADATA_DAY.exec(value.trim());
 	if (!match) return undefined;
-	const date = new Date(
-		Number(match[1]),
-		Number(match[2]) - 1,
-		Number(match[3]),
+	const { year, month, date } = parseIsoDayParts(match);
+	const local = new Date(
+		year,
+		month - 1,
+		date,
 		Number(match[4] ?? 0),
 		Number(match[5] ?? 0),
 		Number(match[6] ?? 0),
 	);
-	return Number.isNaN(date.getTime()) ? undefined : date;
+	return Number.isNaN(local.getTime()) ? undefined : local;
 }
 
 const frontmatterCache = new WeakMap<ContentIndex, Map<string, Promise<Record<string, unknown>>>>();

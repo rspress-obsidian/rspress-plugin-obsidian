@@ -1,4 +1,3 @@
-import { slug } from "github-slugger";
 import { Lexer, Marked, Parser, type Token, type Tokens } from "marked";
 import { parseWikiLink } from "../../markdown/parse-wikilink.js";
 import type { ParsedWikiLink } from "../../markdown/types.js";
@@ -20,6 +19,7 @@ import {
 } from "../../shared/media-exts.js";
 import { parsePdfSubpath, pdfEmbedHtml, webEmbedHtml } from "../../shared/media-html.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../../shared/paths.js";
+import { slugifyHeading } from "../../shared/slug.js";
 import { extractNoteSection } from "../../shared/transclusion.js";
 import type { CanvasLink, CanvasLinks } from "../types.js";
 import { canvasLinkKey, normalizeAssetKey } from "./asset-key.js";
@@ -252,7 +252,7 @@ export function anchorHref(route: string, subpath?: string): string {
 	if (!subpath) return route;
 	const anchor = subpath.slice(1);
 	if (anchor.startsWith("^")) return `${route}#${encodeURIComponent(anchor)}`;
-	return `${route}#${slug(anchor)}`;
+	return `${route}#${slugifyHeading(anchor)}`;
 }
 
 /** The route a target gets when the build supplied no entry for it. */

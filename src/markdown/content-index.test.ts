@@ -425,12 +425,15 @@ describe("heading ids", () => {
 	test("keeps commented headings and comment text out of the index", async () => {
 		await withVault(
 			{
-				"other.md": "## Plan\n%% secret salary 120k %%\nPublic text\n\n%%\n## Hidden\n%%\n",
+				"other.md":
+					"## Plan\n%% secret salary 120k %%\nPublic text\n\n%%\n## Hidden\n%%\n\n<!--\n## Private\n\n[[Ghost]] #hidden\n-->\n",
 			},
 			async (root) => {
 				const page = (await buildContentIndex(root)).byFilePathKey.get("other");
 				expect(page?.headings.map((h) => h.rawText)).toEqual(["Plan"]);
 				expect(page?.headings[0]?.preview).toBe("Public text");
+				expect(page?.wikilinkTargets).not.toContain("ghost");
+				expect(page?.tags).not.toContain("hidden");
 			},
 		);
 	});

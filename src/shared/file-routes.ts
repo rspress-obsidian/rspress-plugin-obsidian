@@ -16,39 +16,48 @@ export interface PublishedFileRoute {
 }
 
 /**
- * Registry linking published non-Markdown files to their pages.
+ * Registry linking published non-Markdown files to their pages, one per build:
+ * two sites built by the same process must not resolve each other's links.
  *
  * A feature registers its files from `addPages`, which runs before any page is
  * compiled and before attachments are staged. Link resolution consults it, so
  * `[[Projects.base]]` opens the base's page instead of downloading the YAML —
  * and a file with a page is never also staged as an attachment.
  */
-const byKind = new Map<string, PublishedFileRoute[]>();
-const byAbsolutePath = new Map<string, PublishedFileRoute>();
-
-/** Replace every route of `kind` with `routes` (a rebuild drops files that are gone). */
-export function setPublishedFileRoutes(kind: string, routes: Iterable<PublishedFileRoute>): void {
-	for (const previous of byKind.get(kind) ?? []) byAbsolutePath.delete(previous.absolutePath);
-	const next = [...routes].map((route) => ({
-		...route,
-		absolutePath: normalizeFsPath(route.absolutePath),
-	}));
-	byKind.set(kind, next);
-	for (const route of next) byAbsolutePath.set(route.absolutePath, route);
+export interface FileRoutes {
+	/** Replace every route of `kind` with `routes` (a rebuild drops files that are gone). */
+	set(kind: string, routes: Iterable<PublishedFileRoute>): void;
+	/** The page a published file is shown on, if any feature published it. */
+	find(absolutePath: string): PublishedFileRoute | undefined;
+	/** Every file `kind` published. */
+	byKind(kind: string): readonly PublishedFileRoute[];
+	/** Forget every published file. */
+	clear(): void;
 }
 
-/** The page a published file is shown on, if any feature published it. */
-export function findPublishedFileRoute(absolutePath: string): PublishedFileRoute | undefined {
-	return byAbsolutePath.get(normalizeFsPath(absolutePath));
-}
-
-/** Every file `kind` published. */
-export function publishedFileRoutes(kind: string): readonly PublishedFileRoute[] {
-	return byKind.get(kind) ?? [];
-}
-
-/** Forget every published file (a new build, or an isolated test). */
-export function clearPublishedFileRoutes(): void {
-	byKind.clear();
-	byAbsolutePath.clear();
+/** An empty registry; a build creates one and hands it to its features. */
+export function createFileRoutes(): FileRoutes {
+	const byKind = new Map<string, PublishedFileRoute[]>();
+	const byAbsolutePath = new Map<string, PublishedFileRoute>();
+	return {
+		set(kind, routes) {
+			for (const previous of byKind.get(kind) ?? []) byAbsolutePath.delete(previous.absolutePath);
+			const next = [...routes].map((route) => ({
+				...route,
+				absolutePath: normalizeFsPath(route.absolutePath),
+			}));
+			byKind.set(kind, next);
+			for (const route of next) byAbsolutePath.set(route.absolutePath, route);
+		},
+		find(absolutePath) {
+			return byAbsolutePath.get(normalizeFsPath(absolutePath));
+		},
+		byKind(kind) {
+			return byKind.get(kind) ?? [];
+		},
+		clear() {
+			byKind.clear();
+			byAbsolutePath.clear();
+		},
+	};
 }

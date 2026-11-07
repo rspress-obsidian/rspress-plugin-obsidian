@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getContentLineFlags } from "../shared/content-flags.js";
+import { backOfNoteEnd } from "../shared/excalidraw-data.js";
 import { PAGE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
-import { parseFrontmatter } from "../shared/frontmatter.js";
+import { isPublishedProperty, parseFrontmatter } from "../shared/frontmatter.js";
+import type { ContentIndexOptions } from "../shared/index-options.js";
 import { ATTACHMENT_EXTS, extensionOf } from "../shared/media-exts.js";
 import {
 	type DocsRouteLocales,
@@ -14,11 +16,10 @@ import {
 } from "../shared/route-path.js";
 import { normalizeLookupValue, normalizeUnicode, stripMarkdownFormatting } from "../shared/slug.js";
 import { collectBacklinks } from "./backlinks.js";
-import { blankCommentRanges, COMMENT_DELIMITER, findCommentRanges } from "./comments.js";
-import { extractDataviewMetadata } from "./dataview.js";
+import { blankCommentRanges, findCommentRanges, hasComments } from "./comments.js";
+import { extractDataviewMetadata } from "./dataview-metadata.js";
 import { scanPageHeadings } from "./heading-text.js";
 import { rememberMentionSources, stripMentionText } from "./mentions.js";
-import { backOfNoteEnd } from "./obsidian-plugins/excalidraw/drawing-file.js";
 import { extractPageLinksFrom } from "./page-links.js";
 import type {
 	BacklinkRef,
@@ -75,42 +76,6 @@ const contentIndexCache = new Map<string, CacheEntry>();
  *  canvas plugins ask for the same index at once; without this each would scan
  *  and parse the whole tree and hand back its own index object. */
 const pendingIndexes = new Map<string, Promise<ContentIndex>>();
-/** Options controlling route and asset URLs for an indexed root. */
-export interface ContentIndexOptions {
-	/**
-	 * Route prefix pages publish under (a vault's `vaultRoutePrefix`). Without
-	 * one, the root is the Rspress docs root and routes follow Rspress's own
-	 * rules, including `locales`.
-	 */
-	routePrefix?: string;
-	/**
-	 * The site's `lang`/`locales`/`multiVersion`, for a docs root: Rspress drops
-	 * the default language and version segment from a route (`en/guide.md` is
-	 * served at `/guide` when `lang: "en"`). Ignored when `routePrefix` is set.
-	 */
-	locales?: DocsRouteLocales;
-	/**
-	 * Keep a stripped copy of each page's body so `getMentions` can find pages
-	 * that name another page without linking to it. Off by default: it is the only
-	 * thing here that retains page text.
-	 */
-	unlinkedMentions?: boolean;
-	/**
-	 * Extract Dataview fields, tasks and list items. Default `true`; the plugin
-	 * turns it off with `enableDataview`, which saves roughly a third of the
-	 * indexing time.
-	 */
-	dataview?: boolean;
-	/** Resolution options the backlinks are computed with (as for links). */
-	enableCaseInsensitiveLookup?: boolean;
-	enableFuzzyMatching?: boolean;
-	/**
-	 * Root-relative folders whose files are neither indexed nor published
-	 * (Templater's templates folder), on top of the hidden folders that never
-	 * are. `/`-separated, matched case-sensitively from the root.
-	 */
-	excludeFolders?: string[];
-}
 
 interface NormalizedIndexOptions {
 	routePrefix: string;
@@ -478,8 +443,8 @@ async function buildContentPage(
 		: { fields: {}, tasks: [], lists: [] };
 
 	// Comments are blanked (not removed) once, up front: a heading, block id,
-	// link, tag or preview inside `%%…%%` is not on the published page.
-	const visible = markdown.includes(COMMENT_DELIMITER)
+	// link, tag or preview inside one is not on the published page.
+	const visible = hasComments(markdown)
 		? blankCommentRanges(markdown, findCommentRanges(markdown))
 		: markdown;
 	const lines = visible.split(/\r?\n/);
@@ -526,10 +491,12 @@ async function buildContentPage(
 		headings,
 		wikilinkTargets: wikilinkTargetsOf(links.outlinks),
 		outlinks: links.outlinks,
+		fileLinks: links.fileLinks,
 		headingBySlug,
 		headingByText,
 		blocks: extractBlocks(lines, isContent),
 		dataviewFields: dataview.fields,
+		frontmatter: metadata.frontmatter,
 		dataviewTasks: dataview.tasks,
 		dataviewLists: dataview.lists,
 	};
@@ -641,20 +608,6 @@ function normalizeStringField(value: unknown): string | undefined {
 	return undefined;
 }
 
-function normalizeBooleanField(value: unknown): boolean {
-	if (typeof value === "boolean") {
-		return value;
-	}
-	if (typeof value === "string") {
-		const lowered = value.trim().toLowerCase();
-		return lowered === "true" || lowered === "yes" || lowered === "1";
-	}
-	if (typeof value === "number") {
-		return value !== 0;
-	}
-	return true;
-}
-
 /**
  * A list-valued property: a YAML list, or the legacy single string Obsidian
  * still reads as a comma-separated list (`aliases: First, Second`).
@@ -693,7 +646,7 @@ function extractFrontmatterMetadata(
 					),
 				),
 			],
-			publish: normalizeBooleanField(data.publish),
+			publish: isPublishedProperty(data.publish),
 			frontmatter: data,
 		};
 	} catch (error) {

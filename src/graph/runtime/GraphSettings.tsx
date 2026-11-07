@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { type GraphScope, MAX_DEPTH } from "./deriveGraphViewData.js";
+import { clampDepth, type GraphFilterSettings, MAX_DEPTH } from "./deriveGraphViewData.js";
 import {
 	DISPLAY_RANGES,
 	FORCE_RANGES,
@@ -8,19 +8,6 @@ import {
 	type SliderRange,
 } from "./graph-settings.js";
 import { FONT_STACK } from "./palette/colors.js";
-
-/** The persisted filter toggles — everything in Filters except the search text. */
-export interface GraphFilterSettings {
-	scope: GraphScope;
-	depth: number;
-	incoming: boolean;
-	outgoing: boolean;
-	neighborLinks: boolean;
-	showTags: boolean;
-	showAttachments: boolean;
-	existingOnly: boolean;
-	showOrphans: boolean;
-}
 
 interface GraphSettingsProps {
 	filters: GraphFilterSettings;
@@ -189,7 +176,7 @@ export default function GraphSettings({
 							type="button"
 							aria-label="Decrease depth"
 							disabled={filters.depth <= 1}
-							onClick={() => setFilter("depth", Math.max(1, filters.depth - 1))}
+							onClick={() => setFilter("depth", clampDepth(filters.depth - 1))}
 							style={BUTTON}
 						>
 							−
@@ -201,7 +188,7 @@ export default function GraphSettings({
 							type="button"
 							aria-label="Increase depth"
 							disabled={filters.depth >= MAX_DEPTH}
-							onClick={() => setFilter("depth", Math.min(MAX_DEPTH, filters.depth + 1))}
+							onClick={() => setFilter("depth", clampDepth(filters.depth + 1))}
 							style={BUTTON}
 						>
 							+

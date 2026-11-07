@@ -11,6 +11,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
 import { formatMomentDate } from "../../../shared/moment-format.js";
+import { extractNoteSection } from "../../../shared/transclusion.js";
 import { expandCommands } from "./engine.js";
 import { invoke, type ProgramRuntime, type RunBudget } from "./interpreter.js";
 import { addDuration, momentFunction, parseDateText, parseMomentDuration } from "./moment.js";
@@ -201,79 +202,6 @@ function dateModule(host: TemplaterHost): HostObject {
 
 const LINK = /^\[\[(.*)\]\]$/;
 
-/** Headings and block ids are matched loosely, as Obsidian's link resolution does. */
-function normalizeHeading(text: string): string {
-	return text
-		.replace(/[#^|[\]]/g, " ")
-		.replace(/\s+/g, " ")
-		.trim()
-		.toLowerCase();
-}
-
-/**
- * The part of `content` a `#subpath` names: a heading's section (the heading
- * line through the next heading of the same or a higher level, nested as
- * `A#B`), or the block carrying `^id`. `undefined` when it is not there.
- */
-export function sliceSubpath(content: string, subpath: string): string | undefined {
-	const lines = content.split("\n");
-	const headings: Array<{ line: number; level: number; text: string }> = [];
-	let fence: string | undefined;
-	for (const [index, line] of lines.entries()) {
-		const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-		if (marker && (!fence || marker.startsWith(fence))) {
-			fence = fence ? undefined : marker;
-			continue;
-		}
-		if (fence) continue;
-		const heading = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
-		if (heading) {
-			headings.push({
-				line: index,
-				level: heading[1]?.length ?? 1,
-				text: normalizeHeading(heading[2] ?? ""),
-			});
-		}
-	}
-
-	if (subpath.startsWith("^")) {
-		const id = subpath.slice(1);
-		// Block ids are `[A-Za-z0-9-]`, so the id needs no escaping in the pattern.
-		const at = lines.findIndex((line) =>
-			/^[\w-]+$/.test(id) ? new RegExp(`(?:^|\\s)\\^${id}\\s*$`).test(line) : false,
-		);
-		if (at < 0) return undefined;
-		const own = lines[at] ?? "";
-		// A list item is its own block; a paragraph (or an id on the line after a
-		// block) runs back to a blank line or to the heading, item or fence before it.
-		if (/^\s*(?:[-*+]|\d+[.)])\s/.test(own)) return own;
-		let start = own.trim() === `^${id}` ? at - 1 : at;
-		while (
-			start > 0 &&
-			!/^\s*$|^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|```|~~~)/.test(lines[start - 1] ?? "")
-		) {
-			start -= 1;
-		}
-		return lines.slice(Math.max(0, start), at + 1).join("\n");
-	}
-
-	let from = 0;
-	let found: { line: number; level: number } | undefined;
-	for (const segment of subpath.split("#").filter(Boolean)) {
-		const wanted = normalizeHeading(segment);
-		const next = headings.find((heading) => heading.line >= from && heading.text === wanted);
-		if (!next) return undefined;
-		found = next;
-		from = next.line + 1;
-	}
-	if (!found) return undefined;
-	const level = found.level;
-	const end = headings.find(
-		(heading) => heading.line > (found?.line ?? 0) && heading.level <= level,
-	);
-	return lines.slice(found.line, end ? end.line : lines.length).join("\n");
-}
-
 async function include(session: Session, link: unknown): Promise<string> {
 	const { host } = session;
 	let file: VaultFile | undefined;
@@ -297,7 +225,7 @@ async function include(session: Session, link: unknown): Promise<string> {
 	}
 	let content = await fs.readFile(file.absolutePath, "utf8");
 	if (subpath) {
-		const section = sliceSubpath(content, subpath);
+		const section = extractNoteSection(content, subpath, { keepBlockMarker: true });
 		if (section !== undefined) content = section;
 	} else {
 		// The included note's properties belong to that note; spliced into

@@ -108,11 +108,6 @@ export function parseHeadingText(markdown: string): HeadingText {
 	return { text: text.trim(), explicitId };
 }
 
-/** {@link parseHeadingText}, text only. */
-export function headingAnchorText(markdown: string): string {
-	return parseHeadingText(markdown).text;
-}
-
 /**
  * The inline markdown of a parsed heading node, sliced from the source it was
  * parsed from: no leading `#`s, closing `#`s or setext underline.

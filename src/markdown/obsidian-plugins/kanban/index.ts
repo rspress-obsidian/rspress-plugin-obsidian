@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { getContentLineFlags } from "../../../shared/content-flags.js";
 import { parseFrontmatter, stripFrontmatter } from "../../../shared/frontmatter.js";
-import { blankCommentRanges, findCommentRanges } from "../../comments.js";
+import { blankCommentRanges, findCommentRanges, hasComments } from "../../comments.js";
 import { scanPageHeadings } from "../../heading-text.js";
 import type { ContentIndex } from "../../types.js";
 import { readObsidianPluginSettings } from "../settings.js";
@@ -54,7 +54,7 @@ function noteSource(ctx: PluginRenderContext): Promise<string> {
 function laneIds(source: string, body: string): Map<number, string> {
 	const offset = source.slice(0, source.length - body.length).split("\n").length - 1;
 	const lines = source.split(/\r?\n/);
-	const blanked = source.includes("%%")
+	const blanked = hasComments(source)
 		? blankCommentRanges(source, findCommentRanges(source)).split(/\r?\n/)
 		: lines;
 	const ids = new Map<number, string>();

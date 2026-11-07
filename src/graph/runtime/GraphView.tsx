@@ -12,8 +12,9 @@ import {
 	useState,
 } from "react";
 import { graphPayload } from "virtual-graph-data";
-import { encodeRoutePath } from "../../shared/route-path.js";
+import { encodeRoutePath, routeKey } from "../../shared/route-path.js";
 import { navigation, useNavigateTo, usePathname } from "../../shared/usePathname.js";
+import { FORCE_GRAPH_PACKAGE } from "../force-graph-package.js";
 import { decodeGraphPayload } from "../graph-payload.js";
 import type { GraphNode, GraphPayload, GraphViewGroup } from "../types.js";
 import {
@@ -23,7 +24,6 @@ import {
 	type ForceGraphNode,
 	type GraphIndex,
 	type GraphViewFilters,
-	normalizeClientRoutePath,
 } from "./deriveGraphViewData.js";
 import { matchesGraphQuery, parseGraphQuery } from "./graph-query.js";
 import {
@@ -35,6 +35,7 @@ import {
 	labelZoomFor,
 	MAX_CENTER_PULL,
 } from "./graph-settings.js";
+import { injectStyles } from "./keyframes.js";
 import { createLinkHitAreaPainter } from "./link-hit-areas.js";
 import {
 	type CanvasColors,
@@ -163,8 +164,18 @@ export class GraphErrorBoundary extends Component<
 	}
 }
 
-/** Shown when the site was built without the optional `react-force-graph-2d` peer. */
-const GRAPH_RENDERER_MISSING_MESSAGE = "Install react-force-graph-2d to draw the graph";
+/** Shown when the site was built without the optional force-graph peer. */
+const GRAPH_RENDERER_MISSING_MESSAGE = `Install ${FORCE_GRAPH_PACKAGE} to draw the graph`;
+
+/** The loader's spin, injected by the component that renders the loader. */
+const SPINNER_STYLE_ID = "graph-spinner-keyframes";
+
+const SPINNER_KEYFRAMES = `
+    @keyframes gv-spinner {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  `;
 
 /**
  * Whether `value` can be rendered as a React component: a function, or one of
@@ -356,7 +367,7 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		truncatedCount: 0,
 	});
 
-	const currentRoutePath = useMemo(() => normalizeClientRoutePath(pathname), [pathname]);
+	const currentRoutePath = useMemo(() => routeKey(pathname), [pathname]);
 
 	const graphIndex = useMemo(() => graphIndexFor(graphPayload), []);
 
@@ -460,8 +471,14 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		[forceGraphData.nodes],
 	);
 
+	// The loader's keyframes live here, not with the panel's: a sidebar graph
+	// renders this component with no panel on the page to inject them.
+	useEffect(() => injectStyles(SPINNER_STYLE_ID, SPINNER_KEYFRAMES), []);
+
 	useEffect(() => {
 		let active = true;
+		// A literal specifier: Rspack resolves it while building, and `install.ts`
+		// aliases exactly this string when the peer is not installed.
 		import("react-force-graph-2d")
 			.then((mod) => {
 				if (!active) return;

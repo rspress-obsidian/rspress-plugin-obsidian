@@ -7,11 +7,17 @@
 import type { Heading, List, ListItem, Root, RootContent } from "mdast";
 import { escapeRegExp } from "../../../shared/escape.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../../../shared/paths.js";
-import { extractInlineFields, type InlineField } from "../../dataview-metadata.js";
+import {
+	extractInlineFields,
+	type InlineField,
+	LIST_ITEM_PREFIX,
+	TASK_BOX_PREFIX,
+} from "../../dataview-metadata.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import { parseObsidianMarkdown, plainText } from "../../syntax.js";
 import type { ParsedWikiLink } from "../../types.js";
 import { visit } from "../../visit.js";
+import { isTaskField } from "../tasks/task-fields.js";
 import type { KanbanSettingsLayer, ResolvedKanbanSettings } from "./board-settings.js";
 
 /** One card: a top-level item of a lane's list, with everything under it. */
@@ -58,20 +64,6 @@ export interface InlineFieldSources {
 	dataview: boolean;
 	tasks: boolean;
 }
-
-/** The fields Tasks owns; Kanban only reads them from a card's first line. */
-export const TASK_FIELDS: Record<string, true> = {
-	priority: true,
-	start: true,
-	created: true,
-	scheduled: true,
-	due: true,
-	completion: true,
-	cancelled: true,
-	id: true,
-	dependsOn: true,
-	recurrence: true,
-};
 
 const COMPLETE_MARKER = "Complete";
 const ARCHIVE_HEADING = "Archive";
@@ -190,13 +182,13 @@ function cardFromListItem(
 	const { start, end } = offsetsOf(item);
 	const itemSource = body.slice(start, end);
 	const lineStart = body.lastIndexOf("\n", start - 1) + 1;
-	const marker = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|(?=\r?\n)|$)/.exec(itemSource)?.[0] ?? "";
+	const marker = LIST_ITEM_PREFIX.exec(itemSource)?.[0] ?? "";
 	// CommonMark's content column: the marker's own indentation plus its width.
 	const indent = start - lineStart + marker.length;
 	let consumed = marker.length;
 	let checkChar = " ";
 	let checked = false;
-	const checkbox = /^\[([^\]\n])\](?:[ \t]+|(?=\r?\n)|$)/.exec(itemSource.slice(consumed));
+	const checkbox = TASK_BOX_PREFIX.exec(itemSource.slice(consumed));
 	if (checkbox) {
 		checkChar = checkbox[1] ?? " ";
 		checked = checkChar !== " ";
@@ -297,11 +289,11 @@ function cardFromListItem(
 			if (field.wrapping === "emoji")
 				return titleFirstLineEnd < 0 || field.end <= titleFirstLineEnd;
 			if (!sources.dataview) return false;
-			return !TASK_FIELDS[field.key] || titleFirstLineEnd < 0 || field.end <= titleFirstLineEnd;
+			return !isTaskField(field.key) || titleFirstLineEnd < 0 || field.end <= titleFirstLineEnd;
 		});
 		const moveBody = settings.inlineMetadataPosition !== "body";
 		for (const field of [...inlineFields].reverse()) {
-			const isTask = field.wrapping === "emoji" || Boolean(TASK_FIELDS[field.key]);
+			const isTask = field.wrapping === "emoji" || isTaskField(field.key);
 			if (isTask ? !settings.moveTaskMetadata : !moveBody) continue;
 			title = title.slice(0, field.start) + title.slice(field.end);
 		}

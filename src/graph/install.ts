@@ -12,10 +12,9 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { moduleDir } from "../runtime-paths.js";
+import { FORCE_GRAPH_PACKAGE } from "./force-graph-package.js";
 
 type BuilderConfig = NonNullable<RspressPlugin["builderConfig"]>;
-
-const FORCE_GRAPH_PACKAGE = "react-force-graph-2d";
 
 /** Shown at build time when the site is built without the optional peer. */
 export const FORCE_GRAPH_INSTALL_HINT = `The graph panel draws with the optional peer dependency \`${FORCE_GRAPH_PACKAGE}\`: install it next to rspress-plugin-obsidian (\`npm install ${FORCE_GRAPH_PACKAGE}\`) and rebuild the site. Until then the panel lists the pages without drawing the graph.`;

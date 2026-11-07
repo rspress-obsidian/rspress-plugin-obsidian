@@ -32,12 +32,16 @@ import {
 	isBlocked,
 	isBlocking,
 	isDone,
-	PRIORITY_NAMES,
-	type Priority,
 	statusTypeGroupText,
 	type Task,
 	urgencyOf,
 } from "./task.js";
+import {
+	PRIORITY_NONE,
+	PRIORITY_QUERY_NAMES,
+	priorityOfName,
+	priorityTitle,
+} from "./task-fields.js";
 
 /** What parsing a query line may depend on. */
 export interface ParseContext {
@@ -317,21 +321,15 @@ function dateField(spec: DateFieldSpec): Field {
 	};
 }
 
-const PRIORITY_FILTER =
-	/^priority(\s+is)?(\s+(above|below|not))?(\s+(lowest|low|none|medium|high|highest))$/i;
-
-const PRIORITY_BY_NAME: Record<string, Priority> = {
-	highest: 0,
-	high: 1,
-	medium: 2,
-	none: 3,
-	low: 4,
-	lowest: 5,
-};
+/** `priority is <name>`, `priority above <name>`…, the names coming from the priority table. */
+const PRIORITY_FILTER = new RegExp(
+	`^priority(\\s+is)?(\\s+(above|below|not))?(\\s+(${PRIORITY_QUERY_NAMES.join("|")}))$`,
+	"i",
+);
 
 /** `%%1%%High priority`: the priority's group heading, sortable by its hidden prefix. */
 function priorityGroupName(task: Task): string {
-	return `%%${task.priority}%%${PRIORITY_NAMES[task.priority]} priority`;
+	return `%%${task.priority}%%${priorityTitle(task.priority)} priority`;
 }
 
 function folderOf(task: Task): string {
@@ -452,7 +450,7 @@ const FIELDS: readonly Field[] = [
 			const match = PRIORITY_FILTER.exec(line);
 			if (!match) return undefined;
 			const level = (match[5] ?? "").toLowerCase();
-			const priority = PRIORITY_BY_NAME[level] ?? 3;
+			const priority = priorityOfName(level) ?? PRIORITY_NONE;
 			switch (match[3]?.toLowerCase()) {
 				case "above":
 					return makeFilter(line, (task) => task.priority < priority);

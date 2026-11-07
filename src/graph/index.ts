@@ -4,12 +4,12 @@ import { deferInvalidationPlugin } from "../dev-invalidation.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { findCanvasBoards } from "../shared/canvas-routes.js";
 import { findPublishedContent } from "../shared/published-content.js";
+import { routeKey } from "../shared/route-path.js";
 import { buildGraphModules, type CollectedRoute, type GraphBuildState } from "./build/index.js";
 import { createGraphDevRefresher } from "./dev-refresh.js";
 import { forceGraphBuilderConfig } from "./install.js";
 import type { GraphViewColors } from "./runtime/GraphView.js";
 import type { GraphViewGroup } from "./types.js";
-import { normalizeRoutePath } from "./utils.js";
 
 // Runtime components and styles live in `dist/graph/runtime/` when published
 // and `src/graph/runtime/` when running from source.
@@ -98,7 +98,7 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 	// unpublished pages (titles, links and text) into the graph.
 	const collectRoutes = (): CollectedRoute[] =>
 		(routeSource?.getRoutes() ?? []).map((route) => ({
-			routePath: normalizeRoutePath(route.routePath),
+			routePath: routeKey(route.routePath),
 			absolutePath: route.absolutePath,
 			relativePath: route.relativePath,
 			pageName: route.pageName,
@@ -151,8 +151,8 @@ export function graphview(options: RspressPluginGraphViewOptions = {}): RspressP
 
 			const published = findPublishedContent(config);
 			devRefresher.watch(
-				[path.resolve(config.root ?? "docs"), published?.vaultRoot].filter((root): root is string =>
-					Boolean(root),
+				[path.resolve(config.root ?? "docs"), published?.vault?.root].filter(
+					(root): root is string => Boolean(root),
 				),
 			);
 			return devRefresher.publish(modules);

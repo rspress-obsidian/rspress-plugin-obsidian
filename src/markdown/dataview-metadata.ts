@@ -6,6 +6,7 @@
  */
 import { getContentLineFlags } from "../shared/content-flags.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../shared/paths.js";
+import { yamlDateAsLocal } from "../shared/yaml-date.js";
 import { DataviewLink, parseDateLiteral, parseDuration } from "./dataview-values.js";
 import type { DataviewListItem, DataviewTask } from "./types.js";
 
@@ -273,15 +274,8 @@ function parseInlineValue(value: string): unknown {
  */
 function frontmatterLeaf(value: unknown): unknown {
 	if (value instanceof Date) {
-		const local = new Date(
-			value.getUTCFullYear(),
-			value.getUTCMonth(),
-			value.getUTCDate(),
-			value.getUTCHours(),
-			value.getUTCMinutes(),
-			value.getUTCSeconds(),
-			value.getUTCMilliseconds(),
-		);
+		const local = yamlDateAsLocal(value);
+		if (!local) return value;
 		local.setFullYear(value.getUTCFullYear());
 		return local;
 	}
@@ -392,8 +386,25 @@ function finalizeFields(groups: FieldGroups): Record<string, unknown> {
 	return fields;
 }
 
-const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/u;
-const TASK_BOX = /^\[(.)\](?:[ \t]+([\s\S]*))?$/u;
+const LIST_MARKER = "([-*+]|\\d{1,9}[.)])";
+/**
+ * One list item line: indent, marker (`-`, `*`, `+`, `1.`, `1)`) and text.
+ * Exported because Tasks and Kanban read the same lines the inline-field
+ * scanner walks; a second regex is how `-\t[ ] x` became a task in one
+ * plugin and not the other.
+ */
+export const LIST_ITEM = new RegExp(`^([ \\t]*)${LIST_MARKER}(?:([ \\t]+)(.*))?$`, "u");
+/** A task marker (`[x]` …) at the start of a list item's text, with what follows. */
+export const TASK_BOX = /^\[(.)\](?:[ \t]+([\s\S]*))?$/u;
+/**
+ * The same marker at the head of a multi-line item source, ending where the
+ * text begins — Kanban reads a card's source by prefix and needs the lengths.
+ */
+export const LIST_ITEM_PREFIX = new RegExp(
+	`^([ \\t]*)${LIST_MARKER}(?:[ \\t]+|(?=\\r?\\n)|$)`,
+	"u",
+);
+export const TASK_BOX_PREFIX = /^\[(.)\](?:[ \t]+|(?=\r?\n)|$)/u;
 const THEMATIC_BREAK = /^[ \t]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const HEADING = /^[ \t]{0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 /** Lines that interrupt a paragraph, so they cannot lazily continue a list item. */

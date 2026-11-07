@@ -3,16 +3,13 @@ import path from "node:path";
 import type { Html, RootContent } from "mdast";
 import { moduleDir, resolveRuntimeFile } from "../../../runtime-paths.js";
 import { escapeHtmlText } from "../../../shared/escape.js";
-import {
-	type PublishedFileRoute,
-	publishedFileRoutes,
-	setPublishedFileRoutes,
-} from "../../../shared/file-routes.js";
+import type { PublishedFileRoute } from "../../../shared/file-routes.js";
 import { normalizeFsPath, normalizeRoutePrefix } from "../../../shared/route-path.js";
 import type { ContentIndex, ContentPage } from "../../types.js";
 import type { ObsidianPluginFeature, PluginRenderContext } from "../types.js";
 import { datasetFor } from "./dataset.js";
-import { mapLibraryBuilderConfig, renderBase } from "./render.js";
+import { mapLibraryBuilderConfig } from "./map/install.js";
+import { renderBase } from "./render.js";
 import type { BaseFile } from "./values.js";
 
 const KIND = "bases";
@@ -116,7 +113,7 @@ export const basesFeature: ObsidianPluginFeature = {
 	async addPages(ctx) {
 		const prefix = normalizeRoutePrefix(ctx.options.bases.routePrefix, "/bases");
 		const routes = baseRoutes(ctx.vault ? [ctx.vault, ctx.docs] : [ctx.docs], prefix);
-		setPublishedFileRoutes(KIND, routes);
+		ctx.fileRoutes.set(KIND, routes);
 		return routes.map((route) => {
 			const title =
 				route.source
@@ -139,7 +136,9 @@ export const basesFeature: ObsidianPluginFeature = {
 		const marker = PAGE_MARKER.exec(ctx.source)?.[1];
 		if (!marker) return undefined;
 		const routePath = decodeURIComponent(marker);
-		const route = publishedFileRoutes(KIND).find((candidate) => candidate.routePath === routePath);
+		const route = ctx.fileRoutes
+			?.byKind(KIND)
+			.find((candidate) => candidate.routePath === routePath);
 		if (!route) return undefined;
 		const title =
 			route.source

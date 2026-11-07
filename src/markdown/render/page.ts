@@ -11,7 +11,6 @@ import { getMentions } from "../mentions.js";
 import { plainText } from "../syntax.js";
 import type { ContentPage } from "../types.js";
 import { isPathInsideRoot, normalizeFsPath } from "../utils.js";
-import { visit } from "../visit.js";
 import type { RenderContext } from "./context.js";
 
 /**
@@ -120,14 +119,10 @@ function applyPageTitle(tree: Root, ctx: RenderContext): void {
 /**
  * Decorate the compiled page once its body is rendered: its title, the
  * backlinks panel and `cssclasses` wrapper of an indexed note, and the math
- * styles of a page that shows math (`formulas` is how many the page's own tree
- * rendered).
+ * styles of a page that shows math (`ctx.mathCount` counts the page's own
+ * formulas and its embeds').
  */
-export async function decorateCompiledPage(
-	tree: Root,
-	ctx: RenderContext,
-	formulas: number,
-): Promise<void> {
+export async function decorateCompiledPage(tree: Root, ctx: RenderContext): Promise<void> {
 	const { options, currentPage, index } = ctx;
 	applyPageTitle(tree, ctx);
 	if (ctx.indexed && options.enableBacklinks) {
@@ -146,25 +141,18 @@ export async function decorateCompiledPage(
 	// Both engines need styles on exactly the pages that show math, the
 	// page's own or an embed's: MathJax a stylesheet it generates per glyph,
 	// emitted inline; KaTeX its static stylesheet, linked from the head.
-	if (options.enableMath) {
-		const marker = options.mathEngine === "mathjax" ? "<mjx-" : 'class="katex';
-		let embedsMath = false;
-		visit(tree, "html", (node) => {
-			if (node.value.includes(marker)) embedsMath = true;
-		});
-		if (formulas > 0 || embedsMath) {
-			if (options.mathEngine === "mathjax") {
-				const stylesheet = mathEngineStylesheet("mathjax");
-				if (stylesheet)
-					tree.children.unshift({ type: "html", value: `<style>${stylesheet}</style>\n` });
-			} else if (ctx.katexStylesheetHref) {
-				tree.children.unshift({
-					type: "mdxJsxFlowElement",
-					name: "KatexStylesheet",
-					attributes: [{ type: "mdxJsxAttribute", name: "href", value: ctx.katexStylesheetHref }],
-					children: [],
-				} as unknown as RootContent);
-			}
+	if (options.enableMath && ctx.mathCount.value > 0) {
+		if (options.mathEngine === "mathjax") {
+			const stylesheet = mathEngineStylesheet("mathjax");
+			if (stylesheet)
+				tree.children.unshift({ type: "html", value: `<style>${stylesheet}</style>\n` });
+		} else if (ctx.katexStylesheetHref) {
+			tree.children.unshift({
+				type: "mdxJsxFlowElement",
+				name: "KatexStylesheet",
+				attributes: [{ type: "mdxJsxAttribute", name: "href", value: ctx.katexStylesheetHref }],
+				children: [],
+			} as unknown as RootContent);
 		}
 	}
 }

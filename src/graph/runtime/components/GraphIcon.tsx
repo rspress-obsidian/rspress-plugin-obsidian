@@ -1,8 +1,11 @@
+import type { CSSProperties } from "react";
+
 export interface GraphIconProps {
 	size?: number;
+	style?: CSSProperties;
 }
 
-export default function GraphIcon({ size = 16 }: GraphIconProps) {
+export default function GraphIcon({ size = 16, style }: GraphIconProps) {
 	return (
 		<svg
 			aria-hidden="true"
@@ -14,6 +17,7 @@ export default function GraphIcon({ size = 16 }: GraphIconProps) {
 			strokeWidth="2"
 			strokeLinecap="round"
 			strokeLinejoin="round"
+			style={style}
 		>
 			<circle cx="5" cy="6" r="2.5" />
 			<circle cx="19" cy="6" r="2.5" />

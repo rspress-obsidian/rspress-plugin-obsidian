@@ -11,21 +11,32 @@
  */
 
 import { getContentLineFlags } from "../shared/content-flags.js";
-import { slugifyHeading } from "../shared/slug.js";
+import { headingKey, slugifyHeading } from "../shared/slug.js";
 
 /**
  * The note slice a `#subpath` selects: a `^block` id, a heading name or slug, or
  * the whole note when the subpath is empty. `undefined` when the subpath names
  * something the note does not contain.
  */
-export function extractNoteSection(content: string, subpath?: string): string | undefined {
+export function extractNoteSection(
+	content: string,
+	subpath?: string,
+	options: { keepBlockMarker?: boolean } = {},
+): string | undefined {
 	if (!subpath) return content;
 	const anchor = subpath.replace(/^#/, "");
 	// `extractBlockSection` takes the bare id — it prepends the `^` itself when
 	// it matches the marker line — so a subpath arriving as `#^id` must not
 	// carry the caret through or nothing ever matches.
-	if (anchor.startsWith("^")) return extractBlockSection(content, anchor.slice(1)) ?? content;
-	return extractHeadingSection(content, anchor) ?? content;
+	if (anchor.startsWith("^")) {
+		const id = anchor.slice(1);
+		const block = extractBlockSection(content, id);
+		if (block === undefined || !options.keepBlockMarker) return block;
+		// Callers that splice the block into a page keep the marker: the block
+		// anchor pass turns it into the id `[[Note#^id]]` points at.
+		return `${block} ^${id}`;
+	}
+	return extractHeadingSection(content, anchor);
 }
 
 /** One heading line of a note. */
@@ -63,20 +74,6 @@ function scanHeadings(lines: string[], isContent: boolean[]): SectionHeading[] {
 		}
 	}
 	return headings;
-}
-
-/**
- * Obsidian's heading-name fold: link text cannot hold `#`, `|`, `^`, `:`, `%`,
- * `[`, `]` or `\`, so a heading containing them is linked with a space in their
- * place (`## Step 1: Setup` → `[[Note#Step 1 Setup]]`). Compared without case.
- */
-function headingKey(text: string): string {
-	return text
-		.normalize("NFC")
-		.replace(/[#|^:%[\]\\]/g, " ")
-		.replace(/\s+/g, " ")
-		.trim()
-		.toLowerCase();
 }
 
 /**

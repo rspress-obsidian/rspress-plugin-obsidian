@@ -12,6 +12,7 @@
 import type { RspressPlugin } from "@rspress/core";
 import type { Code, PhrasingContent, Root, RootContent } from "mdast";
 import type { VFile } from "vfile";
+import type { FileRoutes } from "../../shared/file-routes.js";
 import type {
 	ContentIndex,
 	ContentPage,
@@ -43,6 +44,8 @@ export interface PluginRenderContext {
 	mode: "page" | "embed";
 	/** The tree is a whole note — a compiled page, or an embed with no `#subpath`. */
 	wholeNote: boolean;
+	/** Published non-Markdown files and their pages; unset outside a build. */
+	fileRoutes?: FileRoutes;
 	/** The markdown the tree was parsed from, with `%%comments%%` blanked (same offsets). */
 	source: string;
 	/**
@@ -81,6 +84,8 @@ export interface PluginBuildContext {
 	docs: ContentIndex;
 	vault?: ContentIndex;
 	resolveOptions: NonNullable<ResolveContext["options"]>;
+	/** Published non-Markdown files and their pages, this build's own. */
+	fileRoutes: FileRoutes;
 }
 
 /** A page a feature publishes through Rspress's `addPages`. */
@@ -127,7 +132,7 @@ export interface ObsidianPluginFeature {
 	/**
 	 * Pages to publish. Runs before any note compiles and before attachments
 	 * are staged, so it is also where a feature registers its file routes
-	 * (`setPublishedFileRoutes`).
+	 * (`fileRoutes.set`).
 	 */
 	addPages?(ctx: PluginBuildContext): Promise<PluginPage[]>;
 	/**

@@ -8,6 +8,7 @@
  * A text whose words changed that way is laid out again with Excalidraw's own
  * wrapping and placement, measured by a {@link TextMeasurer}.
  */
+import { elementKind } from "./element-types.js";
 import type { TextMeasurer } from "./measure.js";
 import type { ExcalidrawElement } from "./scene.js";
 
@@ -226,12 +227,16 @@ const BOUND_TEXT_PADDING = 5;
 /** How wide a container's label may be (`getBoundTextMaxWidth`). */
 function boundTextMaxWidth(container: ExcalidrawElement, fontSize: number): number {
 	const { width } = container;
-	if (container.type === "arrow") return Math.max(0.7 * width, fontSize * 11);
-	if (container.type === "ellipse") {
-		return Math.round((width / 2) * Math.SQRT2) - BOUND_TEXT_PADDING * 2;
+	switch (elementKind(container.type).label) {
+		case "arrow":
+			return Math.max(0.7 * width, fontSize * 11);
+		case "ellipse":
+			return Math.round((width / 2) * Math.SQRT2) - BOUND_TEXT_PADDING * 2;
+		case "diamond":
+			return Math.round(width / 2) - BOUND_TEXT_PADDING * 2;
+		case "box":
+			return width - BOUND_TEXT_PADDING * 2;
 	}
-	if (container.type === "diamond") return Math.round(width / 2) - BOUND_TEXT_PADDING * 2;
-	return width - BOUND_TEXT_PADDING * 2;
 }
 
 /** Where a label sits in its container (`computeBoundTextPosition`), from its size. */
@@ -244,11 +249,13 @@ function boundTextPosition(
 	let offsetX = BOUND_TEXT_PADDING;
 	let offsetY = BOUND_TEXT_PADDING;
 	let maxHeight = container.height - BOUND_TEXT_PADDING * 2;
-	if (container.type === "ellipse") {
+	const label = elementKind(container.type).label;
+	// An ellipse and a diamond cut the corners off their box, so their label sits in what is left.
+	if (label === "ellipse") {
 		offsetX += (container.width / 2) * (1 - Math.SQRT2 / 2);
 		offsetY += (container.height / 2) * (1 - Math.SQRT2 / 2);
 		maxHeight = Math.round((container.height / 2) * Math.SQRT2) - BOUND_TEXT_PADDING * 2;
-	} else if (container.type === "diamond") {
+	} else if (label === "diamond") {
 		offsetX += container.width / 4;
 		offsetY += container.height / 4;
 		maxHeight = Math.round(container.height / 2) - BOUND_TEXT_PADDING * 2;
@@ -339,7 +346,7 @@ export function applyDisplayText(
 	const height = text.split("\n").length * element.fontSize * element.lineHeight;
 	const laidOut = { ...element, text, width: nextWidth, height };
 	// An arrow places its label at render time, from the label's size.
-	if (container?.type === "arrow") return laidOut;
+	if (container && elementKind(container.type).label === "arrow") return laidOut;
 	const position = container
 		? boundTextPosition(container, element, nextWidth, height)
 		: adjustedPosition(element, nextWidth, height, textWidth(element.text, width));

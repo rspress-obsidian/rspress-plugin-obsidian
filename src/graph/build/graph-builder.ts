@@ -1,8 +1,8 @@
 import { resolveWikiLink } from "../../markdown/resolve-wikilink.js";
 import { tagRoutePath } from "../../shared/paths.js";
+import { routeKey } from "../../shared/route-path.js";
 import { normalizeLookupValue } from "../../shared/slug.js";
 import type { GraphData, GraphLink, GraphNode } from "../types.js";
-import { normalizeRoutePath } from "../utils.js";
 import { type GraphDocument, safeDecode, TAG_ROUTE_PREFIX } from "./documents.js";
 
 export interface GraphBuildOutput {
@@ -89,7 +89,7 @@ export function buildGraphData(documents: GraphDocument[]): GraphBuildOutput {
 					}
 					const hrefPath = (resolved.href ?? "").split(/[?#]/, 1)[0] ?? "";
 					if (resolved.canvasSrc) {
-						const board = documentByRoute.get(normalizeRoutePath(safeDecode(hrefPath)));
+						const board = documentByRoute.get(routeKey(safeDecode(hrefPath)));
 						if (board) addLink(document, board.route.routePath);
 						continue;
 					}

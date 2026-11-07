@@ -34,7 +34,7 @@ import { normalizeFilePathKey } from "../shared/paths.js";
 import { findPublishedContent, type PublishedContentConfig } from "../shared/published-content.js";
 import { normalizeFsPath, normalizeRoutePrefix } from "../shared/route-path.js";
 import { extractBlockSection, extractHeadingSection } from "../shared/transclusion.js";
-import { DEFAULT_IFRAME_SANDBOX } from "./constants.js";
+import { CANVAS_JSON_DIR, DEFAULT_IFRAME_SANDBOX } from "./constants.js";
 import { parseCanvas } from "./parser.js";
 import type {
 	CanvasData,
@@ -49,9 +49,6 @@ import { normalizeSiteBase } from "./utils/base.js";
 import { anchorHref, collectMarkdownTargets } from "./utils/markdown.js";
 
 const LOG_PREFIX = "[rspress-plugin-obsidian:canvas]";
-
-/** URL directory (under the site base) the published board JSON is served from. */
-export const CANVAS_JSON_DIR = "__canvases__";
 
 /**
  * Transclusion depth the client renders before it falls back to a link (see
@@ -529,7 +526,7 @@ function sharedTree(
 	const root = normalizeFsPath(path.resolve(vaultRoot));
 	const sameRoot = (candidate: string | undefined) =>
 		candidate !== undefined && normalizeFsPath(path.resolve(candidate)) === root;
-	if (published.vaultIndexOptions && sameRoot(published.vaultRoot)) return "vault";
+	if (published.vault && sameRoot(published.vault.root)) return "vault";
 	return sameRoot(published.docsRoot) ? "docs" : undefined;
 }
 
@@ -540,8 +537,8 @@ async function loadVaultIndex(
 	published: PublishedContentConfig | undefined,
 ): Promise<{ index: ContentIndex; resolveOptions: ResolveContext["options"] }> {
 	const resolveOptions = {
-		enableCaseInsensitiveLookup: published?.enableCaseInsensitiveLookup ?? true,
-		enableFuzzyMatching: published?.enableFuzzyMatching ?? false,
+		enableCaseInsensitiveLookup: published?.docsIndexOptions.enableCaseInsensitiveLookup ?? true,
+		enableFuzzyMatching: published?.docsIndexOptions.enableFuzzyMatching ?? false,
 	};
 	// Sharing the Markdown plugin's indexes (and its options) means a card link
 	// resolves to exactly the route the note page was published at, and — as on
@@ -550,8 +547,8 @@ async function loadVaultIndex(
 	if (published && tree) {
 		const [docs, vault] = await Promise.all([
 			getCachedContentIndex(published.docsRoot, published.docsIndexOptions),
-			published.vaultRoot && published.vaultIndexOptions
-				? getCachedContentIndex(published.vaultRoot, published.vaultIndexOptions)
+			published.vault
+				? getCachedContentIndex(published.vault.root, published.vault.indexOptions)
 				: undefined,
 		]);
 		const linked = linkContentIndexes(docs, vault);
@@ -579,7 +576,7 @@ async function scanBoards(
 	const tree = sharedTree(vaultRoot, published);
 	const excludeFolders = (
 		(tree === "vault"
-			? published?.vaultIndexOptions?.excludeFolders
+			? published?.vault?.indexOptions.excludeFolders
 			: tree === "docs"
 				? published?.docsIndexOptions.excludeFolders
 				: undefined) ?? []
@@ -654,11 +651,6 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		enableDefaultStyles: options?.enableDefaultStyles ?? true,
 		outDir: path.resolve(process.cwd(), options?.outDir ?? DEFAULT_OUT_DIR),
 	};
-	if (options?.vaultRoot && !options.fileRoutePrefix) {
-		console.warn(
-			`${LOG_PREFIX} \`vaultRoot\` is set without \`fileRoutePrefix\`: canvas file cards link to \`/Note\`-style routes while the markdown plugin publishes vault pages under its own prefix (e.g. \`/vault/Note\`). Set \`fileRoutePrefix\` to that prefix to avoid broken links.`,
-		);
-	}
 	// Published (from dist/canvas.js / dist/canvas.cjs): chunks live at
 	// dist/canvas/components/*.js. Dev (src/canvas/index.ts): sibling
 	// components/*.tsx.
@@ -725,6 +717,12 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			const vaultRoot =
 				resolvedOptions.vaultRoot ?? path.resolve(process.cwd(), config.root ?? "docs");
 			const published = findPublishedContent(config);
+			// A canvas scanning the vault the markdown plugin publishes links file
+			// cards through that plugin's prefix: the caller's own prefix only
+			// overrides it.
+			const fileRoutePrefix =
+				resolvedOptions.fileRoutePrefix ??
+				(sharedTree(vaultRoot, published) === "vault" ? published?.vault?.routePrefix : undefined);
 			// Started before this hook's first `await`: Rspress calls every
 			// plugin's `addPages` in one go, so any sibling that asks for the
 			// boards from its own `addPages` already gets this scan's promise.
@@ -749,11 +747,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			await rm(resolvedOptions.outDir, { recursive: true, force: true });
 			await mkdir(resolvedOptions.outDir, { recursive: true });
 
-			const { index, resolveOptions } = await loadVaultIndex(
-				vaultRoot,
-				resolvedOptions.fileRoutePrefix,
-				published,
-			);
+			const { index, resolveOptions } = await loadVaultIndex(vaultRoot, fileRoutePrefix, published);
 			const context: PublishContext = {
 				vaultRoot,
 				index,
@@ -797,7 +791,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 				// JSON copy, rather than every route chunk embedding it again.
 				const props = {
 					src: board.source,
-					fileRoutePrefix: resolvedOptions.fileRoutePrefix,
+					fileRoutePrefix,
 					linkPreview: resolvedOptions.linkPreview,
 					editable: resolvedOptions.editable,
 					editorTitle: resolvedOptions.editorTitle,

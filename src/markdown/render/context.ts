@@ -4,7 +4,6 @@
  */
 import type { Root } from "mdast";
 import type { VFile } from "vfile";
-import { blankCommentRanges, findCommentRanges } from "../comments.js";
 import type { MediaContext } from "../media.js";
 import type { ObsidianPluginFeature } from "../obsidian-plugins/types.js";
 import type {
@@ -61,6 +60,11 @@ export interface RenderContext {
 	/** For an embed: the ids its source page gives its headings, in order. */
 	headingIds?: readonly string[];
 	embedCounter: { value: number };
+	/**
+	 * Formulas rendered anywhere under the compiled page, embeds included; the
+	 * page links its math styles when this is non-zero.
+	 */
+	mathCount: { value: number };
 	/** Disk answers for the compiled page, shared by its nested documents (see `MediaContext`). */
 	fileChecks: Map<string, boolean>;
 	/** Page mode inside Rspress: the page's title record. */
@@ -86,10 +90,6 @@ export function mediaContextOf(ctx: RenderContext): MediaContext {
 		embedMedia: ctx.options.enableMediaEmbeds,
 		fileChecks: ctx.fileChecks,
 	};
-}
-
-export function blankComments(source: string): string {
-	return source.includes("%%") ? blankCommentRanges(source, findCommentRanges(source)) : source;
 }
 
 /** The visited-stack key of an embed: the page plus the section it names. */

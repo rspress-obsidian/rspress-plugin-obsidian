@@ -128,7 +128,9 @@ export function exportedImages(
 /** Where a staged file is served, relative to the site root — the asset's own URL. */
 function servedPath(asset: ContentAsset, ctx: PluginBuildContext): string | undefined {
 	if (ctx.vault?.byAssetPath.get(asset.pathKey) === asset) {
-		return path.posix.join(ctx.vaultRoutePrefix.replace(/^\/+|\/+$/g, ""), asset.relativePath);
+		// The index wrote the URL the pages link to; a staged file needs it as a path
+		// (decoded, since the staging directory holds files by their real names).
+		return decodeURIComponent(asset.urlPath).replace(/^\/+/, "");
 	}
 	// A docs-root file under `public/` is served by Rspress already.
 	return asset.relativePath.startsWith("public/") ? undefined : asset.relativePath;

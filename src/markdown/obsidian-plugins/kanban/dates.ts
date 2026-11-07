@@ -12,7 +12,11 @@ import {
 	normalizeMomentUnit,
 	startOf,
 } from "../../../shared/date-math.js";
+import { ISO_DAY, parseIsoDayParts } from "../tasks/dates.js";
 import type { KanbanDateColor } from "./options.js";
+
+/** A whole string that is an ISO day, read as local midnight like a card date. */
+const NOW_DAY = new RegExp(`^${ISO_DAY}$`, "u");
 
 /**
  * "Now" from the `now` option: a `Date`, a `YYYY-MM-DD` day (local midnight,
@@ -22,10 +26,15 @@ import type { KanbanDateColor } from "./options.js";
 export function parseNow(now: Date | string | undefined): Date | undefined {
 	if (now === undefined) return new Date();
 	if (now instanceof Date) return Number.isNaN(now.getTime()) ? undefined : now;
-	const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(now.trim());
-	const parsed = day
-		? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]))
-		: new Date(now.trim());
+	const text = now.trim();
+	const day = NOW_DAY.exec(text);
+	let parsed: Date;
+	if (day) {
+		const { year, month, date } = parseIsoDayParts(day);
+		parsed = new Date(year, month - 1, date);
+	} else {
+		parsed = new Date(text);
+	}
 	return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 

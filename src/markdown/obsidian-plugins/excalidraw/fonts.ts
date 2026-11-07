@@ -30,6 +30,8 @@ interface FontFamily {
 	measuredBy?: string;
 	/** What a reader without the font sees instead. */
 	fallback: string;
+	/** Average advance of one character, in ems: the width estimated without the font files. */
+	advance: number;
 	metrics: FontMetrics;
 }
 
@@ -43,6 +45,7 @@ const FONT_FAMILIES: Record<number, FontFamily> = {
 		name: "Virgil",
 		folder: "Virgil",
 		fallback: HAND_DRAWN_FALLBACK,
+		advance: 0.55,
 		metrics: EXCALIFONT_METRICS,
 	},
 	2: {
@@ -50,42 +53,49 @@ const FONT_FAMILIES: Record<number, FontFamily> = {
 		fallback: "Arial, sans-serif",
 		// Liberation Sans is metric-compatible with Helvetica and Arial.
 		measuredBy: "Liberation",
+		advance: 0.5,
 		metrics: { unitsPerEm: 2048, ascender: 1577, descender: -471 },
 	},
 	3: {
 		name: "Cascadia",
 		folder: "Cascadia",
 		fallback: `"Cascadia Code", Consolas, ui-monospace, monospace`,
+		advance: 0.6,
 		metrics: { unitsPerEm: 2048, ascender: 1900, descender: -480 },
 	},
 	5: {
 		name: "Excalifont",
 		folder: "Excalifont",
 		fallback: HAND_DRAWN_FALLBACK,
+		advance: 0.55,
 		metrics: EXCALIFONT_METRICS,
 	},
 	6: {
 		name: "Nunito",
 		folder: "Nunito",
 		fallback: `"Segoe UI", system-ui, sans-serif`,
+		advance: 0.52,
 		metrics: { unitsPerEm: 1000, ascender: 1011, descender: -353 },
 	},
 	7: {
 		name: "Lilita One",
 		folder: "Lilita",
 		fallback: `Impact, "Arial Black", sans-serif`,
+		advance: 0.5,
 		metrics: { unitsPerEm: 1000, ascender: 923, descender: -220 },
 	},
 	8: {
 		name: "Comic Shanns",
 		folder: "ComicShanns",
 		fallback: `"Comic Sans MS", ui-monospace, monospace`,
+		advance: 0.6,
 		metrics: { unitsPerEm: 1000, ascender: 750, descender: -250 },
 	},
 	9: {
 		name: "Liberation Sans",
 		folder: "Liberation",
 		fallback: "Arial, sans-serif",
+		advance: 0.5,
 		metrics: { unitsPerEm: 2048, ascender: 1854, descender: -434 },
 	},
 };
@@ -98,6 +108,14 @@ const UNKNOWN_FAMILY = FONT_FAMILIES[5] as FontFamily;
 
 function familyOf(id: number): FontFamily {
 	return FONT_FAMILIES[id] ?? UNKNOWN_FAMILY;
+}
+
+/** The family Excalidraw draws a text in when it names none: what added labels use. */
+export const DEFAULT_FONT_FAMILY = 2;
+
+/** The average advance of a character of family `id`, in ems. */
+export function averageAdvance(id: number): number {
+	return familyOf(id).advance;
 }
 
 /**

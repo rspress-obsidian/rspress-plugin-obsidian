@@ -1,6 +1,6 @@
-import type { CSSProperties } from "react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { GraphViewGroup } from "../types.js";
+import GraphFab from "./components/GraphFab.js";
 import { LOCAL_STORAGE_KEY_OPEN, NARROW_VIEWPORT_QUERY } from "./graph-panel-storage.js";
 
 // Lazy load heavy graph components
@@ -12,53 +12,9 @@ interface LazyGraphPanelProps {
 	groups?: readonly GraphViewGroup[];
 }
 
-const FAB_STYLE: CSSProperties = {
-	position: "fixed",
-	bottom: 24,
-	right: 24,
-	zIndex: 9999,
-	width: 48,
-	height: 48,
-	borderRadius: "50%",
-	background: "linear-gradient(135deg, #3f3f3f 0%, #262626 50%, #3f3f3f 100%)",
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "center",
-};
-
-const GRAPH_GLYPH = (
-	<>
-		<circle cx="5" cy="6" r="2.5" />
-		<circle cx="19" cy="6" r="2.5" />
-		<circle cx="12" cy="18" r="2.5" />
-		<line x1="7.5" y1="6" x2="16.5" y2="6" />
-		<line x1="6.5" y1="8" x2="10.5" y2="16" />
-		<line x1="17.5" y1="8" x2="13.5" y2="16" />
-	</>
-);
-
-/** Shown while the heavy graph chunk downloads. */
+/** The FAB in its loading state: the panel's chunk is downloading. */
 function GraphPanelFallback() {
-	return (
-		<div style={FAB_STYLE}>
-			<svg
-				role="img"
-				aria-label="Loading graph"
-				width="20"
-				height="20"
-				viewBox="0 0 24 24"
-				fill="none"
-				stroke="currentColor"
-				strokeWidth="2"
-				strokeLinecap="round"
-				strokeLinejoin="round"
-				style={{ color: "#fff", animation: "gv-fab-pulse 3s ease-in-out infinite" }}
-			>
-				<title>Loading graph</title>
-				{GRAPH_GLYPH}
-			</svg>
-		</div>
-	);
+	return <GraphFab label="Loading graph" loading />;
 }
 
 /**
@@ -134,29 +90,7 @@ export default function LazyGraphPanel({ defaultOpen, colors, groups }: LazyGrap
 	if (isPanelRequested === undefined) return <GraphPanelFallback />;
 
 	if (!isPanelRequested) {
-		return (
-			<button
-				type="button"
-				aria-label="Open graph view"
-				onClick={requestPanel}
-				style={{ ...FAB_STYLE, border: "none", padding: 0, cursor: "pointer" }}
-			>
-				<svg
-					aria-hidden="true"
-					width="20"
-					height="20"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					strokeWidth="2"
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					style={{ color: "#fff" }}
-				>
-					{GRAPH_GLYPH}
-				</svg>
-			</button>
-		);
+		return <GraphFab label="Open graph view" onClick={requestPanel} />;
 	}
 
 	return (

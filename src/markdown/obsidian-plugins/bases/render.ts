@@ -8,32 +8,38 @@
  * Obsidian's default — shows. On the base's own page each view's element id is
  * the view name, so `[[Projects.base#Board]]` lands on (and shows) that view.
  */
-import { createRequire } from "node:module";
-import path from "node:path";
-import { moduleDir } from "../../../runtime-paths.js";
 import { escapeHtmlAttribute, escapeHtmlText, sanitizeUrl } from "../../../shared/escape.js";
-import { findPublishedFileRoute } from "../../../shared/file-routes.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentPage } from "../../types.js";
-import { readObsidianPluginSettings } from "../settings.js";
-import type { BuilderConfig, PluginRenderContext } from "../types.js";
-import { type BaseConfig, BaseConfigError, parseBaseConfig, type ViewConfig } from "./config.js";
+import type { PluginRenderContext } from "../types.js";
+import {
+	type BaseConfig,
+	BaseConfigError,
+	type LayoutKey,
+	layoutSettings,
+	parseBaseConfig,
+	type ViewConfig,
+} from "./config.js";
 import { type Dataset, datasetFor } from "./dataset.js";
 import {
 	compileExpression,
 	type EvalEnv,
-	evaluate,
 	type PropertyRef,
 	parsePropertyId,
 	propertyValue,
-	RowScope,
 } from "./evaluate.js";
 import { lucideIcon } from "./icons.js";
-import type { BasesOptions } from "./options.js";
+import {
+	coordinatesOf,
+	isMarkerColor,
+	mapBackground,
+	mapCenter,
+	zoomLevels,
+	zoomSetting,
+} from "./map/config.js";
+import { MAP_INSTALL_HINT, mapLibraryInstalled } from "./map/install.js";
 import { type QueryGroup, type QueryRow, runView, summarize } from "./query.js";
 import {
-	DEFAULT_MAP_TILES,
-	DEFAULT_MAP_TILES_DARK,
 	MAP_CONFIG_ATTRIBUTE,
 	MAP_PIN_CLASS,
 	MAP_ROW_ATTRIBUTES,
@@ -218,7 +224,7 @@ class Renderer {
 	linkable(file: BaseFile): boolean {
 		return (
 			file.page !== undefined ||
-			findPublishedFileRoute(file.absolutePath) !== undefined ||
+			this.ctx.fileRoutes?.find(file.absolutePath) !== undefined ||
 			// An attachment is published only when a page references it.
 			this.dataset.backlinks(file).length > 0
 		);
@@ -498,7 +504,8 @@ async function renderTable(
 	groups: QueryGroup[] | undefined,
 ): Promise<string> {
 	const { view, config, columns, renderer } = context;
-	const sizes = view.settings.columnSize;
+	const settings = layoutSettings<"table">(view);
+	const sizes = settings.columnSize;
 	const widths =
 		sizes && typeof sizes === "object" && !Array.isArray(sizes)
 			? Object.fromEntries(Object.entries(sizes).filter(([, width]) => typeof width === "number"))
@@ -539,21 +546,22 @@ async function renderTable(
 		const summary = await summaryCells(context, rows);
 		if (summary) foot = `<tfoot class="bases-tfoot">${summary}</tfoot>`;
 	}
-	const rowHeight = typeof view.settings.rowHeight === "string" ? view.settings.rowHeight : "short";
+	const rowHeight = typeof settings.rowHeight === "string" ? settings.rowHeight : "short";
 	return `<div class="bases-table-container"><table class="bases-table" data-row-height="${escapeHtmlAttribute(rowHeight)}">${colgroup}<thead class="bases-thead"><tr class="bases-tr">${head}</tr></thead>${bodies}${foot}</table></div>`;
 }
 
 /** The cover image and properties of one card (cards and Kanban layouts). */
 async function card(context: ViewContext, row: QueryRow, className: string): Promise<string> {
 	const { view, config, renderer, columns } = context;
+	const settings = layoutSettings<"cards">(view);
 	let cover = "";
-	if (typeof view.settings.image === "string" && view.settings.image !== "") {
-		const value = propertyValue(parsePropertyId(view.settings.image), renderer.env, row.scope);
+	if (typeof settings.image === "string" && settings.image !== "") {
+		const value = propertyValue(parsePropertyId(settings.image), renderer.env, row.scope);
 		const image = isEmptyValue(value)
 			? ""
 			: await renderer.image(value, row.file.page, "bases-cards-image");
-		const fit = view.settings.imageFit === "contain" ? "contain" : "cover";
-		const ratio = Number(view.settings.imageAspectRatio);
+		const fit = settings.imageFit === "contain" ? "contain" : "cover";
+		const ratio = Number(settings.imageAspectRatio);
 		const aspect = Number.isFinite(ratio) && ratio > 0 ? ` style="aspect-ratio: 1 / ${ratio}"` : "";
 		cover = `<div class="bases-cards-cover" data-image-fit="${fit}"${aspect}>${image}</div>`;
 	}
@@ -592,7 +600,7 @@ async function renderCards(
 	rows: QueryRow[],
 	groups: QueryGroup[] | undefined,
 ): Promise<string> {
-	const size = Number(context.view.settings.cardSize);
+	const size = Number(layoutSettings<"cards">(context.view).cardSize);
 	const style = Number.isFinite(size) && size > 0 ? ` style="--bases-cards-width: ${size}px"` : "";
 	const grid = async (list: QueryRow[]) =>
 		`<div class="bases-cards-container"${style}>${(await Promise.all(list.map((row) => card(context, row, "bases-cards-item")))).join("")}</div>`;
@@ -605,10 +613,11 @@ async function renderList(
 	groups: QueryGroup[] | undefined,
 ): Promise<string> {
 	const { view, config, renderer, columns } = context;
-	const markers = view.settings.markers;
+	const settings = layoutSettings<"list">(view);
+	const markers = settings.markers;
 	const tag = markers === "number" || markers === "numbers" ? "ol" : "ul";
-	const nested = view.settings.indentProperties === true || view.settings.nestedProperties === true;
-	const separator = typeof view.settings.separator === "string" ? view.settings.separator : ", ";
+	const nested = settings.indentProperties === true || settings.nestedProperties === true;
+	const separator = typeof settings.separator === "string" ? settings.separator : ", ";
 	const item = async (row: QueryRow): Promise<string> => {
 		const [primary, ...rest] = await Promise.all(
 			columns.map((column) => renderer.property(column, row)),
@@ -645,6 +654,7 @@ async function renderKanban(
 	groups: QueryGroup[] | undefined,
 ): Promise<string> {
 	const { view, renderer } = context;
+	const settings = layoutSettings<"kanban">(view);
 	let columns = groups;
 	if (!columns) {
 		renderer.ctx.report(
@@ -653,9 +663,9 @@ async function renderKanban(
 		);
 		columns = [{ value: null, rows }];
 	}
-	if (view.settings.hideEmptyColumns === true)
+	if (settings.hideEmptyColumns === true)
 		columns = columns.filter((column) => column.rows.length > 0);
-	const width = Number(view.settings.columnWidth);
+	const width = Number(settings.columnWidth);
 	const style =
 		Number.isFinite(width) && width > 0 ? ` style="--bases-kanban-column-width: ${width}px"` : "";
 	const lanes = await Promise.all(
@@ -667,202 +677,6 @@ async function renderKanban(
 		}),
 	);
 	return `<div class="bases-kanban"${style}>${lanes.join("")}</div>`;
-}
-
-/** `"lat, lng"` or `[lat, lng]`, as the Maps plugin reads a coordinates property. */
-function coordinatesOf(value: unknown): [number, number] | undefined {
-	const parts =
-		typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : undefined;
-	if (parts?.length !== 2) return undefined;
-	const [lat, lng] = parts.map((part) =>
-		typeof part === "string"
-			? Number(part.trim() || Number.NaN)
-			: typeof part === "number"
-				? part
-				: Number.NaN,
-	);
-	if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-		return undefined;
-	}
-	return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? [lat, lng] : undefined;
-}
-
-/** Shown on a map view, and reported, when the site is built without the map library. */
-const MAP_INSTALL_HINT =
-	"Interactive map views need the optional peer dependency `maplibre-gl`: install it next to rspress-plugin-obsidian (`npm install maplibre-gl`) and rebuild the site.";
-
-/** The stylesheet the map component imports. */
-const MAP_LIBRARY_STYLESHEET = "maplibre-gl/dist/maplibre-gl.css";
-/** MapLibre 6's worker, a module of its own; MapLibre 5 inlines its worker in its main bundle. */
-const MAP_LIBRARY_WORKER = "maplibre-gl/dist/maplibre-gl-worker.mjs";
-
-function resolvesFrom(fromDir: string, specifier: string): boolean {
-	try {
-		createRequire(path.join(fromDir, "noop.js")).resolve(specifier);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
- * Whether `maplibre-gl` resolves from `fromDir`. The default is this package's
- * own directory, where the bundler starts resolving the specifiers the shipped
- * map component imports, so the answer matches what the build will do.
- *
- * It resolves the stylesheet the component imports, not the package's main
- * entry: MapLibre 6 exports that entry under the `import` condition only, so
- * `require.resolve("maplibre-gl")` fails though the bundler finds it, while
- * `dist/*` resolves under any condition, in 5 (no `exports`) and 6 alike.
- */
-export function isMapLibraryInstalled(fromDir: string = moduleDir): boolean {
-	return resolvesFrom(fromDir, MAP_LIBRARY_STYLESHEET);
-}
-
-/**
- * Whether the `maplibre-gl` resolved from `fromDir` runs its worker from a
- * module file of its own (MapLibre 6), which the site's bundler has to emit and
- * the map component has to point MapLibre at.
- */
-export function hasMapLibraryWorkerModule(fromDir: string = moduleDir): boolean {
-	return resolvesFrom(fromDir, MAP_LIBRARY_WORKER);
-}
-
-/**
- * Whether this build draws interactive maps; resolved on first use.
- * Indirected so a test can reproduce a site built without the peer, which
- * is installed in this repository.
- */
-export const mapLibrary: { installed?: boolean } = {};
-
-/**
- * Rsbuild config for the map component. Without `maplibre-gl`: an alias that
- * turns its import into an empty module, so the site still builds and each map
- * view keeps its table. With it: a split chunk for MapLibre's stylesheet, which
- * the component imports lazily. Rspress's own `styles` group (priority 99)
- * pulls every stylesheet, lazy ones included, into the global CSS file, which
- * put MapLibre's ~70 kB of rules in front of every page's first paint; this
- * group outranks it, so the rules ship as an async stylesheet the browser
- * fetches, and applies, before the map chunk runs.
- *
- * Either way it defines `__RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__`, which tells the
- * component whether to have the bundler emit MapLibre 6's worker module: a
- * build-time constant, so the branch referring to that file is dropped, never
- * resolved, when MapLibre 5 (or no MapLibre) is installed.
- */
-export function mapLibraryBuilderConfig(): BuilderConfig {
-	mapLibrary.installed ??= isMapLibraryInstalled();
-	const define = {
-		__RSPRESS_OBSIDIAN_MAPLIBRE_WORKER__: JSON.stringify(
-			mapLibrary.installed && hasMapLibraryWorkerModule(),
-		),
-	};
-	if (!mapLibrary.installed) {
-		return { resolve: { alias: { "maplibre-gl": false } }, source: { define } };
-	}
-	return {
-		source: { define },
-		splitChunks: {
-			cacheGroups: {
-				"obsidian-maplibre-css": {
-					test: /[\\/]maplibre-gl[\\/]dist[\\/]maplibre-gl\.css$/,
-					name: "maplibre-gl",
-					chunks: "async",
-					priority: 100,
-					enforce: true,
-				},
-			},
-		},
-	};
-}
-
-/** A CSS colour as the Maps plugin takes one: hex, a name, a colour function or a custom property. */
-const CSS_COLOR =
-	/^(?:#[\da-f]{3,8}|[a-z]+|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([\w\s.,%/+-]*\)|var\(--[\w-]+\))$/i;
-
-const OSM_ATTRIBUTION = "© [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors";
-
-/** A `mapTiles` setting (one URL or a list) as the URLs a browser may fetch. */
-function tileUrls(value: unknown): string[] {
-	return (Array.isArray(value) ? value : [value])
-		.filter((url): url is string => typeof url === "string")
-		.map((url) => url.trim())
-		.filter((url) => /^(?:https?:)?\/\//i.test(url) || url.startsWith("/"));
-}
-
-interface MapBackground {
-	tiles: string[];
-	tilesDark: string[];
-	/** Inline markdown. */
-	attribution?: string;
-}
-
-/**
- * A view's background, as the Maps plugin picks it: the view's own
- * `mapTiles`, else the site's `bases.mapTiles`, else the plugin's first
- * configured background, else OpenFreeMap. Dark mode falls back to light.
- */
-function mapBackground(
-	view: ViewConfig,
-	options: BasesOptions,
-	vaultRoot: string | undefined,
-): MapBackground {
-	const tileSets =
-		options.readVaultSettings === false
-			? undefined
-			: readObsidianPluginSettings(vaultRoot, "maps")?.tileSets;
-	const vaultSet: unknown = Array.isArray(tileSets) ? tileSets[0] : undefined;
-	const vault =
-		vaultSet && typeof vaultSet === "object"
-			? {
-					tiles: tileUrls("lightTiles" in vaultSet ? vaultSet.lightTiles : undefined),
-					tilesDark: tileUrls("darkTiles" in vaultSet ? vaultSet.darkTiles : undefined),
-				}
-			: undefined;
-	const candidates: Array<MapBackground | undefined> = [
-		{ tiles: tileUrls(view.settings.mapTiles), tilesDark: tileUrls(view.settings.mapTilesDark) },
-		{
-			tiles: tileUrls(options.mapTiles?.tiles),
-			tilesDark: tileUrls(options.mapTiles?.tilesDark),
-			attribution: options.mapTiles?.attribution,
-		},
-		vault,
-	];
-	const background = candidates.find((candidate) => candidate && candidate.tiles.length > 0) ?? {
-		tiles: [DEFAULT_MAP_TILES],
-		tilesDark: [DEFAULT_MAP_TILES_DARK],
-	};
-	const tilesDark = background.tilesDark.length > 0 ? background.tilesDark : background.tiles;
-	const osm = [...background.tiles, ...tilesDark].some((url) =>
-		/\btile\.openstreetmap\.org\//i.test(url),
-	);
-	return {
-		tiles: background.tiles,
-		tilesDark,
-		attribution: background.attribution ?? (osm ? OSM_ATTRIBUTION : undefined),
-	};
-}
-
-/** A numeric view setting, clamped as the Maps plugin clamps it; `fallback` when unset. */
-function zoomSetting(value: unknown, fallback: number, min: number, max: number): number {
-	return typeof value === "number" && Number.isFinite(value)
-		? Math.min(max, Math.max(min, value))
-		: fallback;
-}
-
-/**
- * `center`: a formula (`[48.85, 2.29]`, `this.coordinates`) evaluated with
- * `this`, else the older `"lat, lng"` text; `null` centres on the markers.
- */
-function mapCenter(value: unknown, env: EvalEnv): [number, number] | null {
-	if (Array.isArray(value)) return coordinatesOf(value) ?? null;
-	if (typeof value !== "string" || value.trim() === "") return null;
-	const expression = compileExpression(value);
-	const evaluated =
-		expression instanceof ErrorValue
-			? undefined
-			: coordinatesOf(evaluate(expression, env, new RowScope(env.thisFile)));
-	return evaluated ?? coordinatesOf(value) ?? null;
 }
 
 /** A marker setting's value for a row as text (`icon()` gives its name), or `undefined`. */
@@ -895,16 +709,17 @@ async function renderMap(
 	request: BaseRenderRequest,
 ): Promise<{ html: string; count: number }> {
 	const { view, renderer } = context;
+	const settings = layoutSettings<"map">(view);
 	const { ctx } = renderer;
-	mapLibrary.installed ??= isMapLibraryInstalled();
-	if (!mapLibrary.installed) {
+	const installed = mapLibraryInstalled();
+	if (!installed) {
 		ctx.report(
 			`Map view "${view.name}" renders as a table of its located files. ${MAP_INSTALL_HINT}`,
 			"warn",
 		);
 	}
-	const setting = (key: string): PropertyRef | undefined => {
-		const value = view.settings[key];
+	const setting = (key: LayoutKey<"map">): PropertyRef | undefined => {
+		const value = settings[key];
 		return typeof value === "string" && value.trim() !== "" ? parsePropertyId(value) : undefined;
 	};
 	const coordinates = setting("coordinates");
@@ -927,7 +742,7 @@ async function renderMap(
 				)
 			: undefined;
 		let color = markerSetting(markerColor, row, renderer);
-		if (color && !CSS_COLOR.test(color)) {
+		if (color && !isMarkerColor(color)) {
 			renderer.errors.set(
 				`Map view "${view.name}": marker colour "${color}" is not a CSS colour; the default colour is used`,
 				"warning",
@@ -964,24 +779,15 @@ async function renderMap(
 
 	const background = mapBackground(view, ctx.options.bases, ctx.options.vaultRoot);
 	const attribution =
-		typeof view.settings.mapAttribution === "string"
-			? view.settings.mapAttribution
-			: background.attribution;
+		typeof settings.mapAttribution === "string" ? settings.mapAttribution : background.attribution;
 	const markerProperties = [coordinates, markerIcon, markerColor].filter(
 		(ref) => ref !== undefined,
 	);
-	const minZoom = zoomSetting(view.settings.minZoom, 0, 0, 24);
-	const maxZoom = zoomSetting(view.settings.maxZoom, 18, 0, 24);
 	const config: MapViewConfig = {
-		center: mapCenter(view.settings.center, renderer.env),
-		zoom:
-			typeof view.settings.defaultZoom === "number"
-				? zoomSetting(view.settings.defaultZoom, 0, minZoom, maxZoom)
-				: null,
-		minZoom,
-		maxZoom,
+		center: mapCenter(settings.center, renderer.env),
+		...zoomLevels(settings),
 		// Obsidian sizes an embedded map by `mapHeight`; the base's own page fills its pane.
-		height: request.standalone ? null : zoomSetting(view.settings.mapHeight, 400, 100, 2000),
+		height: request.standalone ? null : zoomSetting(settings.mapHeight, 400, 100, 2000),
 		tiles: background.tiles,
 		tilesDark: background.tilesDark,
 		attribution: attribution ? await renderer.inline(attribution, ctx.currentPage) : "",
@@ -997,7 +803,7 @@ async function renderMap(
 				.map((column) => column.id),
 		],
 	};
-	const hint = mapLibrary.installed
+	const hint = installed
 		? ""
 		: `<div class="bases-warning bases-map-install-hint">${escapeHtmlText(MAP_INSTALL_HINT).replace(/`([^`]+)`/g, "<code>$1</code>")}</div>`;
 	return {

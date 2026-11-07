@@ -67,6 +67,7 @@ const NOT_MEASURABLE: Record<string, string> = {
 		"types only — no executable statements to cover",
 	"src/markdown/obsidian-plugins/templater/options.ts":
 		"types only — no executable statements to cover",
+	"src/shared/index-options.ts": "types only — no executable statements to cover",
 };
 
 interface FileCoverage {

@@ -8,6 +8,7 @@ import { getContentLineFlags } from "../../shared/content-flags.js";
 import { escapeHtmlAttribute } from "../../shared/escape.js";
 import { stripFrontmatter } from "../../shared/frontmatter.js";
 import { extractBlockSection } from "../../shared/transclusion.js";
+import { blankComments } from "../comments.js";
 import { type PageHeading, scanPageHeadings } from "../heading-text.js";
 import { withSiteBase } from "../media.js";
 import {
@@ -18,7 +19,7 @@ import {
 import { resolveHeadingSlug } from "../resolve-wikilink.js";
 import { parseObsidianMarkdown } from "../syntax.js";
 import type { NormalizedPluginOptions, ParsedWikiLink, ResolvedWikiLink } from "../types.js";
-import { blankComments, embedKey, type RenderContext } from "./context.js";
+import { embedKey, type RenderContext } from "./context.js";
 import { treeToHtml } from "./html.js";
 import { createEmbedNode } from "./link-nodes.js";
 
@@ -33,6 +34,12 @@ const MAX_TRANSCLUSION_DEPTH = 5;
  */
 const EMBED_ID_TOKEN = "\uE000embed\uE001";
 
+/** One memoized render: its HTML, and how many formulas it contains. */
+interface TransclusionRender {
+	html: string;
+	math: number;
+}
+
 /**
  * Rendered transclusion HTML, per plugin options object and build generation.
  *
@@ -45,7 +52,7 @@ const EMBED_ID_TOKEN = "\uE000embed\uE001";
  */
 const transclusionRenders = new WeakMap<
 	NormalizedPluginOptions,
-	{ generation: number; renders: Map<string, string> }
+	{ generation: number; renders: Map<string, TransclusionRender> }
 >();
 let transclusionGeneration = 0;
 
@@ -54,10 +61,10 @@ export function clearTransclusionCache(): void {
 	transclusionGeneration += 1;
 }
 
-function transclusionCacheFor(options: NormalizedPluginOptions): Map<string, string> {
+function transclusionCacheFor(options: NormalizedPluginOptions): Map<string, TransclusionRender> {
 	const cached = transclusionRenders.get(options);
 	if (cached && cached.generation === transclusionGeneration) return cached.renders;
-	const renders = new Map<string, string>();
+	const renders = new Map<string, TransclusionRender>();
 	transclusionRenders.set(options, { generation: transclusionGeneration, renders });
 	return renders;
 }
@@ -172,12 +179,19 @@ export async function renderPageEmbed(
 
 		const renders = transclusionCacheFor(ctx.options);
 		const renderKey = [key, String(ctx.depth), [...ctx.visited].sort().join("|")].join("\u0000");
-		let html = renders.get(renderKey);
-		if (html === undefined) {
+		const cached = renders.get(renderKey);
+		let html: string;
+		if (cached) {
+			html = cached.html;
+			// The host page still has to link its math styles for an embed it did
+			// not render this pass.
+			ctx.mathCount.value += cached.math;
+		} else {
 			const tree = parseObsidianMarkdown(section, { enableMath: ctx.options.enableMath });
 			const index = ctx.getContentIndex
 				? await ctx.getContentIndex(targetPage.absolutePath)
 				: ctx.index;
+			const mathBefore = ctx.mathCount.value;
 			await ctx.transform(tree, {
 				...ctx,
 				source: section,
@@ -196,7 +210,7 @@ export async function renderPageEmbed(
 				embedCounter: { value: 0 },
 			});
 			html = treeToHtml(tree, true);
-			renders.set(renderKey, html);
+			renders.set(renderKey, { html, math: ctx.mathCount.value - mathBefore });
 		}
 		ctx.embedCounter.value += 1;
 		const prefix = `${ctx.idPrefix}embed-${ctx.embedCounter.value}-`;

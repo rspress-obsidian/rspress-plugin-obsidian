@@ -76,8 +76,13 @@ const VIEW_KEYS: Record<string, true> = {
 	summaries: true,
 };
 
-/** Settings each layout reads (Layouts/*.md); any other key is reported. */
-const LAYOUT_KEYS: Record<string, Record<string, true>> = {
+/**
+ * Settings each layout reads (Layouts/*.md). This is their one list: `parseView`
+ * reports any other key, and each renderer reads its settings through
+ * {@link layoutSettings}, so a key a renderer reads but nobody declared here is
+ * a type error rather than a warning about valid input.
+ */
+const LAYOUT_KEYS = {
 	table: { columnSize: true, rowHeight: true },
 	cards: { image: true, imageFit: true, imageAspectRatio: true, cardSize: true },
 	list: { markers: true, indentProperties: true, separator: true, nestedProperties: true },
@@ -102,9 +107,22 @@ const LAYOUT_KEYS: Record<string, Record<string, true>> = {
 		mapTilesDark: true,
 		/** Not the Maps plugin's: the credit a published raster background needs. */
 		mapAttribution: true,
-		embeddedHeight: true,
 	},
-};
+} as const satisfies Record<string, Record<string, true>>;
+
+export type LayoutName = keyof typeof LAYOUT_KEYS;
+
+export type LayoutKey<L extends LayoutName> = keyof (typeof LAYOUT_KEYS)[L] & string;
+
+/** The settings of a view of layout `L`, as {@link layoutSettings} reads them. */
+export type SettingsOf<L extends LayoutName> = Partial<Record<LayoutKey<L>, unknown>>;
+
+/** A view's settings, typed to the keys its layout declares in {@link LAYOUT_KEYS}. */
+export function layoutSettings<L extends LayoutName>(view: ViewConfig): SettingsOf<L> {
+	// A Base is user YAML: the keys are unchecked, so the values stay `unknown`
+	// and only the key set is promised. Every read still validates its value.
+	return view.settings as SettingsOf<L>;
+}
 
 /** A YAML mapping as `toJS()` returns it: string keys, values still unchecked. */
 type Mapping = Record<string, unknown>;
@@ -172,7 +190,8 @@ function parseView(raw: unknown, index: number, warnings: string[]): ViewConfig 
 		typeof value.name === "string" || typeof value.name === "number"
 			? String(value.name)
 			: `${type.charAt(0).toUpperCase()}${type.slice(1)}`;
-	const layoutKeys = LAYOUT_KEYS[type] ?? {};
+	const layoutKeys: Record<string, true> =
+		type in LAYOUT_KEYS ? LAYOUT_KEYS[type as LayoutName] : {};
 	const settings: Record<string, unknown> = {};
 	for (const [key, entry] of Object.entries(value)) {
 		if (Object.hasOwn(VIEW_KEYS, key)) continue;

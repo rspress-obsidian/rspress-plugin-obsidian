@@ -906,25 +906,6 @@ describe("canvas plugin options", () => {
 	test("enableDefaultStyles: false leaves the stylesheet out", () => {
 		expect(canvas({ enableDefaultStyles: false }).globalStyles).toBeUndefined();
 	});
-
-	test("warns only when a vault root is set without a file route prefix", () => {
-		const warnings: string[] = [];
-		const originalWarn = console.warn;
-		console.warn = (...args: unknown[]) => {
-			warnings.push(args.join(" "));
-		};
-		try {
-			canvas({ vaultRoot: "/tmp/vault" });
-			canvas({ vaultRoot: "/tmp/vault", fileRoutePrefix: "/vault" });
-			canvas({ fileRoutePrefix: "/vault" });
-			canvas();
-		} finally {
-			console.warn = originalWarn;
-		}
-
-		expect(warnings).toHaveLength(1);
-		expect(warnings[0]).toContain("fileRoutePrefix");
-	});
 });
 
 describe("canvas defaults", () => {

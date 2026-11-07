@@ -8,14 +8,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getContentLineFlags } from "../../../shared/content-flags.js";
 import { parseMomentDate } from "../../../shared/moment-format.js";
-import { blankAllComments } from "../../comments.js";
+import { blankComments } from "../../comments.js";
 import type { ContentIndex, ContentPage } from "../../types.js";
-import { type Day, dayFromParts, dayOfLocalDate, isoDay } from "./dates.js";
+import {
+	COMPACT_DAY,
+	type Day,
+	dayFromParts,
+	dayOfLocalDate,
+	ISO_DAY,
+	isoDay,
+	parseIsoDayParts,
+} from "./dates.js";
 import type { FilenameDates, TaskStatus } from "./settings.js";
-import { type ListEntry, parseListLine, type Task, type TaskFile } from "./task.js";
+import { type ListEntry, parseListLine, startsListItem, type Task, type TaskFile } from "./task.js";
 
 const HEADING_LINE = /^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
-const LIST_START = /^[\s>]*(?:[-*+]|[0-9]+[.)])(?:\s|$)/;
+/** `YYYY-MM-DD`, then `YYYYMMDD`, anywhere in a note's name. */
+const FILENAME_DAY = new RegExp(ISO_DAY, "u");
+const FILENAME_COMPACT_DAY = new RegExp(COMPACT_DAY, "u");
 
 /** What decides which lines are tasks and what they hold: different settings, a different index. */
 export interface TaskParseSettings {
@@ -48,9 +58,10 @@ export function filenameDate(
 		const date = parseMomentDate(basename, settings.format);
 		if (date) return dayOfLocalDate(date);
 	}
-	const match = /(\d{4})-(\d{2})-(\d{2})/.exec(basename) ?? /(\d{4})(\d{2})(\d{2})/.exec(basename);
+	const match = FILENAME_DAY.exec(basename) ?? FILENAME_COMPACT_DAY.exec(basename);
 	if (!match) return undefined;
-	const day = dayFromParts(Number(match[1]), Number(match[2]), Number(match[3]));
+	const { year, month, date } = parseIsoDayParts(match);
+	const day = dayFromParts(year, month, date);
 	return Number.isNaN(day) ? undefined : day;
 }
 
@@ -81,7 +92,7 @@ export function parseNoteTasks(
 	// `<!-- -->` is not on the page); the line as written is the task, so an
 	// inline `%%note%%` stays in its description (as in Tasks) and is hidden
 	// when the description renders.
-	const blanked = blankAllComments(source);
+	const blanked = blankComments(source);
 	const lines = blanked === source ? raw : blanked.split(/\r?\n/);
 	const isContent = getContentLineFlags(raw);
 	const tasks: Task[] = [];
@@ -96,7 +107,7 @@ export function parseNoteTasks(
 			open = [];
 			return;
 		}
-		const entry = LIST_START.test(text)
+		const entry = startsListItem(text)
 			? parseListLine(raw[line] ?? text, {
 					file,
 					line,

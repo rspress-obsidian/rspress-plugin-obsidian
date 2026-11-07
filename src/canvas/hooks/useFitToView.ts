@@ -1,7 +1,8 @@
 import type { RefObject } from "react";
 import { useCallback, useEffect } from "react";
 import type { CanvasData, CanvasNode } from "../types.js";
-import { MIN_ZOOM, type Viewport } from "./usePanZoom.js";
+import { type Viewport, viewportShowing } from "../viewport.js";
+import { MIN_ZOOM } from "./usePanZoom.js";
 
 /** The zoom a fit never exceeds, so a tiny board is not blown up past legibility. */
 export const MAX_FIT_ZOOM = 1.5;
@@ -33,11 +34,11 @@ export function fitViewport(nodes: CanvasNode[], width: number, height: number):
 			),
 		),
 	);
-	return {
-		x: width / 2 - (bounds.minX + (bounds.maxX - bounds.minX) / 2) * zoom,
-		y: height / 2 - (bounds.minY + (bounds.maxY - bounds.minY) / 2) * zoom,
-		zoom,
+	const centre = {
+		x: bounds.minX + (bounds.maxX - bounds.minX) / 2,
+		y: bounds.minY + (bounds.maxY - bounds.minY) / 2,
 	};
+	return viewportShowing(centre, { x: width / 2, y: height / 2 }, zoom);
 }
 
 export interface FitToViewOptions {

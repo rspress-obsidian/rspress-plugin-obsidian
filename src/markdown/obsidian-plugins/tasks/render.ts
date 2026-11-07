@@ -7,26 +7,17 @@
 import { escapeHtmlAttribute, escapeHtmlText, escapeRegExp } from "../../../shared/escape.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentPage, ParsedWikiLink, ResolvedWikiLink } from "../../types.js";
-import { type Day, isoDay, type TaskDate } from "./dates.js";
 import {
-	type Query,
-	type QueryResult,
+	COMPONENTS,
+	DATE_COMPONENTS,
 	TASK_COMPONENTS,
-	type TaskComponent,
-	type TaskGroup,
-	taskCountText,
-} from "./query.js";
+	type TaskComponentSpec,
+} from "./components.js";
+import type { Day, TaskDate } from "./dates.js";
+import { type Query, type QueryResult, type TaskGroup, taskCountText } from "./query.js";
 import type { SearchInfo } from "./query-model.js";
-import {
-	closestParentTask,
-	fileBaseName,
-	type ListEntry,
-	PRIORITY_EMOJI,
-	PRIORITY_NAMES,
-	type Task,
-	type TaskDateField,
-	urgencyOf,
-} from "./task.js";
+import { closestParentTask, fileBaseName, type ListEntry, type Task, urgencyOf } from "./task.js";
+import { priorityTitle } from "./task-fields.js";
 
 /** What rendering needs from the page being built. */
 interface RenderTools {
@@ -38,47 +29,6 @@ interface RenderTools {
 	globalFilter: string;
 	taskCountLocation: "top" | "bottom";
 }
-
-const DATE_COMPONENTS: Record<
-	string,
-	{ field: TaskDateField; emoji: string; className: string; attribute: string }
-> = {
-	createdDate: {
-		field: "created",
-		emoji: "➕",
-		className: "task-created",
-		attribute: "data-task-created",
-	},
-	startDate: { field: "start", emoji: "🛫", className: "task-start", attribute: "data-task-start" },
-	scheduledDate: {
-		field: "scheduled",
-		emoji: "⏳",
-		className: "task-scheduled",
-		attribute: "data-task-scheduled",
-	},
-	dueDate: { field: "due", emoji: "📅", className: "task-due", attribute: "data-task-due" },
-	cancelledDate: {
-		field: "cancelled",
-		emoji: "❌",
-		className: "task-cancelled",
-		attribute: "data-task-cancelled",
-	},
-	doneDate: { field: "done", emoji: "✅", className: "task-done", attribute: "data-task-done" },
-};
-
-const COMPONENT_CLASSES: Record<TaskComponent, string> = {
-	id: "task-id",
-	dependsOn: "task-dependsOn",
-	priority: "task-priority",
-	recurrenceRule: "task-recurring",
-	onCompletion: "task-onCompletion",
-	createdDate: "task-created",
-	startDate: "task-start",
-	scheduledDate: "task-scheduled",
-	dueDate: "task-due",
-	cancelledDate: "task-cancelled",
-	doneDate: "task-done",
-};
 
 /** `today`, `past-3d`, `future-far`…: how far a date is from today, for CSS. */
 function relativeDateAttribute(date: TaskDate, today: Day): string | undefined {
@@ -92,9 +42,9 @@ function relativeDateAttribute(date: TaskDate, today: Day): string | undefined {
 /** The `data-*` attributes Tasks puts on a task's `<li>`: priority and each date's distance. */
 export function taskDataAttributes(task: Task, today: Day): [string, string][] {
 	const attributes: [string, string][] = [
-		["data-task-priority", (PRIORITY_NAMES[task.priority] ?? "Normal").toLowerCase()],
+		["data-task-priority", priorityTitle(task.priority).toLowerCase()],
 	];
-	for (const { field, attribute } of Object.values(DATE_COMPONENTS)) {
+	for (const { field, attribute } of DATE_COMPONENTS) {
 		// Tasks writes nothing for a scheduled date inferred from the file name.
 		if (field === "scheduled" && task.scheduledInferred) continue;
 		const date = task.dates[field];
@@ -106,41 +56,6 @@ export function taskDataAttributes(task: Task, today: Day): [string, string][] {
 
 function attributesHtml(attributes: [string, string][]): string {
 	return attributes.map(([name, value]) => ` ${name}="${escapeHtmlAttribute(value)}"`).join("");
-}
-
-/** A component as Tasks writes it after the description: ` 📅 2024-05-01`, or just the emoji in short mode. */
-function componentText(
-	task: Task,
-	component: TaskComponent,
-	short: boolean,
-): { text: string; full: string } | undefined {
-	const symbolAndValue = (symbol: string, value: string) =>
-		value
-			? { text: short ? ` ${symbol}` : ` ${symbol} ${value}`, full: `${symbol} ${value}` }
-			: undefined;
-	const dateComponent = DATE_COMPONENTS[component];
-	if (dateComponent) {
-		const date = task.dates[dateComponent.field];
-		if (!date) return undefined;
-		return symbolAndValue(
-			dateComponent.emoji,
-			Number.isNaN(date.day) ? "Invalid date" : isoDay(date.day),
-		);
-	}
-	switch (component) {
-		case "priority": {
-			const emoji = PRIORITY_EMOJI[task.priority] ?? "";
-			return emoji ? { text: ` ${emoji}`, full: emoji } : undefined;
-		}
-		case "recurrenceRule":
-			return symbolAndValue("🔁", task.recurrence);
-		case "onCompletion":
-			return symbolAndValue("🏁", task.onCompletion === "ignore" ? "" : task.onCompletion);
-		case "dependsOn":
-			return symbolAndValue("⛔", task.dependsOn.join(","));
-		default:
-			return symbolAndValue("🆔", task.id);
-	}
 }
 
 /**
@@ -249,23 +164,20 @@ class ResultRenderer {
 			: task.description;
 		let text = `<span class="task-description"><span>${await this.tools.renderInline(description, task.file.page)}</span></span>`;
 		for (const component of TASK_COMPONENTS) {
+			const spec: TaskComponentSpec = COMPONENTS[component];
 			if (layout.hidden[component]) continue;
 			if (component === "scheduledDate" && task.scheduledInferred) continue;
-			const rendered = componentText(task, component, short);
+			const rendered = spec.text(task, short);
 			if (!rendered) continue;
-			const dateComponent = DATE_COMPONENTS[component];
-			const date = dateComponent && task.dates[dateComponent.field];
+			const date = spec.date && task.dates[spec.date.field];
 			const relative = date && relativeDateAttribute(date, this.info.today);
 			const spanAttributes: [string, string][] = [];
-			if (dateComponent && relative) spanAttributes.push([dateComponent.attribute, relative]);
+			if (spec.date && relative) spanAttributes.push([spec.date.attribute, relative]);
 			if (component === "priority") {
-				spanAttributes.push([
-					"data-task-priority",
-					(PRIORITY_NAMES[task.priority] ?? "").toLowerCase(),
-				]);
+				spanAttributes.push(["data-task-priority", priorityTitle(task.priority).toLowerCase()]);
 			}
 			if (short) spanAttributes.push(["title", rendered.full]);
-			text += `<span class="${COMPONENT_CLASSES[component]}"${attributesHtml(spanAttributes)}><span>${escapeHtmlText(rendered.text)}</span></span>`;
+			text += `<span class="${spec.className}"${attributesHtml(spanAttributes)}><span>${escapeHtmlText(rendered.text)}</span></span>`;
 		}
 		if (task.blockLink) {
 			text += `<span class="task-block-link"><span>${escapeHtmlText(task.blockLink)}</span></span>`;

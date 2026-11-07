@@ -30,7 +30,7 @@ export interface ResolvedKanbanSettings {
 	dateFormat: string;
 	timeFormat: string;
 	dateDisplayFormat: string;
-	/** Kanban's `date-time-display-format`: a timed date in the metadata table. */
+	/** A timed date in the metadata table: `dateDisplayFormat` and `timeFormat`, as the plugin derives it. */
 	dateTimeDisplayFormat: string;
 	showRelativeDate: boolean;
 	linkDateToDailyNote: boolean;
@@ -57,56 +57,8 @@ export interface ResolvedKanbanSettings {
 	listCollapse: boolean[];
 }
 
-/**
- * The keys Kanban reads as settings when they appear in a board's frontmatter
- * (its `settingKeyLookup`), plus the 1.x `hide-*` keys older boards carry.
- */
-const SETTING_KEYS: Record<string, true> = {
-	[KANBAN_FRONTMATTER_KEY]: true,
-	"append-archive-date": true,
-	"archive-date-format": true,
-	"archive-date-separator": true,
-	"archive-with-date": true,
-	"date-colors": true,
-	"date-display-format": true,
-	"date-format": true,
-	"date-picker-week-start": true,
-	"date-time-display-format": true,
-	"date-trigger": true,
-	"full-list-lane-width": true,
-	"hide-card-count": true,
-	"hide-date-display": true,
-	"hide-date-in-title": true,
-	"hide-tags-display": true,
-	"hide-tags-in-title": true,
-	"inline-metadata-position": true,
-	"lane-width": true,
-	"link-date-to-daily-note": true,
-	"list-collapse": true,
-	"max-archive-size": true,
-	"metadata-keys": true,
-	"move-dates": true,
-	"move-tags": true,
-	"move-task-metadata": true,
-	"new-card-insertion-method": true,
-	"new-line-trigger": true,
-	"new-note-folder": true,
-	"new-note-template": true,
-	"show-add-list": true,
-	"show-archive-all": true,
-	"show-board-settings": true,
-	"show-checkboxes": true,
-	"show-relative-date": true,
-	"show-search": true,
-	"show-set-view": true,
-	"show-view-as-markdown": true,
-	"table-sizing": true,
-	"tag-action": true,
-	"tag-colors": true,
-	"tag-sort": true,
-	"time-format": true,
-	"time-trigger": true,
-};
+/** Settings a board carries that no site option stands for, but the renderer reads. */
+const BOARD_ONLY_SETTING_KEYS = ["metadata-keys", "list-collapse"] as const;
 
 /** The site option that stands for each Kanban setting. */
 const OPTION_SETTING_KEYS: Record<string, string> = {
@@ -135,6 +87,16 @@ const OPTION_SETTING_KEYS: Record<string, string> = {
 	showCheckboxes: "show-checkboxes",
 };
 
+/**
+ * The settings a board's frontmatter may set: the ones `resolveKanbanSettings`
+ * reads, whether through a site option or not.
+ */
+const SETTING_KEYS: ReadonlySet<string> = new Set([
+	KANBAN_FRONTMATTER_KEY,
+	...Object.values(OPTION_SETTING_KEYS),
+	...BOARD_ONLY_SETTING_KEYS,
+]);
+
 const VIEWS: Record<string, KanbanView> = {
 	board: "board",
 	basic: "board",
@@ -158,7 +120,7 @@ export function boardSettingsLayer(
 ): KanbanSettingsLayer {
 	const layer: KanbanSettingsLayer = { ...footer };
 	for (const [key, value] of Object.entries(frontmatter)) {
-		if (SETTING_KEYS[key]) layer[key] = value;
+		if (SETTING_KEYS.has(key)) layer[key] = value;
 	}
 	return layer;
 }
