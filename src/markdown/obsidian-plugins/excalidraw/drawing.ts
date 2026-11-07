@@ -30,7 +30,7 @@ import {
 } from "./scene.js";
 import { applyDisplayText, firstLink, parseElementText } from "./text.js";
 
-/** The `setPublishedFileRoutes` kind of a plain `.excalidraw` file's page. */
+/** The `FileRoutes` kind of a plain `.excalidraw` file's page. */
 export const FILE_ROUTE_KIND = "excalidraw";
 
 /** A drawing, read from a `.excalidraw.md` note or a plain `.excalidraw` file. */

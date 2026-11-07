@@ -135,7 +135,6 @@ function budgetOf(env: EvalEnv): WorkBudget {
 	return budget;
 }
 
-/** The value of `ref` for `row`. */
 export function propertyValue(ref: PropertyRef, env: EvalEnv, row: RowScope): Value {
 	if (ref.kind === "formula") return evaluateFormula(ref.name, env, row);
 	const file = row.file;
