@@ -534,7 +534,7 @@ interface ContentIndex {
   byAssetPathCI: Map<string, ContentAsset[]>;
   byAssetBaseNameCI: Map<string, ContentAsset[]>;
   backlinks: Map<string, BacklinkRef[]>;     // Built during indexing
-  unpublishedPaths: ReadonlySet<string>;      // Pages dropped for publish: false
+  unpublishedPaths: ReadonlySet<string>;      // `publish: false` pages, normalized absolute paths
   linkedIndexes?: ContentIndex[];            // The other tree on the site
 }
 ```

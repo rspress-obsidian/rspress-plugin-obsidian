@@ -3094,30 +3094,41 @@ describe("publish: false route exclusion", () => {
 	const publishFalseRoot = path.resolve(process.cwd(), "test/markdown/fixtures/publish-false");
 
 	/** The slice of rspress's route service this hook touches. */
-	function fakeRouteService(files: string[]) {
+	function fakeRouteService(files: string[], windowsPaths = false) {
 		const routeData = new Map(
-			files.map((file, index) => [
-				`/page-${index}`,
-				{ routeMeta: { absolutePath: path.join(publishFalseRoot, file) } },
-			]),
+			files.map((file, index) => {
+				const absolutePath = path.join(publishFalseRoot, file);
+				return [
+					`/page-${index}`,
+					{
+						routeMeta: {
+							absolutePath: windowsPaths ? absolutePath.replaceAll("/", "\\") : absolutePath,
+						},
+					},
+				];
+			}),
 		);
 		return { routeData };
 	}
 
-	async function excludedFiles(): Promise<string[]> {
+	async function excludedFiles(windowsPaths = false): Promise<string[]> {
 		const { markdown } = await import("../../src/markdown/index");
 		const plugin = markdown();
 		const configFn = plugin.config as unknown as (config: Record<string, unknown>) => unknown;
 		configFn({ root: publishFalseRoot });
-		const service = fakeRouteService(["draft.md", "live.md"]);
+		const service = fakeRouteService(["draft.md", "live.md"], windowsPaths);
 		await plugin.routeServiceGenerated?.(service as never, false);
 		return [...service.routeData.values()].map((page) =>
-			path.basename(page.routeMeta?.absolutePath ?? ""),
+			path.basename((page.routeMeta?.absolutePath ?? "").replaceAll("\\", "/")),
 		);
 	}
 
 	test("removes the route of a page marked publish: false", async () => {
 		expect(await excludedFiles()).toEqual(["live.md"]);
+	});
+
+	test("removes the route when the host spells the path with backslashes", async () => {
+		expect(await excludedFiles(true)).toEqual(["live.md"]);
 	});
 
 	test("leaves a page without the marker routed", async () => {

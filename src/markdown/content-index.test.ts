@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import os from "node:os";
 import path from "node:path";
 import { caseSensitiveFilesystem } from "../../test/case-sensitive-fs.js";
+import { normalizeFsPath } from "../shared/route-path.ts";
 import { buildContentIndex, getCachedContentIndex } from "./content-index.ts";
 import { getMentions } from "./mentions.ts";
 
@@ -112,7 +113,9 @@ describe("frontmatter parsing", () => {
 				// `publish: false` still drops the page from the index entirely,
 				// and records its path so the route hook can drop the route.
 				expect(index.pages.map((entry) => entry.relativePath)).toEqual(["note.md"]);
-				expect(index.unpublishedPaths).toEqual(new Set([path.join(root, "draft.md")]));
+				expect(index.unpublishedPaths).toEqual(
+					new Set([normalizeFsPath(path.join(root, "draft.md"))]),
+				);
 			},
 		);
 	});

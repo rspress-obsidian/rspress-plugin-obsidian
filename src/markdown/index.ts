@@ -17,7 +17,7 @@ import {
 	attachPublishedContent,
 	type PublishedContentConfig,
 } from "../shared/published-content.js";
-import type { DocsRouteLocales } from "../shared/route-path.js";
+import { type DocsRouteLocales, normalizeFsPath } from "../shared/route-path.js";
 import {
 	blankCommentRanges,
 	filterCommentedToc,
@@ -626,7 +626,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 			const { docs } = await getIndexes().both;
 			for (const [routePath, page] of [...routeService.routeData]) {
 				const absolutePath = page.routeMeta?.absolutePath;
-				if (absolutePath && docs.unpublishedPaths.has(absolutePath)) {
+				if (absolutePath && docs.unpublishedPaths.has(normalizeFsPath(absolutePath))) {
 					routeService.routeData.delete(routePath);
 				}
 			}

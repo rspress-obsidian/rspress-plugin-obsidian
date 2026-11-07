@@ -516,9 +516,10 @@ export interface ContentIndex {
 	pages: ContentPage[];
 	assets: ContentAsset[];
 	/**
-	 * Absolute paths of pages that were indexed and then dropped for
-	 * `publish: false`. The route hook removes their routes from this set
-	 * instead of re-reading every page's frontmatter for the same answer.
+	 * Normalized absolute paths (forward slashes, as `normalizeFsPath` writes
+	 * them) of pages that were indexed and then dropped for `publish: false`.
+	 * The route hook normalizes the route's path the same way and removes the
+	 * route, instead of re-reading every page's frontmatter for the answer.
 	 */
 	unpublishedPaths: ReadonlySet<string>;
 	byAbsolutePath: Map<string, ContentPage>;

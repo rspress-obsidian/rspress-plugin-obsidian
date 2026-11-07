@@ -226,7 +226,7 @@ async function buildContentIndexFromFiles(
 			if (result.value.publish) {
 				pages.push(result.value);
 			} else {
-				unpublishedPaths.push(result.value.absolutePath);
+				unpublishedPaths.push(normalizeFsPath(result.value.absolutePath));
 			}
 		} else {
 			console.warn(
