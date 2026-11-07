@@ -8,6 +8,9 @@ import {
 	compileExpression,
 	type EvalEnv,
 	evaluate,
+	meanOf,
+	medianOf,
+	numbersOf,
 	parsePropertyId,
 	propertyValue,
 	RowScope,
@@ -160,33 +163,23 @@ function groupRows(
 	return view.groupOrder.map((label) => byLabel.get(label) ?? { value: label, rows: [] });
 }
 
-function numbers(values: Value[]): number[] {
-	return values.filter(
-		(value): value is number => typeof value === "number" && !Number.isNaN(value),
-	);
-}
-
-function mean(list: number[]): number | null {
-	return list.length === 0 ? null : list.reduce((total, value) => total + value, 0) / list.length;
-}
-
 /** The summaries every view offers (Bases syntax.md, "Default Summary Formulas"). Averages show two decimals. */
 const DEFAULT_SUMMARIES: Record<string, (values: Value[]) => Value> = {
 	Average: (values) => {
-		const average = mean(numbers(values));
+		const average = meanOf(numbersOf(values));
 		return average === null ? null : Math.round(average * 100) / 100;
 	},
 	Min: (values) => {
-		const list = numbers(values);
+		const list = numbersOf(values);
 		return list.length === 0 ? null : Math.min(...list);
 	},
 	Max: (values) => {
-		const list = numbers(values);
+		const list = numbersOf(values);
 		return list.length === 0 ? null : Math.max(...list);
 	},
-	Sum: (values) => numbers(values).reduce((total, value) => total + value, 0),
+	Sum: (values) => numbersOf(values).reduce((total, value) => total + value, 0),
 	Range: (values) => {
-		const list = numbers(values);
+		const list = numbersOf(values);
 		if (list.length > 0) return Math.max(...list) - Math.min(...list);
 		const times = values.flatMap((value) => {
 			const date = value === null ? undefined : asDate(value);
@@ -196,19 +189,12 @@ const DEFAULT_SUMMARIES: Record<string, (values: Value[]) => Value> = {
 			? null
 			: new DurationValue(0, Math.max(...times) - Math.min(...times));
 	},
-	Median: (values) => {
-		const list = numbers(values).sort((a, b) => a - b);
-		if (list.length === 0) return null;
-		const middle = Math.floor(list.length / 2);
-		return list.length % 2 === 1
-			? (list[middle] ?? null)
-			: ((list[middle - 1] ?? 0) + (list[middle] ?? 0)) / 2;
-	},
+	Median: (values) => medianOf(values),
 	Stddev: (values) => {
-		const list = numbers(values);
-		const average = mean(list);
+		const list = numbersOf(values);
+		const average = meanOf(list);
 		if (average === null) return null;
-		const deviation = Math.sqrt(mean(list.map((value) => (value - average) ** 2)) ?? 0);
+		const deviation = Math.sqrt(meanOf(list.map((value) => (value - average) ** 2)) ?? 0);
 		return Math.round(deviation * 100) / 100;
 	},
 	Earliest: (values) => earliestOrLatest(values, -1),

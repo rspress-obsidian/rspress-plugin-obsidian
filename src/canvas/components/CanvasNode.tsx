@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { memo, useMemo } from "react";
-import { isSameSiteUrl } from "../../shared/media-html.js";
+import { isSameSiteUrl, parsePdfSubpath } from "../../shared/media-html.js";
+import { stripMarkdownFormatting } from "../../shared/slug.js";
 import { extractNoteSection } from "../../shared/transclusion.js";
 import { DEFAULT_IFRAME_SANDBOX } from "../constants.js";
 import type { CanvasFileData, CanvasLinks, CanvasNode } from "../types.js";
@@ -64,15 +65,8 @@ export function cardLabel(node: CanvasNode): string {
 		case "text": {
 			const lines = node.text.split(/\r?\n/).map((line) => line.trim());
 			const heading = lines.find((line) => /^#{1,6}\s/.test(line));
-			const first = heading ?? lines.find(Boolean) ?? "";
-			const plain = first
-				.replace(/^#{1,6}\s+/, "")
-				.replace(
-					/!?\[\[([^\]|]+)\|?([^\]]*)\]\]/g,
-					(_m, target: string, alias: string) => alias || target,
-				)
-				.replace(/[*_`=~>]/g, "")
-				.trim();
+			const first = (heading ?? lines.find(Boolean) ?? "").replace(/^#{1,6}\s+/, "");
+			const plain = stripMarkdownFormatting(first);
 			return plain.length > 80 ? `${plain.slice(0, 79)}…` : plain || "Text card";
 		}
 		case "file":
@@ -311,7 +305,7 @@ function FileContent({
 				</>
 			);
 		case "pdf": {
-			const page = node.subpath?.match(/^#page=(\d+)$/i)?.[1];
+			const { page } = parsePdfSubpath((node.subpath ?? "").slice(1));
 			const src = url ? `${url}${page ? `#page=${page}` : ""}` : null;
 			return (
 				<>

@@ -4,6 +4,7 @@
  * one element's.
  */
 import type { Op } from "roughjs/bin/core";
+import { elementKind } from "./element-types.js";
 import type { ExcalidrawElement, Point } from "./scene.js";
 import { rotatePoint, shaftOps } from "./shapes.js";
 
@@ -76,8 +77,6 @@ function curveBounds(ops: readonly Op[], transform: (point: Point) => Point): Bo
 		: [0, 0, 0, 0];
 }
 
-const LINEAR: Record<string, true> = { line: true, arrow: true };
-
 /** The box of a linear element: its drawn curve, not just its points. */
 function linearCoords(element: ExcalidrawElement): Coords {
 	const [minX, minY, maxX, maxY] =
@@ -114,9 +113,24 @@ export function arrowLabelPosition(arrow: ExcalidrawElement, label: ExcalidrawEl
 	return [middle[0] - label.width / 2, middle[1] - label.height / 2];
 }
 
+/**
+ * Top-left of a text bound to a container: an arrow places its label along
+ * itself when the drawing renders, from the label's own size; every other
+ * container has already written the position it wants.
+ */
+export function placeBoundText(
+	text: ExcalidrawElement,
+	container: ExcalidrawElement | undefined,
+): Point {
+	return container && elementKind(container.type).label === "arrow"
+		? arrowLabelPosition(container, text)
+		: [text.x, text.y];
+}
+
 /** An element's unrotated box and centre (`getElementAbsoluteCoords`). */
 export function elementCoords(element: ExcalidrawElement, elements: ElementsById): Coords {
-	if (element.type === "freedraw") {
+	const kind = elementKind(element.type);
+	if (kind.bounds === "freedraw") {
 		const [minX, minY, maxX, maxY] = pointsBounds(element.points);
 		const x1 = minX + element.x;
 		const y1 = minY + element.y;
@@ -124,12 +138,10 @@ export function elementCoords(element: ExcalidrawElement, elements: ElementsById
 		const y2 = maxY + element.y;
 		return [x1, y1, x2, y2, (x1 + x2) / 2, (y1 + y2) / 2];
 	}
-	if (LINEAR[element.type]) return linearCoords(element);
+	if (kind.bounds === "linear") return linearCoords(element);
 	const container = element.containerId ? elements.get(element.containerId) : undefined;
 	const [x, y] =
-		element.type === "text" && container?.type === "arrow"
-			? arrowLabelPosition(container, element)
-			: [element.x, element.y];
+		kind.paint === "text" ? placeBoundText(element, container) : [element.x, element.y];
 	return [
 		x,
 		y,
@@ -143,8 +155,9 @@ export function elementCoords(element: ExcalidrawElement, elements: ElementsById
 /** An element's axis-aligned bounds with its rotation applied (`ElementBounds.calculateBounds`). */
 export function elementBounds(element: ExcalidrawElement, elements: ElementsById): Bounds {
 	const [x1, y1, x2, y2, cx, cy] = elementCoords(element, elements);
+	const kind = elementKind(element.type);
 	const centre: Point = [cx, cy];
-	if (element.type === "freedraw") {
+	if (kind.bounds === "freedraw") {
 		const [minX, minY, maxX, maxY] = pointsBounds(
 			element.points.map((point) =>
 				rotatePoint(point, [cx - element.x, cy - element.y], element.angle),
@@ -152,7 +165,7 @@ export function elementBounds(element: ExcalidrawElement, elements: ElementsById
 		);
 		return [minX + element.x, minY + element.y, maxX + element.x, maxY + element.y];
 	}
-	if (LINEAR[element.type]) {
+	if (kind.bounds === "linear") {
 		if (element.points.length < 2) {
 			const [px, py] = element.points[0] ?? [0, 0];
 			const [x, y] = rotatePoint([element.x + px, element.y + py], centre, element.angle);
@@ -172,7 +185,7 @@ export function elementBounds(element: ExcalidrawElement, elements: ElementsById
 			Math.max(bounds[3], ly + text.height),
 		];
 	}
-	if (element.type === "ellipse") {
+	if (kind.bounds === "ellipse") {
 		const w = (x2 - x1) / 2;
 		const h = (y2 - y1) / 2;
 		const cos = Math.cos(element.angle);
@@ -182,7 +195,7 @@ export function elementBounds(element: ExcalidrawElement, elements: ElementsById
 		return [cx - ww, cy - hh, cx + ww, cy + hh];
 	}
 	const corners: Point[] =
-		element.type === "diamond"
+		kind.bounds === "diamond"
 			? [
 					[cx, y1],
 					[cx, y2],

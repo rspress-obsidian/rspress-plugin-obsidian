@@ -3,8 +3,10 @@
  * presets and `{{query.file.*}}` placeholders included), run over the vault's
  * tasks, and explained, the way the Tasks plugin does each step.
  */
+
+import type { Day } from "../../../shared/day.js";
 import { isStackOverflow, STACK_OVERFLOW_MESSAGE } from "../../interpreter-limits.js";
-import type { Day } from "./dates.js";
+import { COMPONENT_OPTIONS, type TaskComponent } from "./components.js";
 import { DEFAULT_COMPARATORS, parseFilter, parseGrouper, parseSorter } from "./fields.js";
 import {
 	explainFilter,
@@ -20,37 +22,6 @@ import type { Task } from "./task.js";
 
 /** The most instructions a query's presets may expand to. */
 const MAX_PRESET_INSTRUCTIONS = 10_000;
-
-/** The task fields `hide`/`show` toggle, in the order Tasks prints them. */
-export const TASK_COMPONENTS = [
-	"id",
-	"dependsOn",
-	"priority",
-	"recurrenceRule",
-	"onCompletion",
-	"createdDate",
-	"startDate",
-	"scheduledDate",
-	"dueDate",
-	"cancelledDate",
-	"doneDate",
-] as const;
-
-export type TaskComponent = (typeof TASK_COMPONENTS)[number];
-
-const COMPONENT_BY_OPTION: Record<string, TaskComponent> = {
-	"cancelled date": "cancelledDate",
-	"created date": "createdDate",
-	"depends on": "dependsOn",
-	"done date": "doneDate",
-	"due date": "dueDate",
-	id: "id",
-	"on completion": "onCompletion",
-	priority: "priority",
-	"recurrence rule": "recurrenceRule",
-	"scheduled date": "scheduledDate",
-	"start date": "startDate",
-};
 
 interface QueryLayout {
 	hideBacklinks: boolean;
@@ -394,7 +365,7 @@ export function parseQuery(source: string, context: QueryContext): Query {
 			const hide = (showHide[1] ?? "").toLowerCase() === "hide";
 			const option = (showHide[2] ?? "").toLowerCase();
 			const flag = Object.entries(LAYOUT_BY_OPTION).find(([key]) => option.startsWith(key));
-			const component = Object.entries(COMPONENT_BY_OPTION).find(([key]) => option.startsWith(key));
+			const component = COMPONENT_OPTIONS.find(([key]) => option.startsWith(key));
 			if (flag) {
 				query.layout[flag[1]] = hide;
 			} else if (component) {

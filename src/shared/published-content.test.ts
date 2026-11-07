@@ -153,13 +153,11 @@ describe("published content", () => {
 
 		expect(findPublishedContent(firstConfig)).toMatchObject({
 			docsRoot: first.docs,
-			vaultRoot: first.vault,
-			vaultRoutePrefix: "/vault",
+			vault: { root: first.vault, routePrefix: "/vault" },
 		});
 		expect(findPublishedContent(secondConfig)).toMatchObject({
 			docsRoot: second.docs,
-			vaultRoot: second.vault,
-			vaultRoutePrefix: "/notes",
+			vault: { root: second.vault, routePrefix: "/notes" },
 		});
 		expect(edgesFrom(await build(firstPlugins, firstConfig, first), "/")).toEqual(["/vault/Plan"]);
 		expect(edgesFrom(await build(secondPlugins, secondConfig, second), "/")).toEqual([
@@ -189,7 +187,7 @@ describe("published content", () => {
 		const plugins = [preset, graphview({ onUnresolvedLink: "ignore" })];
 		const config = await configure(plugins, { root: site.docs });
 
-		expect(findPublishedContent(config)).toMatchObject({ vaultRoutePrefix: "/kb" });
+		expect(findPublishedContent(config)).toMatchObject({ vault: { routePrefix: "/kb" } });
 		expect(edgesFrom(await build(plugins, config, site), "/")).toEqual(["/kb/Plan"]);
 	});
 
@@ -248,10 +246,10 @@ describe("published content", () => {
 		await plugin.addPages?.(config, true);
 
 		const published = findPublishedContent(config);
-		if (!published?.vaultRoot || !published.vaultIndexOptions)
-			throw new Error("no vault published");
+		if (!published?.vault) throw new Error("no vault published");
+		const { vault: publishedVault } = published;
 		const docs = await getCachedContentIndex(published.docsRoot, published.docsIndexOptions);
-		const vault = await getCachedContentIndex(published.vaultRoot, published.vaultIndexOptions);
+		const vault = await getCachedContentIndex(publishedVault.root, publishedVault.indexOptions);
 		expect(docs.linkedIndexes).toBeUndefined();
 		expect(vault.linkedIndexes).toBeUndefined();
 	});

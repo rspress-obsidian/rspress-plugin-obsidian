@@ -3,9 +3,10 @@
  * site's `tasks` options, with Tasks' own defaults underneath.
  */
 
+import type { Day } from "../../../shared/day.js";
 import type { NormalizedPluginOptions } from "../../types.js";
 import { readObsidianPluginSettings } from "../settings.js";
-import { type Day, dayOfLocalDate, resolveToday } from "./dates.js";
+import { dayOfLocalDate, resolveToday } from "./dates.js";
 import type { TasksStatusType } from "./options.js";
 
 /** The upstream plugin id, which names its settings folder. */

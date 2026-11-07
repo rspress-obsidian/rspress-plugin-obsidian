@@ -7,9 +7,10 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isMermaidInstalled } from "../../../mermaid/install.js";
-import { escapeRegExp, sanitizeUrl } from "../../../shared/escape.js";
+import { sanitizeUrl } from "../../../shared/escape.js";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
 import { extensionOf, IMAGE_EXTS, PDF_EXT } from "../../../shared/media-exts.js";
+import { extractNoteSection } from "../../../shared/transclusion.js";
 import { withSiteBase } from "../../media.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import type { ContentPage, ResolvedWikiLink, WikiSubpath } from "../../types.js";
@@ -29,7 +30,7 @@ import {
 } from "./scene.js";
 import { applyDisplayText, firstLink, parseElementText } from "./text.js";
 
-/** The `setPublishedFileRoutes` kind of a plain `.excalidraw` file's page. */
+/** The `FileRoutes` kind of a plain `.excalidraw` file's page. */
 export const FILE_ROUTE_KIND = "excalidraw";
 
 /** A drawing, read from a `.excalidraw.md` note or a plain `.excalidraw` file. */
@@ -218,32 +219,16 @@ function selectCrop(
 function noteSection(content: string, subpath: WikiSubpath | undefined): string | undefined {
 	const body = stripFrontmatter(content).replace(/\r\n?/g, "\n");
 	if (!subpath) return body.trim();
-	const lines = body.split("\n");
-	if (subpath.kind === "block") {
-		const marker = new RegExp(`\\s\\^${escapeRegExp(subpath.value)}\\s*$`);
-		const index = lines.findIndex((line) => marker.test(line));
-		if (index === -1) return undefined;
-		let start = index;
-		while (start > 0 && lines[start - 1]?.trim()) start -= 1;
-		return lines
-			.slice(start, index + 1)
-			.join("\n")
-			.replace(marker, "")
-			.trim();
-	}
-	const wanted = (subpath.value.split("#").pop() ?? "").trim().toLowerCase();
-	const start = lines.findIndex((line) => {
-		const heading = /^(#{1,6})\s+(.*?)\s*#*$/.exec(line);
-		return heading?.[2]?.trim().toLowerCase() === wanted;
-	});
-	if (start === -1) return undefined;
-	const depth = /^#+/.exec(lines[start] ?? "")?.[0].length ?? 1;
-	let end = start + 1;
-	while (end < lines.length && !new RegExp(`^#{1,${depth}}\\s`).test(lines[end] ?? "")) end += 1;
-	return lines
-		.slice(start + 1, end)
-		.join("\n")
-		.trim();
+	const section = extractNoteSection(
+		body,
+		subpath.kind === "block" ? `^${subpath.value}` : subpath.value,
+	);
+	if (section === undefined) return undefined;
+	if (subpath.kind === "block") return section.trim();
+	// The text element supplies its own heading, so the section's heading line
+	// is not repeated inside the drawing.
+	const bodyStart = section.indexOf("\n");
+	return (bodyStart < 0 ? "" : section.slice(bodyStart + 1)).trim();
 }
 
 /** The diagnostic mode a broken link takes, as the rest of the plugin reports one. */

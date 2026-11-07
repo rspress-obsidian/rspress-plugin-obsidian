@@ -4979,6 +4979,15 @@ describe("KaTeX stylesheet per page", () => {
 		overrides: Partial<NormalizedPluginOptions> = {},
 		href: string | null = HREF,
 	): Promise<{ links: unknown[]; imports: number; styles: number }> {
+		return compileWith({ ...DEFAULT_OPTIONS, enableMath: true, ...overrides }, name, href);
+	}
+
+	/** {@link compile} over one options object, so two calls share the embed memo. */
+	async function compileWith(
+		options: NormalizedPluginOptions,
+		name: string,
+		href: string | null = HREF,
+	): Promise<{ links: unknown[]; imports: number; styles: number }> {
 		const processor = unified()
 			.use(remarkParse)
 			.use(remarkGfm)
@@ -4992,7 +5001,7 @@ describe("KaTeX stylesheet per page", () => {
 			})
 			.use(remarkWikilink, {
 				getDocsRoot: () => root,
-				options: { ...DEFAULT_OPTIONS, enableMath: true, ...overrides },
+				options,
 				...(href && { getKatexStylesheetHref: () => href }),
 			});
 		const filePath = path.join(root, name);
@@ -5024,6 +5033,12 @@ describe("KaTeX stylesheet per page", () => {
 
 	test("a page whose only math is an embed's links it too", async () => {
 		expect((await compile("Embeds.md", { enableTransclusion: true })).links).toEqual([HREF]);
+	});
+
+	test("a later page reusing an embed's memoized render still links it", async () => {
+		const options = { ...DEFAULT_OPTIONS, enableMath: true, enableTransclusion: true };
+		expect((await compileWith(options, "Embeds.md")).links).toEqual([HREF]);
+		expect((await compileWith(options, "Embeds.md")).links).toEqual([HREF]);
 	});
 
 	test("a board a plugin renders whole keeps Rspress's imports and links it for its cards", async () => {

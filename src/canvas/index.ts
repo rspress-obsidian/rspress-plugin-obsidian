@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { docsRootOf } from "../docs-root.js";
 import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
 import { removeAllComments } from "../markdown/comments.js";
 import {
@@ -11,7 +12,8 @@ import {
 } from "../markdown/content-index.js";
 import { linkContentIndexes } from "../markdown/linked-indexes.js";
 import { parseWikiLink } from "../markdown/parse-wikilink.js";
-import { resolveWikiLink } from "../markdown/resolve-wikilink.js";
+import { publicDirectoryPlugin } from "../markdown/public-dir.js";
+import { resolvePageSubpath, resolveWikiLink } from "../markdown/resolve-wikilink.js";
 import type { ContentAsset, ContentIndex, ContentPage, ResolveContext } from "../markdown/types.js";
 import {
 	type DirectoryListings,
@@ -31,10 +33,14 @@ import { NOTE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
 import { stripFrontmatter } from "../shared/frontmatter.js";
 import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
 import { normalizeFilePathKey } from "../shared/paths.js";
-import { findPublishedContent, type PublishedContentConfig } from "../shared/published-content.js";
+import { withPluginListed } from "../shared/plugin-channel.js";
+import {
+	DEFAULT_RESOLVE_OPTIONS,
+	findPublishedContent,
+	type PublishedContentConfig,
+} from "../shared/published-content.js";
 import { normalizeFsPath, normalizeRoutePrefix } from "../shared/route-path.js";
-import { extractBlockSection, extractHeadingSection } from "../shared/transclusion.js";
-import { DEFAULT_IFRAME_SANDBOX } from "./constants.js";
+import { CANVAS_JSON_DIR, DEFAULT_IFRAME_SANDBOX } from "./constants.js";
 import { parseCanvas } from "./parser.js";
 import type {
 	CanvasData,
@@ -46,12 +52,9 @@ import type {
 } from "./types.js";
 import { canvasLinkKey, normalizeAssetKey } from "./utils/asset-key.js";
 import { normalizeSiteBase } from "./utils/base.js";
-import { anchorHref, collectMarkdownTargets } from "./utils/markdown.js";
+import { collectMarkdownTargets } from "./utils/markdown.js";
 
 const LOG_PREFIX = "[rspress-plugin-obsidian:canvas]";
-
-/** URL directory (under the site base) the published board JSON is served from. */
-export const CANVAS_JSON_DIR = "__canvases__";
 
 /**
  * Transclusion depth the client renders before it falls back to a link (see
@@ -356,19 +359,25 @@ async function resolveFileNode(
 		const key = await registerNote(page, context, maps);
 		if (!key) return { resolved: { kind: "missing" } };
 		const route = `/${page.routePath.replace(/^\/+/, "")}`;
-		const resolved: CanvasResolvedFile = { kind, key, href: anchorHref(route, node.subpath) };
-		if (node.subpath) {
+		// The card links the anchor the page actually renders (an explicit id, a
+		// duplicate heading's `-1` slug, a block id), not one the card derives.
+		const anchor = node.subpath?.replace(/^#/, "") ?? "";
+		const subpath = anchor
+			? {
+					kind: anchor.startsWith("^") ? ("block" as const) : ("heading" as const),
+					value: anchor.startsWith("^") ? anchor.slice(1) : anchor,
+				}
+			: undefined;
+		const section = subpath ? resolvePageSubpath(page, subpath) : undefined;
+		const resolved: CanvasResolvedFile = {
+			kind,
+			key,
+			href: section ? `${route}#${section.fragment}` : route,
+		};
+		if (subpath && !section) {
 			// The whole note stays on the card when the subpath names nothing (the
 			// documented fallback); the card says so and links to the note itself.
-			const anchor = node.subpath.replace(/^#/, "");
-			const body = maps.notes[key] ?? "";
-			const section = anchor.startsWith("^")
-				? extractBlockSection(body, anchor.slice(1))
-				: extractHeadingSection(body, anchor);
-			if (anchor && section === undefined) {
-				resolved.missingSubpath = true;
-				resolved.href = route;
-			}
+			resolved.missingSubpath = true;
 		}
 		return { resolved, note: page };
 	}
@@ -529,7 +538,7 @@ function sharedTree(
 	const root = normalizeFsPath(path.resolve(vaultRoot));
 	const sameRoot = (candidate: string | undefined) =>
 		candidate !== undefined && normalizeFsPath(path.resolve(candidate)) === root;
-	if (published.vaultIndexOptions && sameRoot(published.vaultRoot)) return "vault";
+	if (published.vault && sameRoot(published.vault.root)) return "vault";
 	return sameRoot(published.docsRoot) ? "docs" : undefined;
 }
 
@@ -539,10 +548,9 @@ async function loadVaultIndex(
 	fileRoutePrefix: string | undefined,
 	published: PublishedContentConfig | undefined,
 ): Promise<{ index: ContentIndex; resolveOptions: ResolveContext["options"] }> {
-	const resolveOptions = {
-		enableCaseInsensitiveLookup: published?.enableCaseInsensitiveLookup ?? true,
-		enableFuzzyMatching: published?.enableFuzzyMatching ?? false,
-	};
+	const resolveOptions = published
+		? { ...published.resolveOptions, fileRoutes: published.fileRoutes }
+		: DEFAULT_RESOLVE_OPTIONS;
 	// Sharing the Markdown plugin's indexes (and its options) means a card link
 	// resolves to exactly the route the note page was published at, and — as on
 	// a note page — falls back to the site's other tree.
@@ -550,8 +558,8 @@ async function loadVaultIndex(
 	if (published && tree) {
 		const [docs, vault] = await Promise.all([
 			getCachedContentIndex(published.docsRoot, published.docsIndexOptions),
-			published.vaultRoot && published.vaultIndexOptions
-				? getCachedContentIndex(published.vaultRoot, published.vaultIndexOptions)
+			published.vault
+				? getCachedContentIndex(published.vault.root, published.vault.indexOptions)
 				: undefined,
 		]);
 		const linked = linkContentIndexes(docs, vault);
@@ -579,7 +587,7 @@ async function scanBoards(
 	const tree = sharedTree(vaultRoot, published);
 	const excludeFolders = (
 		(tree === "vault"
-			? published?.vaultIndexOptions?.excludeFolders
+			? published?.vault?.indexOptions.excludeFolders
 			: tree === "docs"
 				? published?.docsIndexOptions.excludeFolders
 				: undefined) ?? []
@@ -644,6 +652,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		include: options?.include || ["**/*.canvas"],
 		exclude: [...DEFAULT_EXCLUDES, ...(options?.exclude ?? [])],
 		fileRoutePrefix: options?.fileRoutePrefix,
+		defaultFileRoutePrefix: options?.defaultFileRoutePrefix,
 		linkPreview: options?.linkPreview ?? true,
 		editable: options?.editable || false,
 		editorTitle: options?.editorTitle || "Canvas editor",
@@ -654,11 +663,6 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		enableDefaultStyles: options?.enableDefaultStyles ?? true,
 		outDir: path.resolve(process.cwd(), options?.outDir ?? DEFAULT_OUT_DIR),
 	};
-	if (options?.vaultRoot && !options.fileRoutePrefix) {
-		console.warn(
-			`${LOG_PREFIX} \`vaultRoot\` is set without \`fileRoutePrefix\`: canvas file cards link to \`/Note\`-style routes while the markdown plugin publishes vault pages under its own prefix (e.g. \`/vault/Note\`). Set \`fileRoutePrefix\` to that prefix to avoid broken links.`,
-		);
-	}
 	// Published (from dist/canvas.js / dist/canvas.cjs): chunks live at
 	// dist/canvas/components/*.js. Dev (src/canvas/index.ts): sibling
 	// components/*.tsx.
@@ -690,14 +694,15 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		...mermaidConfig,
 		// Cards typeset their math in the browser, which loads KaTeX's stylesheet
 		// from this public directory first.
-		plugins: [...(mermaidConfig.plugins ?? []), deferInvalidationPlugin, katexStylesheetPlugin()],
-		source: { ...mermaidConfig.source, define },
-		server: {
-			...mermaidConfig.server,
+		plugins: [
+			...(mermaidConfig.plugins ?? []),
+			deferInvalidationPlugin,
+			katexStylesheetPlugin(),
 			// Rsbuild concatenates this with Rspress's own `<root>/public`, serving
 			// both in dev and copying both into the build output.
-			publicDir: [{ name: resolvedOptions.outDir, copyOnBuild: true, watch: false }],
-		},
+			publicDirectoryPlugin("rspress-plugin-obsidian:canvas", resolvedOptions.outDir),
+		],
+		source: { ...mermaidConfig.source, define },
 	};
 
 	// The boards the latest scan published, read back by the markdown and graph
@@ -708,13 +713,8 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		name: "rspress-plugin-obsidian:canvas",
 		...(resolvedOptions.enableDefaultStyles && { globalStyles: stylePath }),
 		builderConfig,
-		// The markdown and graph features find this plugin in `config.plugins`,
-		// the only plugin list a hook sees. A plugin added with `utils.addPlugin`
-		// from another plugin's `config` hook runs without being listed there, so
-		// it lists itself — on a copy, leaving the caller's config untouched.
 		config(config) {
-			const listed = config.plugins ?? [];
-			return listed.includes(plugin) ? config : { ...config, plugins: [...listed, plugin] };
+			return withPluginListed(config, plugin);
 		},
 		async addPages(config, _isProd) {
 			define.__RSPRESS_OBSIDIAN_CANVAS_BASE__ = JSON.stringify(normalizeSiteBase(config.base));
@@ -722,9 +722,18 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			// `config.root` rule `rootDir` uses below. `process.cwd()` was the
 			// old default, but that is usually the project root one level above
 			// the content, so an out-of-the-box `canvas()` found nothing.
-			const vaultRoot =
-				resolvedOptions.vaultRoot ?? path.resolve(process.cwd(), config.root ?? "docs");
+			const vaultRoot = resolvedOptions.vaultRoot ?? docsRootOf(config);
 			const published = findPublishedContent(config);
+			// A canvas scanning the vault the markdown plugin publishes links file
+			// cards through that plugin's prefix: the caller's own prefix only
+			// overrides it. A vault the caller names but no markdown plugin
+			// publishes still has a conventional prefix; a canvas over mere docs
+			// pages has none.
+			const tree = sharedTree(vaultRoot, published);
+			const fileRoutePrefix =
+				resolvedOptions.fileRoutePrefix ??
+				(tree === "vault" ? published?.vault?.routePrefix : undefined) ??
+				(tree === undefined ? resolvedOptions.defaultFileRoutePrefix : undefined);
 			// Started before this hook's first `await`: Rspress calls every
 			// plugin's `addPages` in one go, so any sibling that asks for the
 			// boards from its own `addPages` already gets this scan's promise.
@@ -742,18 +751,14 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			// Earlier versions wrote board JSON into the site's own `public/`; left
 			// there it would keep publishing deleted boards and, in dev, shadow
 			// the fresh copies.
-			const rootDir = path.resolve(process.cwd(), config.root ?? "docs");
+			const rootDir = docsRootOf(config);
 			await rm(path.join(rootDir, "public", CANVAS_JSON_DIR), { recursive: true, force: true });
 			// The output directory is rebuilt from scratch: a board or attachment
 			// removed from the vault must stop being published.
 			await rm(resolvedOptions.outDir, { recursive: true, force: true });
 			await mkdir(resolvedOptions.outDir, { recursive: true });
 
-			const { index, resolveOptions } = await loadVaultIndex(
-				vaultRoot,
-				resolvedOptions.fileRoutePrefix,
-				published,
-			);
+			const { index, resolveOptions } = await loadVaultIndex(vaultRoot, fileRoutePrefix, published);
 			const context: PublishContext = {
 				vaultRoot,
 				index,
@@ -797,7 +802,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 				// JSON copy, rather than every route chunk embedding it again.
 				const props = {
 					src: board.source,
-					fileRoutePrefix: resolvedOptions.fileRoutePrefix,
+					fileRoutePrefix,
 					linkPreview: resolvedOptions.linkPreview,
 					editable: resolvedOptions.editable,
 					editorTitle: resolvedOptions.editorTitle,

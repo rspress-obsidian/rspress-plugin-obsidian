@@ -1,8 +1,8 @@
 import type { PointerEvent, RefObject } from "react";
 import { useCallback, useRef, useState } from "react";
 import type { CanvasData, CanvasNode } from "../types.js";
+import type { Viewport } from "../viewport.js";
 import type { CanvasEditor, NodeMove } from "./useCanvasEditor.js";
-import type { Viewport } from "./usePanZoom.js";
 
 /**
  * Movement, in screen pixels, after which a pointer press on a card becomes a
@@ -143,20 +143,17 @@ export function useNodeGesture({
 				})
 				.filter((move): move is NodeMove => move !== null);
 			// One entry for the whole gesture, however many nodes moved with it.
-			if (moves.length) commit({ type: "move", moves }, current);
+			if (moves.length) commit({ type: "move", moves });
 		}
 		if (resize) {
 			const node = current.nodes.find((item) => item.id === resize.id);
 			if (node && (node.width !== resize.originX || node.height !== resize.originY)) {
-				commit(
-					{
-						type: "resize",
-						id: resize.id,
-						from: { width: resize.originX, height: resize.originY },
-						to: { width: node.width, height: node.height },
-					},
-					current,
-				);
+				commit({
+					type: "resize",
+					id: resize.id,
+					from: { width: resize.originX, height: resize.originY },
+					to: { width: node.width, height: node.height },
+				});
 			}
 		}
 	}, [canvasRef, commit]);

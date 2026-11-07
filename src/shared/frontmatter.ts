@@ -93,6 +93,21 @@ export function parseFrontmatter(markdown: string): ParsedFrontmatter {
 }
 
 /**
+ * Obsidian's `publish` property: a page is published unless the property says
+ * otherwise. `false`, `"false"`, `"no"` and `0` all mean "keep this in the
+ * vault"; anything else — including a missing property — publishes it.
+ */
+export function isPublishedProperty(value: unknown): boolean {
+	if (typeof value === "boolean") return value;
+	if (typeof value === "string") {
+		const lowered = value.trim().toLowerCase();
+		return !(lowered === "false" || lowered === "no" || lowered === "0");
+	}
+	if (typeof value === "number") return value !== 0;
+	return true;
+}
+
+/**
  * Drop a leading frontmatter block (see {@link frontmatterLength}) and return
  * the body byte-for-byte; a document without one is returned unchanged.
  * Deliberately byte-exact — the callers (transclusion, canvas note reading, the

@@ -27,10 +27,11 @@ import {
 	pdfEmbedHtml,
 	webEmbedHtml,
 } from "../shared/media-html.js";
+import { normalizeFilePathKey } from "../shared/paths.js";
+import { normalizeFsPath } from "../shared/route-path.js";
 import { humanizeBaseName } from "../shared/slug.js";
 import { assetUrlPath } from "./content-index.js";
 import type { ContentIndex, ParsedWikiLink } from "./types.js";
-import { normalizeFilePathKey, normalizeFsPath } from "./utils.js";
 import { visit } from "./visit.js";
 
 /** What media rendering needs from the page being compiled. */

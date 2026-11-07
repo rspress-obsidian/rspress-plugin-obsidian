@@ -10,7 +10,7 @@ import { unified } from "unified";
 import { VFile } from "vfile";
 import { toMarkdownMathHandlers } from "../../test/markdown/math-element";
 import { createCanvasBoards } from "../shared/canvas-routes.js";
-import { normalizeLookupValue } from "../shared/slug.js";
+import { pushNamedPage } from "./content-index.ts";
 import { remarkWikilink } from "./remark-wikilink.ts";
 import type {
 	ContentAsset,
@@ -160,8 +160,8 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 		push(byFilePathKeyCI, page.filePathKey.toLowerCase(), page);
 		push(byBaseName, page.baseName, page);
 		push(byBaseNameCI, page.baseName.toLowerCase(), page);
-		if (page.title) push(byTitle, normalizeLookupValue(page.title), page);
-		for (const alias of page.aliases) push(byAlias, normalizeLookupValue(alias), page);
+		if (page.title) pushNamedPage(byTitle, page.title, page);
+		for (const alias of page.aliases) pushNamedPage(byAlias, alias, page);
 	}
 
 	const byAssetPath = new Map<string, ContentAsset>();
@@ -179,6 +179,7 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 		rootDir: "/vault",
 		pages,
 		assets,
+		unpublishedPaths: new Set(),
 		byAbsolutePath,
 		byPathKey,
 		byFilePathKey,
@@ -188,7 +189,6 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 		byTag: new Map(),
 		byAssetPath,
 		byAssetBaseName,
-		byPathKeyCI: new Map(),
 		byFilePathKeyCI,
 		byBaseNameCI,
 		byAssetPathCI,

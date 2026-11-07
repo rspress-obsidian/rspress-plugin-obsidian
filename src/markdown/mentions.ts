@@ -10,7 +10,7 @@
  * so it must not import that module's fence helpers back.
  */
 import { normalizeUnicode } from "../shared/slug.js";
-import { blankAllComments } from "./comments.js";
+import { blankComments } from "./comments.js";
 import { baseIndexOf } from "./linked-indexes.js";
 import type { ContentIndex, ContentPage } from "./types.js";
 
@@ -53,13 +53,13 @@ const TABLE_DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/;
 /**
  * Strip frontmatter, fenced blocks, inline code, comments and table syntax; keep
  * prose. Comments are the page's own (`%%` and `<!-- -->`, see
- * {@link blankAllComments}), so commented-out text never becomes a snippet.
+ * {@link blankComments}), so commented-out text never becomes a snippet.
  */
 export function stripMentionText(markdown: string): string {
 	const kept: string[] = [];
 	let fence: string | null = null;
 
-	for (const line of stripLeadingFrontmatter(blankAllComments(markdown)).split(/\r?\n/)) {
+	for (const line of stripLeadingFrontmatter(blankComments(markdown)).split(/\r?\n/)) {
 		const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
 		if (fenceMatch) {
 			const marker = fenceMatch[1] ?? "";

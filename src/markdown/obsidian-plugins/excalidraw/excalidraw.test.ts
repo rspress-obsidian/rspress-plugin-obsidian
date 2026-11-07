@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { findPublishedFileRoute, publishedFileRoutes } from "../../../shared/file-routes.js";
 import { excalidrawFeature } from "./index.js";
 import { stagingDir } from "./publish.js";
 import {
@@ -12,6 +11,7 @@ import {
 	makeVault,
 	PNG,
 	sceneJson,
+	testFileRoutes,
 	vaultIndex,
 	vaultOptions,
 } from "./test-helpers.js";
@@ -225,7 +225,7 @@ describe("plain .excalidraw files", () => {
 				content: `---\ntitle: "Plain"\n---\n\n{/* excalidraw-file: "Plain.excalidraw" */}\n`,
 			},
 		]);
-		expect(findPublishedFileRoute(path.join(root, "Plain.excalidraw"))?.routePath).toBe(
+		expect(testFileRoutes.find(path.join(root, "Plain.excalidraw"))?.routePath).toBe(
 			"/vault/Plain.excalidraw",
 		);
 		// The drawing's image is staged where the content index serves it.
@@ -245,7 +245,7 @@ describe("plain .excalidraw files", () => {
 		const page = await compile(root, path.join(temp, "temp-1.mdx"), options, index);
 		expect(page.html).toContain('<div class="excalidraw-drawing"><svg');
 		expect(page.html).toContain('<a href="/vault/Target">');
-		expect(publishedFileRoutes("excalidraw")).toHaveLength(1);
+		expect(testFileRoutes.byKind("excalidraw")).toHaveLength(1);
 	});
 
 	test("a note that claims a plain drawing's route keeps it", async () => {

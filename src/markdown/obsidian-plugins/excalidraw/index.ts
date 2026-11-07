@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { Code, Html, RootContent } from "mdast";
 import { escapeHtmlAttribute, escapeHtmlText } from "../../../shared/escape.js";
-import { publishedFileRoutes, setPublishedFileRoutes } from "../../../shared/file-routes.js";
+import {
+	backOfNoteEnd,
+	EXCALIDRAW_DATA_TITLE,
+	EXCALIDRAW_HEADINGS,
+} from "../../../shared/excalidraw-data.js";
 import { extensionOf } from "../../../shared/media-exts.js";
 import { withSiteBase } from "../../media.js";
 import { mirrorFiles } from "../../mirror-files.js";
@@ -18,7 +22,6 @@ import {
 	isDrawingFile,
 	loadDrawing,
 } from "./drawing.js";
-import { backOfNoteEnd } from "./drawing-file.js";
 import { excalidrawFontsDir } from "./fonts.js";
 import {
 	exportedImages,
@@ -107,9 +110,9 @@ function generatedDrawing(
 	ctx: PluginRenderContext,
 ): { absolutePath: string; page: ContentPage } | undefined {
 	const source = markedDrawing(ctx.source);
-	const route = publishedFileRoutes(FILE_ROUTE_KIND).find(
-		(candidate) => candidate.source === source,
-	);
+	const route = ctx.fileRoutes
+		?.byKind(FILE_ROUTE_KIND)
+		.find((candidate) => candidate.source === source);
 	if (!route) return undefined;
 	return {
 		absolutePath: route.absolutePath,
@@ -122,15 +125,6 @@ function generatedDrawing(
 		},
 	};
 }
-
-/** The plugin's own headings: where a drawing note's outline stops being the author's. */
-const DATA_HEADINGS: Record<string, true> = {
-	"Excalidraw Data": true,
-	"Text Elements": true,
-	"Element Links": true,
-	"Embedded Files": true,
-	Drawing: true,
-};
 
 /** The page data Rspress derives from a note's source, which for a drawing is its raw data. */
 interface PageData {
@@ -147,9 +141,9 @@ interface PageData {
  */
 async function cleanDrawingPage(page: PageData, search: boolean): Promise<void> {
 	if (!(await isDrawingFile(page._filepath))) return;
-	if (page.title === "Excalidraw Data")
+	if (page.title === EXCALIDRAW_DATA_TITLE)
 		page.title = path.basename(page._filepath).replace(/\.md$/i, "");
-	const cut = page.toc.findIndex((heading) => DATA_HEADINGS[heading.text.trim()]);
+	const cut = page.toc.findIndex((heading) => EXCALIDRAW_HEADINGS.has(heading.text.trim()));
 	if (cut !== -1) page.toc = page.toc.slice(0, cut);
 	if (!search || !page.content) return;
 	const words = await loadDrawing(page._filepath).then(
@@ -324,7 +318,7 @@ export const excalidrawFeature: ObsidianPluginFeature = {
 
 	async addPages(ctx) {
 		const routes = plainDrawingRoutes(ctx);
-		setPublishedFileRoutes(FILE_ROUTE_KIND, routes);
+		ctx.resolveOptions.fileRoutes.set(FILE_ROUTE_KIND, routes);
 		const settings = resolveSettings(ctx.options);
 		await mirrorFiles(
 			stagingDir(ctx.options),

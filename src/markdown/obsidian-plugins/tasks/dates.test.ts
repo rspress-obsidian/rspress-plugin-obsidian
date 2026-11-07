@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { dayFromParts } from "../../../shared/day.ts";
 import {
 	compareTaskDates,
-	dayFromParts,
 	formatDay,
 	isoDay,
 	parseDateRange,

@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "../../shared/usePathname.js";
 import type { GraphViewGroup } from "../types.js";
+import GraphFab from "./components/GraphFab.js";
 import GraphIcon from "./components/GraphIcon.js";
 import ZoomButton from "./components/ZoomButton.js";
-import { DEFAULT_GRAPH_FILTERS, MAX_DEPTH } from "./deriveGraphViewData.js";
-import GraphSettings, { type GraphFilterSettings } from "./GraphSettings.js";
+import {
+	clampDepth,
+	DEFAULT_FILTER_SETTINGS,
+	type GraphFilterSettings,
+} from "./deriveGraphViewData.js";
+import GraphSettings from "./GraphSettings.js";
 import GraphView, {
 	type GraphViewColors,
 	type GraphViewHandle,
@@ -28,6 +33,7 @@ import {
 	readDisplaySettings,
 	readForceSettings,
 } from "./graph-settings.js";
+import { injectStyles } from "./keyframes.js";
 
 interface GraphPanelProps {
 	defaultOpen?: boolean;
@@ -51,30 +57,18 @@ const SECONDARY_TEXT = "var(--rp-c-text-2, #475569)";
 /** Pause in typing, in ms, after which the search box's query reaches the graph. */
 export const SEARCH_DEBOUNCE_MS = 200;
 
-const DEFAULT_FILTER_SETTINGS: GraphFilterSettings = {
-	scope: DEFAULT_GRAPH_FILTERS.scope,
-	depth: DEFAULT_GRAPH_FILTERS.depth,
-	incoming: DEFAULT_GRAPH_FILTERS.incoming,
-	outgoing: DEFAULT_GRAPH_FILTERS.outgoing,
-	neighborLinks: DEFAULT_GRAPH_FILTERS.neighborLinks,
-	showTags: DEFAULT_GRAPH_FILTERS.showTags,
-	showAttachments: DEFAULT_GRAPH_FILTERS.showAttachments,
-	existingOnly: DEFAULT_GRAPH_FILTERS.existingOnly,
-	showOrphans: DEFAULT_GRAPH_FILTERS.showOrphans,
-};
-
 /** Stored filter toggles, each validated; unknown or malformed fields keep their default. */
 function readFilterSettings(value: unknown): GraphFilterSettings {
 	const stored: Record<string, unknown> = value && typeof value === "object" ? { ...value } : {};
-	const flag = (key: keyof GraphFilterSettings) => {
+	const flag = (key: keyof GraphFilterSettings): boolean => {
 		const raw = stored[key];
-		return typeof raw === "boolean" ? raw : (DEFAULT_FILTER_SETTINGS[key] as boolean);
+		return typeof raw === "boolean" ? raw : DEFAULT_FILTER_SETTINGS[key] === true;
 	};
 	return {
 		scope: stored.scope === "global" ? "global" : "local",
 		depth:
 			typeof stored.depth === "number" && Number.isFinite(stored.depth)
-				? Math.min(MAX_DEPTH, Math.max(1, Math.round(stored.depth)))
+				? clampDepth(stored.depth)
 				: DEFAULT_FILTER_SETTINGS.depth,
 		incoming: flag("incoming"),
 		outgoing: flag("outgoing"),
@@ -122,39 +116,16 @@ function writeStored(key: string, value: string): void {
 	}
 }
 
-function injectKeyframes() {
-	if (typeof document === "undefined") return;
-	if (document.getElementById(STYLE_ID)) return;
-	const style = document.createElement("style");
-	style.id = STYLE_ID;
-	style.textContent = `
-    @keyframes gv-fab-pulse {
-      0%, 100% { box-shadow: 0 2px 16px rgba(99,102,241,0.35), 0 0 0 0 rgba(99,102,241,0.3); }
-      50% { box-shadow: 0 4px 20px rgba(99,102,241,0.5), 0 0 0 6px rgba(99,102,241,0); }
-    }
+const PANEL_KEYFRAMES = `
     @keyframes gv-panel-enter {
       from { opacity: 0; transform: scale(0.92) translateY(8px); }
       to { opacity: 1; transform: scale(1) translateY(0); }
-    }
-    @keyframes gv-fab-spin-in {
-      from { transform: rotate(-90deg) scale(0.8); opacity: 0; }
-      to { transform: rotate(0deg) scale(1); opacity: 1; }
     }
     @keyframes gv-accent-shimmer {
       0% { background-position: -200% 0; }
       100% { background-position: 200% 0; }
     }
-    @keyframes gv-spinner {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-    @keyframes gv-tooltip-in {
-      from { opacity: 0; transform: translateY(3px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
   `;
-	document.head.appendChild(style);
-}
 
 export default function GraphPanel({
 	defaultOpen = false,
@@ -304,9 +275,7 @@ export default function GraphPanel({
 		e.currentTarget.style.cursor = "grab";
 	}, []);
 
-	useEffect(() => {
-		injectKeyframes();
-	}, []);
+	useEffect(() => injectStyles(STYLE_ID, PANEL_KEYFRAMES), []);
 
 	useEffect(() => {
 		const updateSize = () => {
@@ -475,80 +444,15 @@ export default function GraphPanel({
 
 	return (
 		<>
-			<button
+			<GraphFab
 				ref={fabRef}
-				type="button"
+				label={isOpen ? "Close graph view" : "Open graph view"}
+				open={isOpen}
+				hidden={isFullscreen}
 				onClick={handleToggle}
-				aria-controls={PANEL_ID}
-				aria-expanded={isOpen}
-				// Fullscreen only fades the FAB out; without this it stays in the tab
-				// order and is announced while invisible.
-				aria-hidden={isFullscreen}
-				tabIndex={isFullscreen ? -1 : 0}
-				style={{
-					position: "fixed",
-					bottom: 24,
-					right: 24,
-					zIndex: 9999,
-					width: 48,
-					height: 48,
-					borderRadius: "50%",
-					border: "none",
-					background: "linear-gradient(135deg, #3f3f3f 0%, #262626 50%, #3f3f3f 100%)",
-					color: "#fff",
-					cursor: isFullscreen ? "default" : "pointer",
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "center",
-					opacity: isFullscreen ? 0 : 1,
-					pointerEvents: isFullscreen ? "none" : "auto",
-					animation: isFullscreen ? "none" : "gv-fab-pulse 3s ease-in-out infinite",
-					transition: "transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease",
-				}}
-				onMouseEnter={(e) => {
-					if (isFullscreen) return;
-					e.currentTarget.style.transform = "scale(1.12)";
-					e.currentTarget.style.animationPlayState = "paused";
-				}}
-				onMouseLeave={(e) => {
-					if (isFullscreen) return;
-					e.currentTarget.style.transform = "scale(1)";
-					e.currentTarget.style.animationPlayState = "running";
-				}}
-				aria-label={isOpen ? "Close graph view" : "Open graph view"}
-			>
-				<svg
-					aria-hidden="true"
-					width="20"
-					height="20"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					strokeWidth="2"
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					style={{
-						animation: isOpen ? "none" : "gv-fab-spin-in 0.4s ease-out",
-						filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.2))",
-					}}
-				>
-					{isOpen ? (
-						<>
-							<line x1="18" y1="6" x2="6" y2="18" />
-							<line x1="6" y1="6" x2="18" y2="18" />
-						</>
-					) : (
-						<>
-							<circle cx="5" cy="6" r="2.5" />
-							<circle cx="19" cy="6" r="2.5" />
-							<circle cx="12" cy="18" r="2.5" />
-							<line x1="7.5" y1="6" x2="16.5" y2="6" />
-							<line x1="6.5" y1="8" x2="10.5" y2="16" />
-							<line x1="17.5" y1="8" x2="13.5" y2="16" />
-						</>
-					)}
-				</svg>
-			</button>
+				ariaControls={PANEL_ID}
+				ariaExpanded={isOpen}
+			/>
 
 			<div
 				ref={wrapperRef}

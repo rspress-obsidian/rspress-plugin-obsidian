@@ -4,12 +4,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { RspressPlugin } from "@rspress/core";
 import { deferInvalidationPlugin } from "../dev-invalidation.js";
+import { docsRootOf } from "../docs-root.js";
 import { KATEX_STYLESHEET_PATH, katexStylesheetPlugin } from "../katex-stylesheet.js";
 import { mermaidBuilderConfig } from "../mermaid/install.js";
 import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { findCanvasBoards } from "../shared/canvas-routes.js";
 import { getContentLineFlags } from "../shared/content-flags.js";
-import { parseFrontmatter } from "../shared/frontmatter.js";
+import { createFileRoutes } from "../shared/file-routes.js";
+import type { ContentIndexOptions } from "../shared/index-options.js";
+import { withPluginListed } from "../shared/plugin-channel.js";
 import {
 	attachPublishedContent,
 	type PublishedContentConfig,
@@ -17,47 +20,40 @@ import {
 import type { DocsRouteLocales } from "../shared/route-path.js";
 import {
 	blankCommentRanges,
-	COMMENT_DELIMITER,
 	filterCommentedToc,
 	findCommentRanges,
+	hasComments,
 } from "./comments.js";
-import {
-	type ContentIndex,
-	type ContentIndexOptions,
-	getCachedContentIndex,
-} from "./content-index.js";
+import { type ContentIndex, getCachedContentIndex } from "./content-index.js";
 import { generateDailyNoteCalendar } from "./daily-notes.js";
 import { scanPageHeadings } from "./heading-text.js";
 import { linkContentIndexes } from "./linked-indexes.js";
 import { isPluginOwnedImageUrl } from "./media.js";
-import { mirrorFiles } from "./mirror-files.js";
 import { normalizePluginOptions } from "./normalize-options.js";
 import {
 	enabledPluginFeatures,
 	mergeBuilderConfigs,
 	type PluginBuildContext,
 } from "./obsidian-plugins/index.js";
+import { pathUnderRoot } from "./path-containment.js";
 import { publicDirectoryPlugin } from "./public-dir.js";
 import { rehypeRawForMdx } from "./rehype-raw-mdx.js";
 import { remarkWikilink } from "./remark-wikilink.js";
 import { isPluginOwnedMarkdownDestination } from "./render/markdown-links.js";
 import { clearTransclusionCache } from "./render/transclusion.js";
-import { resolveWikiLink } from "./resolve-wikilink.js";
 import { generateTagPages } from "./tag-pages.js";
 import type {
-	ContentAsset,
 	RemarkPluginFactory,
 	RemarkWikiLinkPluginOptions,
 	RspressPluginMarkdownOptions,
 } from "./types.js";
-import { isPathInsideRoot, pathUnderRoot } from "./utils.js";
-
-// Destinations a page links: a markdown link or image (`](url)`, `](<url>)`)
-// and an HTML `src`/`href` attribute.
-const SITE_URL_PATTERN = /\]\(\s*(?:<([^>\n]+)>|([^)\s]+))|\b(?:src|href)\s*=\s*["']([^"']+)["']/g;
+import { syncAssets, vaultFileForSiteUrl } from "./vault-assets.js";
 
 export type { MathEngine } from "../math.js";
 export type { MermaidSecurityLevel } from "../mermaid/classes.js";
+export type { CanvasBoards } from "../shared/canvas-routes.js";
+export type { PublishedFileRoute } from "../shared/file-routes.js";
+export type { ContentIndexOptions } from "../shared/index-options.js";
 export { formatMomentDate as formatDailyNoteDate } from "../shared/moment-format.js";
 export type { BacklinkRef } from "./backlinks.js";
 export {
@@ -67,7 +63,6 @@ export {
 } from "./backlinks.js";
 export {
 	buildContentIndex,
-	type ContentIndexOptions,
 	getCachedContentIndex,
 } from "./content-index.js";
 export {
@@ -108,7 +103,7 @@ export type {
 	TemplaterFolderTemplate,
 	TemplaterOptions,
 } from "./obsidian-plugins/templater/options.js";
-export { extractPageLinks, type PageLinks } from "./page-links.js";
+export { extractPageLinks, type PageLinkOptions, type PageLinks } from "./page-links.js";
 export { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
 export { remarkWikilink } from "./remark-wikilink.js";
 export { resolveWikiLink } from "./resolve-wikilink.js";
@@ -119,6 +114,7 @@ export {
 } from "./tag-pages.js";
 export type {
 	BlockEntry,
+	CacheLink,
 	ContentAsset,
 	ContentIndex,
 	ContentPage,
@@ -135,29 +131,10 @@ export type {
 	ResolvedWikiLink,
 	ResolveStatus,
 	RspressPluginMarkdownOptions,
+	WikiLinkCandidate,
 	WikilinkMatch,
 	WikiSubpath,
 } from "./types.js";
-
-/**
- * Whether a page's own frontmatter marks it as not-for-publication.
- *
- * Obsidian reads `publish: false` as "keep this in the vault, don't put it on
- * the site". The vault side of that is handled by the content index; this covers
- * the docs tree, where Rspress would otherwise route the file like any other.
- */
-async function isUnpublishedFile(absolutePath: string): Promise<boolean> {
-	if (!/\.mdx?$/i.test(absolutePath)) return false;
-	try {
-		const markdown = await fs.readFile(absolutePath, "utf8");
-		const { data } = parseFrontmatter(markdown);
-		return data.publish === false;
-	} catch {
-		// Unreadable or malformed frontmatter: the page keeps its route, and the
-		// frontmatter pass reports the problem where it always has.
-		return false;
-	}
-}
 
 // Resolved at module load time. Candidates cover the published bundle
 // (`dist/markdown.css`) and the source layout (`src/markdown/styles.css`).
@@ -224,9 +201,7 @@ function rewriteOutline(page: {
 }): void {
 	const raw = page._flattenContent ?? "";
 	if (!raw) return;
-	const source = raw.includes(COMMENT_DELIMITER)
-		? blankCommentRanges(raw, findCommentRanges(raw))
-		: raw;
+	const source = hasComments(raw) ? blankCommentRanges(raw, findCommentRanges(raw)) : raw;
 	const lines = source.split(/\r?\n/);
 	const headings = scanPageHeadings(lines, getContentLineFlags(lines));
 	const outline = headings.filter((h) => h.topLevel && h.depth >= 2 && h.depth <= 4);
@@ -300,7 +275,7 @@ function rewriteOutline(page: {
  */
 export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlugin {
 	const normalizedOptions = normalizePluginOptions(options);
-	let docsRoot = path.resolve(process.cwd(), "docs");
+	let docsRoot = docsRootOf(undefined);
 	let siteBase = "/";
 
 	let locales: DocsRouteLocales = {};
@@ -309,6 +284,9 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 	// settles once the canvas scan Rspress runs beside our `addPages` is done.
 	let sitePlugins: readonly unknown[] | undefined;
 	const canvasBoards = () => findCanvasBoards({ plugins: sitePlugins });
+	// Files features publish as pages (`.base` views, drawings) and where each
+	// is shown; one registry per build, so two sites in one process never share.
+	const fileRoutes = createFileRoutes();
 	const { vaultRoot, vaultRoutePrefix } = normalizedOptions;
 	// The reproduced Obsidian plugins this site turned on (Tasks, Kanban, …).
 	const features = enabledPluginFeatures(normalizedOptions);
@@ -345,11 +323,12 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 	// the `config.root` and locales the hooks below learned.
 	const publishedContent = (): PublishedContentConfig => ({
 		docsRoot,
-		vaultRoot,
-		vaultRoutePrefix,
+		vault: vaultRoot
+			? { root: vaultRoot, routePrefix: vaultRoutePrefix, indexOptions: vaultIndexOptions }
+			: undefined,
 		docsIndexOptions: docsIndexOptions(),
-		vaultIndexOptions: vaultRoot ? vaultIndexOptions : undefined,
-		...resolveOptions,
+		resolveOptions,
+		fileRoutes,
 	});
 
 	// Attachments are staged outside the docs tree and served as an extra
@@ -422,96 +401,16 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 	const getIndexForFile = (filePath: string): Promise<ContentIndex> =>
 		vaultRoot && isVaultFile(filePath) ? getIndexes().vault : getIndexes().docs;
 
-	/**
-	 * The vault file a root-absolute site URL names (`/vault/media/x.png` →
-	 * `<vaultRoot>/media/x.png`), or `undefined` when the URL is outside the
-	 * vault prefix, escapes the vault, or names a dotfile — which is never
-	 * published.
-	 */
-	const vaultFileForSiteUrl = (url: string): string | undefined => {
-		if (!vaultRoot) return undefined;
-		const prefix = `/${vaultRoutePrefix.replace(/^\/+|\/+$/g, "")}/`;
-		let decoded = url.split(/[?#]/)[0] ?? "";
-		try {
-			decoded = decodeURIComponent(decoded);
-		} catch {
-			return undefined;
-		}
-		if (!decoded.startsWith(prefix)) return undefined;
-		const segments = decoded.slice(prefix.length).split("/");
-		if (segments.some((segment) => segment === "" || segment.startsWith("."))) return undefined;
-		const file = path.join(vaultRoot, ...segments);
-		return isPathInsideRoot(file, vaultRoot) ? file : undefined;
-	};
-
-	/**
-	 * Publish exactly the attachments a published page references — an embed, a
-	 * wikilink, a markdown link or image, a frontmatter property link — from
-	 * either tree. Vault attachments are served under `vaultRoutePrefix`. A
-	 * docs-root attachment under `public/` is already served by Rspress; any
-	 * other docs-root attachment is linked at its root-relative path and served
-	 * only once staged here. A dotfile is never indexed, and a `publish: false`
-	 * note is not in the index, so neither its own text nor its attachments
-	 * reach the site.
-	 */
-	const syncAssets = async ({
-		docs,
-		vault,
-	}: {
-		docs: ContentIndex;
-		vault?: ContentIndex;
-	}): Promise<void> => {
-		const prefix = vaultRoutePrefix.replace(/^\/+|\/+$/g, "");
-		const wanted = new Map<string, string>();
-		// A board the canvas feature publishes is a page, not an attachment, and
-		// the resolver serves no other `.canvas` file raw while that feature is
-		// on the site (see `resolveAgainstAsset`).
-		const boards = await canvasBoards();
-		const linkOptions = { ...resolveOptions, canvasBoards: boards };
-		const stageVaultAsset = (asset: ContentAsset): void => {
-			wanted.set(path.posix.join(prefix, asset.relativePath), asset.absolutePath);
-		};
-		for (const index of vault ? [vault, docs] : [docs]) {
-			for (const page of index.pages) {
-				for (const link of page.outlinks ?? []) {
-					const asset = resolveWikiLink(link, {
-						currentPage: page,
-						index,
-						options: linkOptions,
-					}).targetAsset;
-					if (!asset) continue;
-					if (vault?.byAssetPath.get(asset.pathKey) === asset) {
-						stageVaultAsset(asset);
-					} else if (
-						docs.byAssetPath.get(asset.pathKey) === asset &&
-						!asset.relativePath.startsWith("public/")
-					) {
-						wanted.set(asset.relativePath, asset.absolutePath);
-					}
-				}
-			}
-		}
-		// A docs page may link a vault attachment by the URL it is published at
-		// (`![](/vault/media/x.png)`): that is a reference too, or the file
-		// would only be served when some other page happened to embed it. A
-		// `.canvas` file is not served that way while a canvas feature is on the
-		// site: the raw board holds what its published JSON drops (comments,
-		// private paths).
-		if (vault) {
-			const byFile = new Map(vault.assets.map((asset) => [asset.absolutePath, asset]));
-			for (const page of docs.pages) {
-				const source = await fs.readFile(page.absolutePath, "utf8").catch(() => "");
-				for (const match of source.matchAll(SITE_URL_PATTERN)) {
-					const file = vaultFileForSiteUrl(match[1] ?? match[2] ?? match[3] ?? "");
-					const asset = file ? byFile.get(file) : undefined;
-					if (asset && !(boards && /\.canvas$/i.test(asset.relativePath))) {
-						stageVaultAsset(asset);
-					}
-				}
-			}
-		}
-		await mirrorFiles(assetStagingDir, wanted);
-	};
+	const publishAssets = (indexes: { docs: ContentIndex; vault?: ContentIndex }) =>
+		syncAssets({
+			stagingDir: assetStagingDir,
+			vaultRoot,
+			vaultRoutePrefix,
+			...indexes,
+			resolveOptions,
+			canvasBoards,
+			fileRoutes,
+		});
 
 	let warnedLegacyCopies = false;
 	const warnLegacyCopies = async (): Promise<void> => {
@@ -546,6 +445,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 				getKatexStylesheetHref: () => `${siteBase}${KATEX_STYLESHEET_PATH}`,
 			}),
 			getCanvasBoards: canvasBoards,
+			getFileRoutes: () => fileRoutes,
 			options: normalizedOptions,
 		},
 	];
@@ -592,7 +492,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		async modifySearchIndexData(pages, isProd) {
 			for (const page of pages) {
 				const content = page.content ?? "";
-				if (!content.includes(COMMENT_DELIMITER)) continue;
+				if (!hasComments(content)) continue;
 				const ranges = findCommentRanges(content);
 				if (ranges.length === 0) continue;
 
@@ -615,7 +515,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		// leaves `content` empty, so the flattened source stands in.
 		async extendPageData(pageData, isProd) {
 			const source = pageData.content || pageData._flattenContent || "";
-			if (source.includes(COMMENT_DELIMITER)) {
+			if (hasComments(source)) {
 				pageData.toc = filterCommentedToc(pageData.toc, source);
 			}
 			rewriteOutline(pageData);
@@ -638,15 +538,8 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		},
 
 		config(siteConfig) {
-			// The graph and canvas find this plugin in `config.plugins`, the only
-			// plugin list a hook sees. A plugin added with `utils.addPlugin` from
-			// another plugin's `config` hook runs without being listed there, so it
-			// lists itself — on a copy, leaving the caller's config untouched.
-			const listed = siteConfig.plugins ?? [];
-			const config = listed.includes(plugin)
-				? siteConfig
-				: { ...siteConfig, plugins: [...listed, plugin] };
-			docsRoot = path.resolve(process.cwd(), config.root ?? "docs");
+			const config = withPluginListed(siteConfig, plugin);
+			docsRoot = docsRootOf(config);
 			sitePlugins = config.plugins;
 			siteBase = `/${(config.base ?? "/").replace(/^\/+|\/+$/g, "")}/`.replace(/\/{2,}/g, "/");
 			// Docs routes follow Rspress's rules, which drop the default
@@ -697,7 +590,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 						checkDeadImages: {
 							excludes: (url: string) => {
 								if (isPluginOwnedImageUrl(url)) return true;
-								const file = vaultFileForSiteUrl(url);
+								const file = vaultFileForSiteUrl(url, vaultRoot, vaultRoutePrefix);
 								return file !== undefined && existsSync(file);
 							},
 						},
@@ -718,7 +611,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 			// the dev server reads the staging directory live. Read past the memo:
 			// filling it here would hand the next compile — started by an edit
 			// made after this point — an index from before that edit.
-			if (!isProd) await syncAssets(await loadIndexes());
+			if (!isProd) await publishAssets(await loadIndexes());
 		},
 
 		// `publish: false` on a docs-root page removes its route, which is what
@@ -730,15 +623,17 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		async routeServiceGenerated(routeService: {
 			routeData: Map<string, { routeMeta?: { absolutePath?: string } }>;
 		}) {
+			const { docs } = await getIndexes().both;
 			for (const [routePath, page] of [...routeService.routeData]) {
 				const absolutePath = page.routeMeta?.absolutePath;
-				if (!absolutePath || !isPathInsideRoot(absolutePath, docsRoot)) continue;
-				if (await isUnpublishedFile(absolutePath)) routeService.routeData.delete(routePath);
+				if (absolutePath && docs.unpublishedPaths.has(absolutePath)) {
+					routeService.routeData.delete(routePath);
+				}
 			}
 		},
 
 		async addPages(config: { root?: string; plugins?: readonly unknown[] }): Promise<VaultPage[]> {
-			docsRoot = path.resolve(process.cwd(), config.root ?? "docs");
+			docsRoot = docsRootOf(config);
 			sitePlugins = config.plugins;
 			resetGeneration();
 			// The indexes built here seed this generation's memo, so the remark
@@ -757,12 +652,12 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 				siteBase,
 				docs,
 				vault,
-				resolveOptions: { ...resolveOptions, canvasBoards: await canvasBoards() },
+				resolveOptions: { ...resolveOptions, canvasBoards: await canvasBoards(), fileRoutes },
 			};
 			for (const feature of features) {
 				pages.push(...((await feature.addPages?.(featureContext)) ?? []));
 			}
-			await syncAssets(both);
+			await publishAssets(both);
 			if (vault) {
 				// Routes come from the same index the resolver uses, so emitted
 				// hrefs and generated routes cannot drift. Pages with

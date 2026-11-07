@@ -24,14 +24,14 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { VFile } from "vfile";
-import { publishedFileRoutes, setPublishedFileRoutes } from "../../../shared/file-routes.js";
+import { createFileRoutes } from "../../../shared/file-routes.js";
 import { stripFrontmatter } from "../../../shared/frontmatter.js";
 import { normalizeFsPath } from "../../../shared/route-path.js";
 import { buildContentIndex } from "../../content-index.js";
 import { normalizePluginOptions } from "../../normalize-options.js";
+import { isPathInsideRoot } from "../../path-containment.js";
 import { remarkWikilink } from "../../remark-wikilink.js";
 import type { ContentIndex, NormalizedPluginOptions } from "../../types.js";
-import { isPathInsideRoot } from "../../utils.js";
 import type { PluginPage } from "../types.js";
 import { basesFeature } from "./index.js";
 
@@ -84,6 +84,7 @@ let vaultRoot: string;
 let docsRoot: string;
 let docs: ContentIndex;
 let vault: ContentIndex;
+const fileRoutes = createFileRoutes();
 let options: NormalizedPluginOptions;
 let pages: PluginPage[];
 let warn: Mock<typeof console.warn>;
@@ -120,8 +121,8 @@ afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 beforeEach(async () => {
 	warn = spyOn(console, "warn").mockImplementation(() => {});
-	// The registry is cleared before each test (test-setup.ts); `addPages` runs
-	// before any page compiles, as in a build.
+	// One registry per build, as `markdown()` hands it to its features.
+	fileRoutes.clear();
 	pages =
 		(await basesFeature.addPages?.({
 			options,
@@ -131,7 +132,7 @@ beforeEach(async () => {
 			siteBase: "/",
 			docs,
 			vault,
-			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false, fileRoutes },
 		})) ?? [];
 });
 
@@ -150,6 +151,7 @@ async function compile(
 			getContentIndex: async (file) => (isPathInsideRoot(file, vaultRoot) ? vault : docs),
 			getPublishedIndexes: async () => [docs, vault],
 			getSiteBase: () => siteBase,
+			getFileRoutes: () => fileRoutes,
 			options,
 		})
 		.use(remarkRehype, { allowDangerousHtml: true })
@@ -184,7 +186,7 @@ describe("base pages", () => {
 			"/bases/Projects",
 		]);
 		expect(
-			publishedFileRoutes("bases").find((route) => route.routePath === "/bases/Projects"),
+			fileRoutes.byKind("bases").find((route) => route.routePath === "/bases/Projects"),
 		).toEqual({
 			kind: "bases",
 			absolutePath: normalizeFsPath(path.join(vaultRoot, "Projects.base")),
@@ -197,8 +199,7 @@ describe("base pages", () => {
 		);
 		// Two trees publishing the same route: the vault's file wins, and the clash is reported.
 		expect(
-			publishedFileRoutes("bases").find((route) => route.routePath === "/bases/Clash")
-				?.absolutePath,
+			fileRoutes.byKind("bases").find((route) => route.routePath === "/bases/Clash")?.absolutePath,
 		).toBe(normalizeFsPath(path.join(vaultRoot, "Clash.base")));
 		expect(
 			warn.mock.calls.some(([message]) => String(message).includes("Clash.base is not published")),
@@ -212,7 +213,7 @@ describe("base pages", () => {
 			siteBase: "/",
 			vaultRoutePrefix: "/vault",
 			docs,
-			resolveOptions: {},
+			resolveOptions: { fileRoutes },
 		});
 		expect(custom?.map((page) => page.routePath).sort()).toEqual(["/views/Clash", "/views/Guide"]);
 	});
@@ -275,7 +276,7 @@ describe("base pages", () => {
 			content: "{/* obsidian-base: %2Fnowhere */}\n",
 		});
 		expect(unknown.html).not.toContain("bases-container");
-		setPublishedFileRoutes("bases", []);
+		fileRoutes.clear();
 		const unregistered = await generated(
 			pages.find((page) => page.routePath === "/bases/Projects"),
 		);

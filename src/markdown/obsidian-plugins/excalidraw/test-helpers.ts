@@ -11,6 +11,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { VFile } from "vfile";
+import { createFileRoutes } from "../../../shared/file-routes.js";
 import { buildContentIndex } from "../../content-index.js";
 import { normalizePluginOptions } from "../../normalize-options.js";
 import { remarkWikilink } from "../../remark-wikilink.js";
@@ -177,6 +178,9 @@ export async function vaultIndex(root: string): Promise<ContentIndex> {
 	return buildContentIndex(root, { routePrefix: "/vault" });
 }
 
+/** The registry a build hands to its features; these tests share one. */
+export const testFileRoutes = createFileRoutes();
+
 /**
  * Compile one vault note through the real remark pass to HTML. An absolute
  * `name` is a file outside the vault — a page Rspress compiles from a temp file.
@@ -197,6 +201,7 @@ export async function compile(
 			getDocsRoot: () => root,
 			getContentIndex: async () => contentIndex,
 			getSiteBase: () => siteBase,
+			getFileRoutes: () => testFileRoutes,
 			options,
 		})
 		.use(remarkRehype, { allowDangerousHtml: true })
@@ -221,6 +226,10 @@ export function buildContext(
 		siteBase: "/",
 		docs: index,
 		vault: index,
-		resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+		resolveOptions: {
+			enableCaseInsensitiveLookup: true,
+			enableFuzzyMatching: false,
+			fileRoutes: testFileRoutes,
+		},
 	};
 }

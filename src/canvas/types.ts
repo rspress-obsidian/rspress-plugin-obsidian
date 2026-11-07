@@ -169,11 +169,19 @@ export interface CanvasPluginOptions {
 	 */
 	exclude?: string[];
 	/**
-	 * Route prefix of the vault's note pages. Set it to the markdown plugin's
-	 * `vaultRoutePrefix` when `vaultRoot` points at a vault published by that
-	 * plugin, otherwise cards link to routes that do not exist.
+	 * Route prefix of the vault's note pages, when the caller knows better than
+	 * the site does. A vault the markdown plugin publishes already carries its
+	 * prefix, so this is only needed to override it.
 	 */
 	fileRoutePrefix?: string;
+	/**
+	 * Where file cards point when no markdown plugin of the same site publishes
+	 * the vault. `pluginObsidian` passes its shared `vaultRoutePrefix` here, so
+	 * a build that ships the canvas alone still links notes under the site's
+	 * prefix. A published vault's own prefix wins over this one, and
+	 * `fileRoutePrefix` wins over both.
+	 */
+	defaultFileRoutePrefix?: string;
 	/**
 	 * Show link nodes as a live, sandboxed preview of the website — what
 	 * Obsidian does. Set to `false` for a plain link card instead (no

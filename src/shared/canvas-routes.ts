@@ -1,5 +1,6 @@
 import { normalizeFilePathKey } from "./paths.js";
-import { normalizeFsPath } from "./route-path.js";
+import { attachPluginValue, findPluginValue } from "./plugin-channel.js";
+import { normalizeFsPath, routeKey } from "./route-path.js";
 
 /**
  * One board the canvas feature has published: where it lives in the vault,
@@ -54,20 +55,10 @@ export interface CanvasBoards {
 /**
  * One spelling per published route: `/canvas/demo`, `/canvas/demo/`,
  * `/canvas/demo.html` and `/canvas/demo/index` are the same page to Rspress.
+ * Board routes are published lowercase, so the shared key is lowercased too.
  */
 function normalizeBoardRoute(routePath: string): string {
-	let route = routePath.trim();
-	try {
-		route = decodeURI(route);
-	} catch {
-		// Already decoded, or a stray `%`; match it as written.
-	}
-	route = route
-		.replace(/[?#].*$/, "")
-		.replace(/\.html$/i, "")
-		.replace(/\/index$/i, "")
-		.replace(/\/+$/, "");
-	return (route.startsWith("/") ? route : `/${route}`).toLowerCase();
+	return routeKey(routePath).toLowerCase();
 }
 
 /** Index the boards one canvas scan published. */
@@ -100,18 +91,12 @@ export function createCanvasBoards(boards: Iterable<CanvasBoardRoute>): CanvasBo
 
 // The canvas plugin object carries a reader for the boards its latest scan
 // published, and the markdown and graph features find it among the `plugins`
-// of the site config Rspress hands every hook — the mechanism
-// `published-content` uses, for the same reasons: there is no module state, so
-// each site sees its own boards however many sites a process builds, and the
-// order the plugins are listed in does not matter. The reader hands out a
-// promise because Rspress runs every plugin's `addPages` at once: a sibling's
+// of the site config Rspress hands every hook. The reader hands out a promise
+// because Rspress runs every plugin's `addPages` at once: a sibling's
 // `addPages` asking while the canvas scan is still globbing waits for that
 // scan, rather than reading the empty board list and staging the raw `.canvas`
 // file — comments, private paths and all — as an attachment.
-// `Symbol.for`, not `Symbol()`: the per-feature entries may be loaded as
-// separate bundle copies (an ESM and a CJS entry side by side), and each copy
-// has to recognise a canvas plugin built by another.
-const CANVAS_BOARDS = Symbol.for("rspress-plugin-obsidian:canvas-boards");
+const CANVAS_BOARDS = "canvas-boards";
 
 /**
  * Attach the reader a sibling feature calls to learn which boards `plugin`
@@ -122,7 +107,7 @@ export function attachCanvasBoards<Plugin extends object>(
 	plugin: Plugin,
 	read: () => Promise<CanvasBoards>,
 ): Plugin {
-	return Object.assign(plugin, { [CANVAS_BOARDS]: read });
+	return attachPluginValue(plugin, CANVAS_BOARDS, read);
 }
 
 /**
@@ -134,10 +119,5 @@ export function attachCanvasBoards<Plugin extends object>(
 export function findCanvasBoards(config: {
 	plugins?: readonly unknown[];
 }): Promise<CanvasBoards> | undefined {
-	for (const plugin of config.plugins ?? []) {
-		if (typeof plugin !== "object" || plugin === null || !(CANVAS_BOARDS in plugin)) continue;
-		const read = plugin[CANVAS_BOARDS];
-		if (typeof read === "function") return read();
-	}
-	return undefined;
+	return findPluginValue<Promise<CanvasBoards>>(config, CANVAS_BOARDS);
 }

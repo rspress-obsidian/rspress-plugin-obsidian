@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
-import { normalizeLookupValue } from "../shared/slug.js";
 import { buildBacklinksIndex, getCachedBacklinksIndex, renderBacklinksHtml } from "./backlinks.ts";
-import { buildContentIndex } from "./content-index.ts";
+import { buildContentIndex, pushNamedPage } from "./content-index.ts";
 import type { ContentIndex, ContentPage } from "./types.ts";
 
 const ambiguousRoot = path.resolve(process.cwd(), "test/markdown/fixtures/ambiguous");
@@ -61,19 +60,20 @@ function makeIndex(pages: ContentPage[]): ContentIndex {
 		byAbsolutePath.set(page.absolutePath, page);
 		byPathKey.set(page.pathKey, page);
 		byFilePathKey.set(page.filePathKey, page);
-		push(byFilePathKeyCI, page.filePathKey.toLowerCase(), page);
+		pushNamedPage(byFilePathKeyCI, page.filePathKey.toLowerCase(), page);
 		if (page.baseName.length > 0) {
 			push(byBaseName, page.baseName, page);
-			push(byBaseNameCI, page.baseName.toLowerCase(), page);
+			pushNamedPage(byBaseNameCI, page.baseName.toLowerCase(), page);
 		}
-		if (page.title) push(byTitle, normalizeLookupValue(page.title), page);
-		for (const alias of page.aliases) push(byAlias, normalizeLookupValue(alias), page);
+		if (page.title) pushNamedPage(byTitle, page.title, page);
+		for (const alias of page.aliases) pushNamedPage(byAlias, alias, page);
 	}
 
 	return {
 		rootDir: "/vault",
 		pages,
 		assets: [],
+		unpublishedPaths: new Set(),
 		byAbsolutePath,
 		byPathKey,
 		byFilePathKey,
@@ -83,7 +83,6 @@ function makeIndex(pages: ContentPage[]): ContentIndex {
 		byTag: new Map(),
 		byAssetPath: new Map(),
 		byAssetBaseName: new Map(),
-		byPathKeyCI: new Map(),
 		byFilePathKeyCI,
 		byBaseNameCI,
 		byAssetPathCI: new Map(),

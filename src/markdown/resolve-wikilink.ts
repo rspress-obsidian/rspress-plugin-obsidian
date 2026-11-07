@@ -1,8 +1,11 @@
 import path from "node:path";
-import GithubSlugger from "github-slugger";
-import { findPublishedFileRoute } from "../shared/file-routes.js";
-import { normalizeLookupValue, normalizeUnicode } from "../shared/slug.js";
-import { headingAnchorText } from "./heading-text.js";
+import type { PublishedFileRoute } from "../shared/file-routes.js";
+import { normalizeFilePathKey } from "../shared/paths.js";
+import { routeHref } from "../shared/route-path.js";
+import { headingKey, normalizeLookupValue, slugifyHeading } from "../shared/slug.js";
+import { wikiLinkDisplayText } from "./labels.js";
+import { resolveRelativePathKey } from "./path-containment.js";
+import { formatAvailableBlocks, formatAvailableHeadings } from "./subpath-diagnostics.js";
 import type {
 	ContentAsset,
 	ContentIndex,
@@ -13,14 +16,6 @@ import type {
 	ResolvedWikiLink,
 	WikiSubpath,
 } from "./types.js";
-import {
-	formatAvailableBlocks,
-	formatAvailableHeadings,
-	normalizeFilePathKey,
-	resolveRelativePathKey,
-	routeHref,
-	wikiLinkDisplayText,
-} from "./utils.js";
 
 type Candidate = ContentPage | ContentAsset;
 type Match<T extends Candidate> = { found: T; ambiguity?: string };
@@ -81,6 +76,10 @@ export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext)
 				: undefined;
 		if (asset)
 			return withAmbiguity(resolveAgainstAsset(asset.found, parsed, context), asset.ambiguity);
+		const relativeFile = context.options?.fileRoutes?.find(
+			path.join(index.rootDir, path.dirname(source.relativePath), parsed.target),
+		);
+		if (relativeFile) return resolveAgainstFileRoute(relativeFile, parsed);
 		return {
 			status: "broken-page",
 			message: `Unable to resolve relative wikilink target "${parsed.target}" from ${context.currentPage.relativePath}.`,
@@ -99,6 +98,8 @@ export function resolveWikiLink(parsed: ParsedWikiLink, context: ResolveContext)
 		if (exactPage) return resolveAgainstPage(exactPage, parsed);
 		const exactAsset = index.byAssetPath.get(exactPathKey);
 		if (exactAsset) return resolveAgainstAsset(exactAsset, parsed, context);
+		const exactFile = context.options?.fileRoutes?.find(path.join(index.rootDir, parsed.target));
+		if (exactFile) return resolveAgainstFileRoute(exactFile, parsed);
 
 		// Before the name fan-out, consult the site's published boards directly:
 		// a page whose index does not contain vault files would otherwise match
@@ -327,7 +328,7 @@ function resolveCurrentPageReference(page: ContentPage, parsed: ParsedWikiLink):
 		};
 	}
 
-	const resolved = resolveSubpath(page, subpath);
+	const resolved = resolvePageSubpath(page, subpath);
 	if (!resolved) {
 		return brokenAnchor(page, subpath);
 	}
@@ -360,7 +361,7 @@ function resolveAgainstPage(page: ContentPage, parsed: ParsedWikiLink): Resolved
 		return { status: "ok", href, label, targetPage: page };
 	}
 
-	const resolved = resolveSubpath(page, parsed.subpath);
+	const resolved = resolvePageSubpath(page, parsed.subpath);
 	if (!resolved) {
 		return brokenAnchor(page, parsed.subpath);
 	}
@@ -371,6 +372,21 @@ function resolveAgainstPage(page: ContentPage, parsed: ParsedWikiLink): Resolved
 		label,
 		description: resolved.heading?.preview,
 		targetPage: page,
+	};
+}
+
+function resolveAgainstFileRoute(
+	route: PublishedFileRoute,
+	parsed: ParsedWikiLink,
+): ResolvedWikiLink {
+	// A `.base` view or a drawing keeps its `#subpath` (a view name) as the
+	// fragment; the feature's page decides whether it exists.
+	const fragment = parsed.subpath ? `#${parsed.subpath.value}` : "";
+	return {
+		status: "ok",
+		href: `${route.routePath}${fragment}`,
+		label: wikiLinkDisplayText(parsed),
+		fileRoute: route,
 	};
 }
 
@@ -405,7 +421,7 @@ function resolveAgainstAsset(
 	}
 	// A file a feature publishes as a page (a `.base` view, a drawing) opens
 	// that page; its `#subpath` (a base's view name) is kept as the fragment.
-	const fileRoute = findPublishedFileRoute(asset.absolutePath);
+	const fileRoute = context.options?.fileRoutes?.find(asset.absolutePath);
 	const fragment = parsed.subpath ? `#${parsed.subpath.value}` : "";
 	if (fileRoute) {
 		return {
@@ -423,7 +439,7 @@ function resolveAgainstAsset(
 	};
 }
 
-function resolveSubpath(
+export function resolvePageSubpath(
 	page: ContentPage,
 	subpath: WikiSubpath,
 ): { fragment: string; heading?: HeadingEntry } | undefined {
@@ -435,15 +451,6 @@ function resolveSubpath(
 
 	const heading = findHeading(page, subpath.value);
 	return heading ? { fragment: heading.explicitId ?? heading.slug, heading } : undefined;
-}
-
-/**
- * Obsidian's heading-name fold: link text cannot hold `#`, `|`, `^`, `:`, `%`,
- * `[`, `]` or `\`, so Obsidian writes a space in their place when it links a
- * heading containing them (`## Step 1: Setup` → `[[Note#Step 1 Setup]]`).
- */
-function headingKey(text: string): string {
-	return normalizeLookupValue(text.replace(/[#|^:%[\]\\]/g, " "));
 }
 
 /**
@@ -463,7 +470,7 @@ function findHeading(page: ContentPage, anchor: string): HeadingEntry | undefine
 	const keys = parts.map((part) => ({
 		raw: part,
 		key: headingKey(part),
-		slug: new GithubSlugger().slug(headingAnchorText(normalizeUnicode(part))),
+		slug: slugifyHeading(part),
 	}));
 	const matches = (heading: HeadingEntry, key: (typeof keys)[number]): boolean =>
 		heading.explicitId === key.raw ||

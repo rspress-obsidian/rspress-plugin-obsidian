@@ -19,8 +19,10 @@ import {
 	commonBounds,
 	type ElementsById,
 	elementCoords,
+	placeBoundText,
 } from "./bounds.js";
-import { baselineOffset, fontFamilyCss } from "./fonts.js";
+import { elementKind } from "./element-types.js";
+import { baselineOffset, DEFAULT_FONT_FAMILY, fontFamilyCss } from "./fonts.js";
 import type { TextMeasurer } from "./measure.js";
 import type { ExcalidrawElement, FrameRendering, Scene } from "./scene.js";
 import {
@@ -94,8 +96,6 @@ const FRAME_STYLE = {
 	nameLineHeight: 1.25,
 };
 
-const IFRAME_LIKE: Record<string, true> = { iframe: true, embeddable: true };
-
 function round(value: number): string {
 	return String(Math.round(value * 100) / 100);
 }
@@ -109,12 +109,12 @@ function frameLabel(
 	const fontSize = FRAME_STYLE.nameFontSize;
 	const height = fontSize * FRAME_STYLE.nameLineHeight;
 	let text = frame.name ?? (frame.type === "magicframe" ? "AI Frame" : "Frame");
-	let width = measure.lineWidth(text, fontSize, 2);
+	let width = measure.lineWidth(text, fontSize, DEFAULT_FONT_FAMILY);
 	if (width > frame.width) {
 		// `truncateText`: the longest start that fits with an ellipsis.
 		for (let end = text.length; end > 0; end -= 1) {
 			const cut = `${text.slice(0, end)}...`;
-			if (measure.lineWidth(cut, fontSize, 2) <= frame.width) {
+			if (measure.lineWidth(cut, fontSize, DEFAULT_FONT_FAMILY) <= frame.width) {
 				text = cut;
 				break;
 			}
@@ -135,7 +135,7 @@ function frameLabel(
 		text,
 		originalText: text,
 		fontSize,
-		fontFamily: 2,
+		fontFamily: DEFAULT_FONT_FAMILY,
 		textAlign: "left",
 		verticalAlign: "top",
 		containerId: null,
@@ -230,8 +230,9 @@ function linearNode(
 	offsetY: number,
 ): string {
 	const opacity = opacityAttributes(opacityOf(element, ctx));
+	// Excalidraw fills a line that closes on itself with the even-odd rule; not an arrow.
 	const loopFill =
-		element.type === "line" &&
+		!elementKind(element.type).arrow &&
 		isPathALoop(element.points) &&
 		element.backgroundColor !== "transparent"
 			? ` fill-rule="evenodd"`
@@ -351,7 +352,7 @@ function embeddableLabel(element: ExcalidrawElement, measure: TextMeasurer): Exc
 		Math.min(element.width / 2, element.width / label.length),
 		element.width / 30,
 	);
-	const lineWidth = (line: string) => measure.lineWidth(line, fontSize, 2);
+	const lineWidth = (line: string) => measure.lineWidth(line, fontSize, DEFAULT_FONT_FAMILY);
 	const text = wrapText(label, element.width - 20, lineWidth);
 	const width = textWidth(text, lineWidth);
 	const height = text.split("\n").length * fontSize * 1.15;
@@ -367,7 +368,7 @@ function embeddableLabel(element: ExcalidrawElement, measure: TextMeasurer): Exc
 		text,
 		originalText: label,
 		fontSize,
-		fontFamily: 2,
+		fontFamily: DEFAULT_FONT_FAMILY,
 		textAlign: "center",
 		verticalAlign: "middle",
 		lineHeight: 1.15,
@@ -379,35 +380,31 @@ function embeddableLabel(element: ExcalidrawElement, measure: TextMeasurer): Exc
 function elementNode(element: ExcalidrawElement, ctx: Context): string {
 	const offsetX = element.x + ctx.offsetX;
 	const offsetY = element.y + ctx.offsetY;
-	switch (element.type) {
-		case "rectangle":
+	const kind = elementKind(element.type);
+	switch (kind.paint) {
+		case "rect": {
+			const shape = shapeNode(element, ctx, offsetX, offsetY);
+			if (!kind.embed) return shape;
+			const label = embeddableLabel(element, ctx.input.measure);
+			return `${shape}${textNode(label, ctx, label.x + ctx.offsetX, label.y + ctx.offsetY)}`;
+		}
 		case "diamond":
 		case "ellipse":
 			return shapeNode(element, ctx, offsetX, offsetY);
-		case "iframe":
-		case "embeddable": {
-			const label = embeddableLabel(element, ctx.input.measure);
-			return `${shapeNode(element, ctx, offsetX, offsetY)}${textNode(label, ctx, label.x + ctx.offsetX, label.y + ctx.offsetY)}`;
-		}
-		case "line":
-		case "arrow":
+		case "linear":
 			return linearNode(element, ctx, offsetX, offsetY);
 		case "freedraw":
 			return freedrawNode(element, ctx, offsetX, offsetY);
 		case "image":
 			return imageNode(element, ctx, offsetX, offsetY);
 		case "frame":
-		case "magicframe":
 			return frameNode(element, ctx, offsetX, offsetY);
 		case "text": {
 			const container = element.containerId ? ctx.byId.get(element.containerId) : undefined;
-			if (container?.type === "arrow") {
-				const [x, y] = arrowLabelPosition(container, element);
-				return textNode(element, ctx, x + ctx.offsetX, y + ctx.offsetY);
-			}
-			return textNode(element, ctx, offsetX, offsetY);
+			const [x, y] = placeBoundText(element, container);
+			return textNode(element, ctx, x + ctx.offsetX, y + ctx.offsetY);
 		}
-		default:
+		case "none":
 			return "";
 	}
 }
@@ -433,7 +430,7 @@ function placedNode(element: ExcalidrawElement, ctx: Context): string {
 function rootElements(elements: readonly ExcalidrawElement[]): ExcalidrawElement[] {
 	const frames = new Set(
 		elements
-			.filter((element) => element.type === "frame" || element.type === "magicframe")
+			.filter((element) => elementKind(element.type).paint === "frame")
 			.map((frame) => frame.id),
 	);
 	return elements.filter((element) => !element.frameId || !frames.has(element.frameId));
@@ -444,7 +441,7 @@ export function renderSceneSvg(input: RenderInput): string {
 	const dark = input.theme === "dark";
 	const labelled: ExcalidrawElement[] = [];
 	for (const element of input.elements) {
-		const isFrame = element.type === "frame" || element.type === "magicframe";
+		const isFrame = elementKind(element.type).paint === "frame";
 		if (isFrame && input.frameRendering.enabled && input.frameRendering.name) {
 			labelled.push(frameLabel(element, dark, input.measure));
 		}
@@ -467,7 +464,7 @@ export function renderSceneSvg(input: RenderInput): string {
 	};
 
 	for (const frame of labelled) {
-		if (frame.type !== "frame" && frame.type !== "magicframe") continue;
+		if (elementKind(frame.type).paint !== "frame") continue;
 		const [x1, y1, x2, y2] = elementCoords(frame, byId);
 		const cx = (x2 - x1) / 2 - (frame.x - x1);
 		const cy = (y2 - y1) / 2 - (frame.y - y1);
@@ -480,7 +477,9 @@ export function renderSceneSvg(input: RenderInput): string {
 		labelled
 			.filter(
 				(element) =>
-					element.type === "text" && element.containerId && byId.has(element.containerId),
+					elementKind(element.type).paint === "text" &&
+					element.containerId &&
+					byId.has(element.containerId),
 			)
 			.map((element) => element.id),
 	);
@@ -492,8 +491,9 @@ export function renderSceneSvg(input: RenderInput): string {
 		const text = label ? byId.get(label.id) : undefined;
 		if (text && !text.isDeleted && bound.has(text.id)) body.push(placedNode(text, ctx));
 	};
-	for (const element of labelled) if (!IFRAME_LIKE[element.type]) draw(element);
-	for (const element of labelled) if (IFRAME_LIKE[element.type]) draw(element);
+	// Embed placeholders are drawn last, over everything else.
+	for (const element of labelled) if (!elementKind(element.type).embed) draw(element);
+	for (const element of labelled) if (elementKind(element.type).embed) draw(element);
 
 	const style = input.fontCss ? `<style>${input.fontCss}</style>` : "";
 	const backdrop = input.background

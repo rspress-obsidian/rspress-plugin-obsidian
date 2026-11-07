@@ -62,6 +62,32 @@ export function normalizeRoutePath(input: string): string {
 	return normalized.toLowerCase() === "index" ? "" : normalized;
 }
 
+/**
+ * The canonical spelling of one absolute route. Rspress hands route consumers
+ * `/guide/note`, `/guide/note/`, `/guide/note.html` or `/guide/note/index`
+ * depending on where they look — the route table, a rendered `<a href>` or
+ * `location.pathname` — and every one names the same page. Percent-encoding
+ * and NFC are undone so a written href matches the route it came from.
+ *
+ * Keys stay case-sensitive; the canvas feature lowercases its own because it
+ * publishes board routes that way.
+ */
+export function routeKey(routePath: string): string {
+	let route = routePath.trim();
+	try {
+		route = decodeURI(route);
+	} catch {
+		// A stray `%`: match it as written.
+	}
+	route = route
+		.replace(/[?#].*$/, "")
+		.normalize("NFC")
+		.replace(/\.html$/i, "")
+		.replace(/\/index$/i, "")
+		.replace(/\/+$/, "");
+	return route.startsWith("/") ? route || "/" : `/${route}`;
+}
+
 /** Published route for a vault-relative path, under an optional route prefix. */
 export function deriveRoutePath(relativePath: string, routePrefix = ""): string {
 	const routeKey = normalizeRoutePath(relativePath);

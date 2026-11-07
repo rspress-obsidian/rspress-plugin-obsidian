@@ -51,6 +51,15 @@ export function normalizeLookupValue(input: string): string {
 	return normalizeUnicode(input.trim().replace(/\s+/g, " ")).toLowerCase();
 }
 
+/**
+ * Obsidian's heading-name fold: link text cannot hold `#`, `|`, `^`, `:`, `%`,
+ * `[`, `]` or `\`, so a heading containing them is linked with a space in their
+ * place (`## Step 1: Setup` → `[[Note#Step 1 Setup]]`). Compared without case.
+ */
+export function headingKey(text: string): string {
+	return normalizeLookupValue(text.replace(/[#|^:%[\]\\]/g, " "));
+}
+
 export function humanizeBaseName(input: string): string {
 	return input.replace(/[-_]+/g, " ").trim();
 }

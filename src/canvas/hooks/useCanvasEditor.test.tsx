@@ -35,11 +35,7 @@ function board(): CanvasData {
 }
 
 function commit(state: EditorState, action: EditorAction): EditorState {
-	return editorReducer(state, {
-		type: "commit",
-		action,
-		next: applyEditorAction(state.canvas, action),
-	});
+	return editorReducer(state, { type: "commit", action });
 }
 
 const ids = (items: { id: string }[]) => items.map((item) => item.id);
@@ -187,7 +183,7 @@ describe("useCanvasEditor", () => {
 		expect(first).toMatchObject({ canUndo: false, canRedo: false, contentVersion: 0 });
 
 		const action: EditorAction = { type: "add-node", node: text("d") };
-		act(() => first.commit(action, applyEditorAction(first.canvas, action)));
+		act(() => first.commit(action));
 		expect(seen.at(-1)).toMatchObject({ canUndo: true, canRedo: false, contentVersion: 1 });
 
 		act(() => first.undo());

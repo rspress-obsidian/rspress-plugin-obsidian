@@ -57,10 +57,7 @@ export function useCardEditing({ editable, canvasRef, commit }: CardEditingOptio
 		// must not clear the redo stack or mark the board unsaved.
 		if (node?.type !== "text" || node.text === editing.draft) return;
 		const updated: CanvasNode = { ...node, text: editing.draft };
-		commit(
-			{ type: "update", id: node.id, from: node, to: updated },
-			{ ...current, nodes: current.nodes.map((item) => (item.id === node.id ? updated : item)) },
-		);
+		commit({ type: "update", id: node.id, from: node, to: updated });
 	}, [canvasRef, commit]);
 
 	return {

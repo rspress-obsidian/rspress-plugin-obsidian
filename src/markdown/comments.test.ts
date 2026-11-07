@@ -10,8 +10,8 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { VFile } from "vfile";
 import {
-	blankAllComments,
 	blankCommentRanges,
+	blankComments,
 	filterCommentedToc,
 	findCommentRanges,
 	findHtmlCommentRanges,
@@ -214,16 +214,16 @@ describe("findHtmlCommentRanges", () => {
 	});
 });
 
-describe("blankAllComments", () => {
+describe("blankComments", () => {
 	test("blanks both kinds without moving any offset", () => {
 		const source = "a %%x%% b <!-- y --> c";
-		const blanked = blankAllComments(source);
+		const blanked = blankComments(source);
 		expect(blanked).toHaveLength(source.length);
 		expect(blanked).toBe(`a ${" ".repeat(5)} b ${" ".repeat(10)} c`);
 	});
 
 	test("an HTML comment wrapping a %% comment is blanked whole", () => {
-		expect(blankAllComments("<!-- %%x%% secret -->").trim()).toBe("");
+		expect(blankComments("<!-- %%x%% secret -->").trim()).toBe("");
 	});
 });
 
@@ -412,16 +412,16 @@ describe("comments follow the page's CommonMark code boundaries", () => {
 		// extraction (blanked) read the same comments the page hides.
 		expect(removeAllComments(source).includes("secret")).toBe(shown);
 		expect(removeAllComments(source, { fragment: true }).includes("secret")).toBe(shown);
-		expect(blankAllComments(source).includes("secret")).toBe(shown);
+		expect(blankComments(source).includes("secret")).toBe(shown);
 	});
 
 	test("frontmatter hides delimiters from the comment scan", () => {
 		const source = "---\nnote: '%% a <!-- b'\n---\nbody %% secret %%";
-		expect(blankAllComments(source)).toBe(`---\nnote: '%% a <!-- b'\n---\nbody ${" ".repeat(12)}`);
+		expect(blankComments(source)).toBe(`---\nnote: '%% a <!-- b'\n---\nbody ${" ".repeat(12)}`);
 	});
 
 	test("a fence inside frontmatter does not swallow the body", () => {
 		const source = "---\nnote: |\n  ```\n---\nbody %% secret %%";
-		expect(blankAllComments(source)).not.toContain("secret");
+		expect(blankComments(source)).not.toContain("secret");
 	});
 });

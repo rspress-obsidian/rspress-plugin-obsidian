@@ -9,6 +9,7 @@ import { getStroke } from "perfect-freehand";
 import rough from "roughjs";
 import type { Drawable, Op, Options } from "roughjs/bin/core";
 import { escapeHtmlAttribute } from "../../../shared/escape.js";
+import { elementKind } from "./element-types.js";
 import type { ExcalidrawElement, Point } from "./scene.js";
 
 /** Excalidraw writes SVG numbers with two decimals (`MAX_DECIMALS_FOR_SVG_EXPORT`). */
@@ -61,25 +62,15 @@ export function cornerRadius(size: number, element: ExcalidrawElement): number {
 	return 0;
 }
 
-const ROUNDABLE_TYPES: Record<string, true> = {
-	rectangle: true,
-	iframe: true,
-	embeddable: true,
-	line: true,
-	diamond: true,
-	image: true,
-};
-
-const LINEAR_TYPES: Record<string, true> = { line: true, arrow: true };
-
 /** Small shapes get less wobble, or they would be unrecognisable (`adjustRoughness`). */
 function adjustRoughness(element: ExcalidrawElement): number {
+	const kind = elementKind(element.type);
 	const max = Math.max(element.width, element.height);
 	const min = Math.min(element.width, element.height);
 	if (
 		(min >= 20 && max >= 50) ||
-		(min >= 15 && element.roundness && ROUNDABLE_TYPES[element.type]) ||
-		(LINEAR_TYPES[element.type] && max >= 50)
+		(min >= 15 && element.roundness && kind.roundable) ||
+		(kind.bounds === "linear" && max >= 50)
 	) {
 		return element.roughness;
 	}
@@ -106,25 +97,21 @@ function roughOptions(element: ExcalidrawElement, continuousPath = false): Optio
 		stroke: element.strokeColor,
 		preserveVertices: continuousPath || element.roughness < 2,
 	};
-	switch (element.type) {
-		case "rectangle":
-		case "iframe":
-		case "embeddable":
-		case "diamond":
-		case "ellipse":
+	switch (elementKind(element.type).fill) {
+		// Excalidraw lets a shape take any transparent colour as its background,
+		// but a closed line or freedraw only skips the literal "transparent".
+		case "background":
 			options.fillStyle = element.fillStyle;
 			options.fill = isTransparent(element.backgroundColor) ? undefined : element.backgroundColor;
-			if (element.type === "ellipse") options.curveFitting = 1;
 			return options;
-		case "line":
-		case "freedraw":
+		case "closed":
 			if (isPathALoop(element.points)) {
 				options.fillStyle = element.fillStyle;
 				options.fill =
 					element.backgroundColor === "transparent" ? undefined : element.backgroundColor;
 			}
 			return options;
-		default:
+		case "none":
 			return options;
 	}
 }
@@ -381,11 +368,10 @@ function arrowheadDrawables(
  * and frames have none; freedraw has only its closed-loop fill.
  */
 export function elementDrawables(element: ExcalidrawElement, canvasBackground: string): Drawable[] {
-	switch (element.type) {
-		case "rectangle":
-		case "iframe":
-		case "embeddable": {
-			const shaped = element.type === "rectangle" ? element : asEmbeddablePlaceholder(element);
+	const kind = elementKind(element.type);
+	switch (kind.paint) {
+		case "rect": {
+			const shaped = kind.embed ? asEmbeddablePlaceholder(element) : element;
 			if (element.roundness) {
 				const w = element.width;
 				const h = element.height;
@@ -422,20 +408,16 @@ export function elementDrawables(element: ExcalidrawElement, canvasBackground: s
 		}
 		case "ellipse":
 			return [
-				generator.ellipse(
-					element.width / 2,
-					element.height / 2,
-					element.width,
-					element.height,
-					roughOptions(element),
-				),
+				generator.ellipse(element.width / 2, element.height / 2, element.width, element.height, {
+					...roughOptions(element),
+					curveFitting: 1,
+				}),
 			];
-		case "line":
-		case "arrow": {
+		case "linear": {
 			const options = roughOptions(element);
 			const points: Point[] = element.points.length > 0 ? element.points : [[0, 0]];
 			let shaft: Drawable;
-			if (element.type === "arrow" && element.elbowed) {
+			if (kind.arrow && element.elbowed) {
 				shaft = generator.path(elbowArrowPath(points, 16), roughOptions(element, true));
 			} else if (!element.roundness) {
 				shaft = options.fill
@@ -445,7 +427,7 @@ export function elementDrawables(element: ExcalidrawElement, canvasBackground: s
 				shaft = generator.curve(points, options);
 			}
 			const drawables = [shaft];
-			if (element.type === "arrow") {
+			if (kind.arrow) {
 				for (const [position, head] of [
 					["start", element.startArrowhead],
 					["end", element.endArrowhead],
@@ -475,7 +457,10 @@ export function elementDrawables(element: ExcalidrawElement, canvasBackground: s
 						}),
 					]
 				: [];
-		default:
+		case "image":
+		case "frame":
+		case "text":
+		case "none":
 			return [];
 	}
 }

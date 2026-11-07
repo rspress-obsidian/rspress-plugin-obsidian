@@ -162,6 +162,10 @@ It takes the plugin's runtime context:
   from the canvas plugin listed in the same site, and then a `.canvas` file
   that plugin did not publish is a broken link rather than an attachment.
   When unset, a board link is a plain attachment link.
+- `getFileRoutes()` (optional): the build's `FileRoutes`, the pages `.base` and
+  `.excalidraw` files were published at. `markdown()` supplies it, and a
+  `[[Projects.base]]` target then resolves to its page route; when unset, it is
+  a plain attachment link.
 - `options`: a complete `NormalizedPluginOptions`. This is every option above
   with its default filled in, `vaultRoot` made absolute, and `dailyNotes` fully
   populated.
@@ -177,7 +181,12 @@ It rescans on every call. The scan skips hidden files and folders,
 | `ContentIndexOptions` field | Type | Default | What it does |
 |-------|------|---------|-------------|
 | `routePrefix` | `string` | `""` | Prefix added to every page and attachment route. |
+| `locales` | `string[]` | `[]` | Locale segments Rspress keeps in a route and the index strips. |
 | `unlinkedMentions` | `boolean` | `false` | Keeps a stripped copy of each page body so `getMentions` can find pages that name another page. |
+| `dataview` | `boolean` | `true` | Parses Dataview fields, tasks and lists while indexing. Turning it off skips about a third of indexing time and leaves those fields empty. |
+| `enableCaseInsensitiveLookup` | `boolean` | `true` | Resolves `[[note]]` to `Note.md`. |
+| `enableFuzzyMatching` | `boolean` | `false` | Resolves a partial name when no exact match exists. |
+| `excludeFolders` | `string[]` | `[]` | Vault folders never indexed, such as Templater's templates folder. |
 
 ```ts
 import { buildContentIndex } from "rspress-plugin-obsidian/markdown";
@@ -193,13 +202,18 @@ Works like `buildContentIndex`, but returns the cached index while no file's
 modification time or size has changed. The options are part of the cache key.
 Prefer it in code that runs often.
 
-### `extractPageLinks(markdown: string): PageLinks`
+### `extractPageLinks(markdown: string, options?: PageLinkOptions): PageLinks`
 
 Returns the links and tags that one note contains. `outlinks` holds every link
 as a `ParsedWikiLink`: wikilinks and embeds, relative Markdown links and
 images, reference definitions, `obsidian://open` URIs, and wikilinks in
 frontmatter properties. `tags` holds frontmatter and inline tags without the
 `#`. Backlinks and attachment publishing resolve the same list.
+
+`PageLinkOptions` has two flags. `dedupe` (default `true`) keeps one entry per
+target. `frontmatterFirst` (default `false`) lists frontmatter links before
+body links; with `{ dedupe: false, frontmatterFirst: true }` you get the
+`file.links` order Bases documents, which keeps repeats.
 
 ## Wikilinks
 
@@ -327,10 +341,11 @@ the prose that mention matching reads.
 
 ## Tag pages
 
-### `generateTagPages(index: ContentIndex): AdditionalPage[]`
+### `generateTagPages(...indexes: ContentIndex[]): AdditionalPage[]`
 
 Returns one `{ routePath, content }` page per tag, in the shape that the Rspress
-`addPages` hook expects.
+`addPages` hook expects. Pass every tree the site publishes — the plugin passes
+the docs root's index and the vault's — so a tag used in both becomes one page.
 
 ```ts
 import { buildContentIndex, generateTagPages } from "rspress-plugin-obsidian/markdown";
@@ -449,6 +464,7 @@ interface ParsedWikiLink {
   subpath?: WikiSubpath;           // After #
   search?: "heading" | "block";    // [[##query]] or [[^^query]]
   isCurrentPageReference: boolean; // [[#Heading]]
+  ghost?: boolean;                 // Known missing: draw as unresolved, never name-match
 }
 
 interface WikiSubpath {
@@ -475,6 +491,7 @@ interface ResolveContext {
     Pick<NormalizedPluginOptions, "enableFuzzyMatching" | "enableCaseInsensitiveLookup">
   > & {
     canvasBoards?: CanvasBoards; // The site's published boards; unset, a board is an attachment
+    fileRoutes?: FileRoutes; // The site's published .base/.excalidraw pages
   };
 }
 
@@ -512,12 +529,12 @@ interface ContentIndex {
   byTag: Map<string, ContentPage[]>;
   byAssetPath: Map<string, ContentAsset>;
   byAssetBaseName: Map<string, ContentAsset[]>;
-  byPathKeyCI: Map<string, ContentPage[]>;   // CI = case-insensitive
-  byFilePathKeyCI: Map<string, ContentPage[]>;
+  byFilePathKeyCI: Map<string, ContentPage[]>; // CI = case-insensitive
   byBaseNameCI: Map<string, ContentPage[]>;
   byAssetPathCI: Map<string, ContentAsset[]>;
   byAssetBaseNameCI: Map<string, ContentAsset[]>;
   backlinks: Map<string, BacklinkRef[]>;     // Built during indexing
+  unpublishedPaths: ReadonlySet<string>;      // Pages dropped for publish: false
   linkedIndexes?: ContentIndex[];            // The other tree on the site
 }
 ```
@@ -544,6 +561,8 @@ interface ContentPage {
   headings: HeadingEntry[];
   wikilinkTargets: string[];
   outlinks?: ParsedWikiLink[];     // Every link the page makes
+  fileLinks?: CacheLink[];         // Links as written, for Obsidian's file cache
+  frontmatter?: Record<string, unknown>; // Parsed frontmatter, even when dataview is off
   headingBySlug: Map<string, HeadingEntry>;
   headingByText: Map<string, HeadingEntry>;
   blocks: BlockEntry[];            // { id } without the ^
@@ -558,6 +577,7 @@ interface HeadingEntry {
   explicitId?: string;             // From {#custom-id}
   depth?: number;                  // 1–6
   sourceText?: string;             // Inline Markdown as written
+  topLevel?: boolean;              // false inside a blockquote or callout
   preview?: string;                // First ~200 characters of the section
 }
 
@@ -567,6 +587,13 @@ interface ContentAsset {
   pathKey: string;
   baseName: string;
   urlPath: string;
+}
+
+interface CacheLink {
+  target: string;                  // As written: "Folder/Note#Heading^block"
+  display: string;                 // Alias, else Obsidian's display text
+  isEmbed: boolean;
+  origin: "property" | "body";     // file.embeds lists body embeds only
 }
 ```
 

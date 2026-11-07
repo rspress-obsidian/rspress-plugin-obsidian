@@ -12,10 +12,12 @@ import {
 	useState,
 } from "react";
 import { graphPayload } from "virtual-graph-data";
-import { encodeRoutePath } from "../../shared/route-path.js";
+import { encodeRoutePath, routeKey } from "../../shared/route-path.js";
 import { navigation, useNavigateTo, usePathname } from "../../shared/usePathname.js";
+import { FORCE_GRAPH_PACKAGE } from "../force-graph-package.js";
 import { decodeGraphPayload } from "../graph-payload.js";
 import type { GraphNode, GraphPayload, GraphViewGroup } from "../types.js";
+import { kindColor, labelOpacity, nodeRadius, safeColor } from "./appearance.js";
 import {
 	createGraphIndex,
 	deriveGraphViewData,
@@ -23,7 +25,6 @@ import {
 	type ForceGraphNode,
 	type GraphIndex,
 	type GraphViewFilters,
-	normalizeClientRoutePath,
 } from "./deriveGraphViewData.js";
 import { matchesGraphQuery, parseGraphQuery } from "./graph-query.js";
 import {
@@ -32,12 +33,11 @@ import {
 	DEFAULT_FORCE_SETTINGS,
 	type GraphDisplaySettings,
 	type GraphForceSettings,
-	labelZoomFor,
 	MAX_CENTER_PULL,
 } from "./graph-settings.js";
+import { injectStyles } from "./keyframes.js";
 import { createLinkHitAreaPainter } from "./link-hit-areas.js";
 import {
-	type CanvasColors,
 	DARK_COLORS,
 	FONT_STACK,
 	type GraphViewColors,
@@ -163,8 +163,18 @@ export class GraphErrorBoundary extends Component<
 	}
 }
 
-/** Shown when the site was built without the optional `react-force-graph-2d` peer. */
-const GRAPH_RENDERER_MISSING_MESSAGE = "Install react-force-graph-2d to draw the graph";
+/** Shown when the site was built without the optional force-graph peer. */
+const GRAPH_RENDERER_MISSING_MESSAGE = `Install ${FORCE_GRAPH_PACKAGE} to draw the graph`;
+
+/** The loader's spin, injected by the component that renders the loader. */
+const SPINNER_STYLE_ID = "graph-spinner-keyframes";
+
+const SPINNER_KEYFRAMES = `
+    @keyframes gv-spinner {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  `;
 
 /**
  * Whether `value` can be rendered as a React component: a function, or one of
@@ -243,47 +253,6 @@ export interface GraphViewHandle {
 	getStats: () => GraphViewStats;
 }
 
-/** Radius of a node with no links, in graph units, before the size setting. */
-const BASE_RADIUS = 5;
-const LARGE_GRAPH_BASE_RADIUS = 4;
-
-/**
- * Visual node radius. Nodes grow with their link count, as in Obsidian; the
- * pointer-area painter and the arrow placement use the same value so the hit
- * region and arrowheads line up with the drawn dot.
- */
-function nodeRadius(degree: number, isLargeGraph: boolean, nodeSize: number): number {
-	const base = isLargeGraph ? LARGE_GRAPH_BASE_RADIUS : BASE_RADIUS;
-	return base * nodeSize * (1 + 0.25 * Math.log2(1 + degree));
-}
-
-/** Label opacity at a zoom level: fades in over the 30% of zoom below the threshold. */
-function labelOpacity(globalScale: number, textFadeThreshold: number): number {
-	const fullAt = labelZoomFor(textFadeThreshold);
-	const startAt = fullAt * 0.7;
-	return Math.min(1, Math.max(0, (globalScale - startAt) / (fullAt - startAt)));
-}
-
-/**
- * Accept a group colour only if the runtime can actually paint it: an
- * invalid `fillStyle` is silently ignored by canvas, which would bleed the
- * previous node's colour into this one.
- */
-function safeColor(value: string): string | undefined {
-	if (typeof value !== "string" || value.trim() === "") return undefined;
-	if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
-		return CSS.supports("color", value) ? value : undefined;
-	}
-	return value;
-}
-
-function kindColor(node: Pick<ForceGraphNode, "kind">, colors: CanvasColors): string {
-	if (node.kind === "tag") return colors.tagNode;
-	if (node.kind === "attachment") return colors.attachmentNode;
-	if (node.kind === "unresolved") return colors.unresolvedNode;
-	return colors.node;
-}
-
 /** Pulls every node toward the origin; d3's own `center` force only recentres the mean. */
 function createCenterPull(strength: number): CustomForce {
 	let nodes: Array<{ x?: number; y?: number; vx?: number; vy?: number }> = [];
@@ -356,7 +325,7 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		truncatedCount: 0,
 	});
 
-	const currentRoutePath = useMemo(() => normalizeClientRoutePath(pathname), [pathname]);
+	const currentRoutePath = useMemo(() => routeKey(pathname), [pathname]);
 
 	const graphIndex = useMemo(() => graphIndexFor(graphPayload), []);
 
@@ -460,8 +429,14 @@ export default forwardRef<GraphViewHandle, GraphViewProps>(function GraphView(
 		[forceGraphData.nodes],
 	);
 
+	// The loader's keyframes live here, not with the panel's: a sidebar graph
+	// renders this component with no panel on the page to inject them.
+	useEffect(() => injectStyles(SPINNER_STYLE_ID, SPINNER_KEYFRAMES), []);
+
 	useEffect(() => {
 		let active = true;
+		// A literal specifier: Rspack resolves it while building, and `install.ts`
+		// aliases exactly this string when the peer is not installed.
 		import("react-force-graph-2d")
 			.then((mod) => {
 				if (!active) return;

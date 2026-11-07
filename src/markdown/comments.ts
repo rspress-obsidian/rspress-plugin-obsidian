@@ -24,15 +24,19 @@
 import { createHash } from "node:crypto";
 import type { Root } from "mdast";
 import type { Parent } from "unist";
-import { frontmatterLength } from "../shared/content-flags.js";
+import { frontmatterLength, getContentLineFlags } from "../shared/content-flags.js";
 import { slugifyHeading, stripMarkdownFormatting } from "../shared/slug.js";
+import { scanPageHeadings } from "./heading-text.js";
 import { parseObsidianMarkdown } from "./syntax.js";
 import { visit } from "./visit.js";
 
 const DELIMITER = "%%";
+const HTML_COMMENT_OPEN = "<!--";
 
-/** The comment delimiter, exported so callers can skip work when absent. */
-export const COMMENT_DELIMITER = DELIMITER;
+/** Whether `source` holds any comment at all; callers skip the scan when not. */
+export function hasComments(source: string): boolean {
+	return source.includes(DELIMITER) || source.includes(HTML_COMMENT_OPEN);
+}
 
 /** A half-open `[start, end)` source range Obsidian hides. */
 export interface CommentRange {
@@ -135,8 +139,6 @@ function obsidianRanges(source: string, literal: readonly CommentRange[]): Comme
 	return ranges;
 }
 
-const HTML_COMMENT_OPEN = "<!--";
-
 function htmlRanges(source: string, literal: readonly CommentRange[]): CommentRange[] {
 	const ranges: CommentRange[] = [];
 	let openAt = -1;
@@ -153,17 +155,6 @@ function htmlRanges(source: string, literal: readonly CommentRange[]): CommentRa
 }
 
 /**
- * Every `%%` comment range in `source`, in document order and
- * non-overlapping. `fragment`: `source` is a piece of markdown with no
- * frontmatter of its own (a canvas text card), so a leading `---` is a rule.
- */
-export function findCommentRanges(source: string, fragment = false): CommentRange[] {
-	// Most notes have no `%%`; skip parsing them.
-	if (!source.includes(DELIMITER)) return [];
-	return obsidianRanges(source, literalRanges(source, fragment));
-}
-
-/**
  * Every `<!-- … -->` range in `source` outside code, in document order. A
  * comment ends at the first `-->` after its opener; an unclosed one runs to
  * the end of `source`.
@@ -174,12 +165,15 @@ export function findHtmlCommentRanges(source: string, fragment = false): Comment
 }
 
 /**
- * Both kinds of comment in `source`, merged into sorted, non-overlapping
- * ranges. HTML comments are looked for after the `%%` ones are blanked, so a
- * `<!--` inside a `%%` comment opens nothing; both read code from the source
- * as written.
+ * Every comment range in `source` — `%%…%%` and `<!-- … -->` — merged into
+ * sorted, non-overlapping ranges. Obsidian renders neither, so indexing and
+ * rendering skip the same text. HTML comments are looked for after the `%%`
+ * ones are blanked, so a `<!--` inside a `%%` comment opens nothing; both read
+ * code from the source as written. `fragment`: `source` is a piece of markdown
+ * with no frontmatter of its own (a canvas text card), so a leading `---` is a
+ * rule.
  */
-function findAllCommentRanges(source: string, fragment: boolean): CommentRange[] {
+export function findCommentRanges(source: string, fragment = false): CommentRange[] {
 	const hasObsidian = source.includes(DELIMITER);
 	const hasHtml = source.includes(HTML_COMMENT_OPEN);
 	if (!hasObsidian && !hasHtml) return [];
@@ -214,29 +208,31 @@ function isOffsetIn(offset: number, ranges: readonly CommentRange[]): boolean {
 	return ranges.some((range) => offset >= range.start && offset < range.end);
 }
 
-const HEADING_LINE = /^\s{0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$/;
-
-/** How often each heading text occurs in `source`, split by whether a comment hides it. */
+// How often each heading occurs in `source`, split by whether a comment hides
+// it. The heading grammar comes from `scanPageHeadings` — the owner of "what a
+// heading is" — so setext headings count too and a trailing `#` in `## C#`
+// stays part of the text.
 function countHeadings(
 	source: string,
 	ranges: CommentRange[],
 	commented: boolean,
 ): Map<string, number> {
 	const lines = source.split("\n");
+	const isContent = getContentLineFlags(lines);
 	const literal = literalRanges(source, false);
-	const counts = new Map<string, number>();
+	const offsets: number[] = [];
 	let offset = 0;
-
 	for (const line of lines) {
-		const lineStart = offset;
+		offsets.push(offset);
 		offset += line.length + 1;
-		const text = HEADING_LINE.exec(line)?.[1];
-		if (!text) continue;
-		const at = lineStart + line.indexOf(text);
-		if (isOffsetIn(at, literal) || isOffsetIn(at, ranges) !== commented) continue;
-		counts.set(text, (counts.get(text) ?? 0) + 1);
 	}
-
+	const counts = new Map<string, number>();
+	for (const heading of scanPageHeadings(lines, isContent)) {
+		const at = offsets[heading.line] ?? 0;
+		if (isOffsetIn(at, literal) || isOffsetIn(at, ranges) !== commented) continue;
+		if (!heading.text) continue;
+		counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
+	}
 	return counts;
 }
 
@@ -337,8 +333,8 @@ export function blankCommentRanges(source: string, ranges: CommentRange[]): stri
  * kept, same length), for text that is searched or previewed rather than
  * rendered: the hover preview, the graph search, link and tag extraction.
  */
-export function blankAllComments(source: string): string {
-	const ranges = findAllCommentRanges(source, false);
+export function blankComments(source: string): string {
+	const ranges = findCommentRanges(source);
 	return ranges.length > 0 ? blankCommentRanges(source, ranges) : source;
 }
 
@@ -360,7 +356,7 @@ export function removeAllComments(
 ): string {
 	let result = "";
 	let cursor = from;
-	for (const range of findAllCommentRanges(source, fragment)) {
+	for (const range of findCommentRanges(source, fragment)) {
 		if (range.end <= cursor) continue;
 		result += source.slice(cursor, Math.max(cursor, range.start));
 		cursor = range.end;

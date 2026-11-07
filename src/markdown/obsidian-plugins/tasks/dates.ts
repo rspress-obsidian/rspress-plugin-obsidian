@@ -14,10 +14,8 @@ import {
 	momentUnitSpan,
 	startOf,
 } from "../../../shared/date-math.js";
+import { type Day, dayFromParts, ISO_DAY, parseIsoDayParts } from "../../../shared/day.js";
 import { formatMomentDate } from "../../../shared/moment-format.js";
-
-/** Days since 1970-01-01; `NaN` for a date that does not exist (`2024-02-30`). */
-export type Day = number;
 
 /** An inclusive range of days. */
 export interface DayRange {
@@ -31,24 +29,15 @@ export interface TaskDate {
 	day: Day;
 }
 
-/** The day `year-month-date` names, or `NaN` when no such day exists. */
-export function dayFromParts(year: number, month: number, date: number): Day {
-	const ms = Date.UTC(year, month - 1, date);
-	const check = new Date(ms);
-	if (
-		check.getUTCFullYear() !== year ||
-		check.getUTCMonth() !== month - 1 ||
-		check.getUTCDate() !== date
-	) {
-		return Number.NaN;
-	}
-	return ms / DAY_MS;
-}
+/** A whole string that is an ISO day. */
+const FULL_DAY = new RegExp(`^${ISO_DAY}$`, "u");
 
 /** The day an ISO `YYYY-MM-DD` string names, or `NaN`. */
 export function parseIsoDay(text: string): Day {
-	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-	return match ? dayFromParts(Number(match[1]), Number(match[2]), Number(match[3])) : Number.NaN;
+	const match = FULL_DAY.exec(text);
+	if (!match) return Number.NaN;
+	const { year, month, date } = parseIsoDayParts(match);
+	return dayFromParts(year, month, date);
 }
 
 /** The local calendar day of a `Date`. */

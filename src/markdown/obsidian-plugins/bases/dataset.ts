@@ -4,14 +4,14 @@
  *
  * Built once per index generation (`WeakMap` on the index objects, which the
  * plugin replaces on each build or dev recompile) and shared by every base on
- * every page, so a 3000-note vault reads and parses each note once, not once
- * per query.
+ * every page. Everything a note contributes — its frontmatter, its tags, its
+ * links — comes from its `ContentPage`, so the dataset reads no note twice.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { formatMomentDate } from "../../../shared/moment-format.js";
 import { normalizeFsPath } from "../../../shared/route-path.js";
+import { yamlDateAsLocal } from "../../../shared/yaml-date.js";
 import { parseWikiLink } from "../../parse-wikilink.js";
 import { resolveWikiLink } from "../../resolve-wikilink.js";
 import type {
@@ -21,7 +21,6 @@ import type {
 	NormalizedPluginOptions,
 } from "../../types.js";
 import { readObsidianConfigFile } from "../settings.js";
-import { type LinkRecord, type NoteLinks, noteLinks } from "./links.js";
 import {
 	type BaseFile,
 	DateValue,
@@ -38,7 +37,7 @@ export interface Dataset {
 	resolve(target: string, from: ContentPage | undefined): BaseFile | undefined;
 	/** A link value for link text written in `from` (`[[Note|Shown]]`, `Note`, `https://…`). */
 	link(text: string, from: ContentPage | undefined, display?: string): LinkValue;
-	/** `file.links`: the note's links, frontmatter included. */
+	/** `file.links`: the note's links as Obsidian's metadata cache lists them, repeats kept. */
 	links(file: BaseFile): readonly LinkValue[];
 	/** `file.embeds`. */
 	embeds(file: BaseFile): readonly LinkValue[];
@@ -89,15 +88,10 @@ async function buildDataset(
 	};
 	const files: BaseFile[] = [];
 	const byAbsolutePath = new Map<string, BaseFile>();
-	const pending: { file: BaseFile; raw: Record<string, unknown>; links: NoteLinks }[] = [];
 
 	await Promise.all(
 		indexes.flatMap((index) => [
-			...index.pages.map(async (page) => {
-				const file = fileOfPage(page, index);
-				pending.push({ file, ...(await readNote(page.absolutePath)) });
-				return file;
-			}),
+			...index.pages.map((page) => fileOfPage(page, index)),
 			...index.assets.map((asset) => fileOfAsset(asset, index)),
 		]),
 	).then((built) => {
@@ -143,17 +137,31 @@ async function buildDataset(
 	};
 
 	const outgoing = new Map<BaseFile, { links: LinkValue[]; embeds: LinkValue[] }>();
-	for (const { file, raw, links } of pending) {
-		file.properties = convertProperties(raw, types, (text) => link(text, file.page));
-		const toValue = (record: LinkRecord) =>
-			new LinkValue(record.path, record.display, resolveTarget(record.path, file.page), file.page);
-		const values = links.links.map(toValue);
-		// An embed is the same link in both lists, so it resolves once.
-		const embeds = values.slice(values.length - links.embeds.length);
-		outgoing.set(file, { links: values, embeds });
+	for (const file of files) {
+		const page = file.page;
+		if (!page) continue;
+		file.properties = convertProperties(page.frontmatter ?? {}, types, (text) => link(text, page));
+		const links: LinkValue[] = [];
+		const embeds: LinkValue[] = [];
+		for (const cached of page.fileLinks ?? []) {
+			const value = new LinkValue(
+				cached.target,
+				cached.display,
+				resolveTarget(cached.target, page),
+				page,
+			);
+			links.push(value);
+			// An embed is the same link in both lists, so it resolves once. Only
+			// the body has embeds; a `![[x]]` in a property is just a link there.
+			if (cached.isEmbed && cached.origin === "body") embeds.push(value);
+		}
+		outgoing.set(file, { links, embeds });
 	}
 
 	let incoming: Map<BaseFile, LinkValue[]> | undefined;
+	// These are Obsidian's backlinks, which show a link's basename; the site's
+	// own backlinks (`ContentIndex.backlinks`) show the page title instead, so
+	// `file.backlinks` cannot read them.
 	const backlinks = (file: BaseFile): readonly LinkValue[] => {
 		if (!incoming) {
 			const map = new Map<BaseFile, LinkValue[]>();
@@ -193,25 +201,6 @@ function propertyTypes(vaultRoot: string | undefined): PropertyTypes {
 		if (typeof value === "string") result[key] = value;
 	}
 	return result;
-}
-
-/** A note's frontmatter and links, read once per index generation. */
-async function readNote(
-	absolutePath: string,
-): Promise<{ raw: Record<string, unknown>; links: NoteLinks }> {
-	let markdown: string;
-	try {
-		markdown = await fs.readFile(absolutePath, "utf8");
-	} catch {
-		return { raw: {}, links: { links: [], embeds: [] } };
-	}
-	let raw: Record<string, unknown> = {};
-	try {
-		raw = parseFrontmatter(markdown).data;
-	} catch {
-		// Broken frontmatter gives no properties; the content index reports it.
-	}
-	return { raw, links: noteLinks(markdown, raw) };
 }
 
 function pathParts(
@@ -281,10 +270,18 @@ function convertValue(
 ): Value {
 	if (raw === undefined || raw === null) return null;
 	if (raw instanceof Date) {
-		const date = dateFromYaml(raw);
+		// gray-matter's YAML reads `2024-05-01` as a UTC instant; Obsidian reads a
+		// date property as the local wall-clock value written.
+		const date = yamlDateAsLocal(raw);
+		if (!date) return null;
+		const hasTime =
+			date.getHours() !== 0 ||
+			date.getMinutes() !== 0 ||
+			date.getSeconds() !== 0 ||
+			date.getMilliseconds() !== 0;
 		// A text property keeps the date as it is written.
-		if (type !== "text") return date;
-		return formatMomentDate(new Date(date.ms), date.hasTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD");
+		if (type !== "text") return new DateValue(date.getTime(), hasTime);
+		return formatMomentDate(date, hasTime ? "YYYY-MM-DD HH:mm:ss" : "YYYY-MM-DD");
 	}
 	if (Array.isArray(raw)) return raw.map((item) => convertValue(item, undefined, link));
 	if (typeof raw === "object") {
@@ -314,27 +311,4 @@ function convertValue(
 	}
 	if (typeof raw === "number" || typeof raw === "boolean") return raw;
 	return String(raw);
-}
-
-/**
- * gray-matter's YAML reads `2024-05-01` and `2024-05-01 10:00:00` as UTC
- * instants. Obsidian reads both as local wall-clock values, so the UTC fields
- * are taken as local ones: a date property shows the day that is written.
- */
-function dateFromYaml(date: Date): DateValue {
-	const hasTime =
-		date.getUTCHours() !== 0 ||
-		date.getUTCMinutes() !== 0 ||
-		date.getUTCSeconds() !== 0 ||
-		date.getUTCMilliseconds() !== 0;
-	const local = new Date(
-		date.getUTCFullYear(),
-		date.getUTCMonth(),
-		date.getUTCDate(),
-		date.getUTCHours(),
-		date.getUTCMinutes(),
-		date.getUTCSeconds(),
-		date.getUTCMilliseconds(),
-	);
-	return new DateValue(local.getTime(), hasTime);
 }

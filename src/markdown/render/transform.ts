@@ -21,9 +21,9 @@ import {
 	processTaskStatuses,
 } from "../inline-passes.js";
 import { processMarkdownImages } from "../media.js";
+import { isPathInsideRoot } from "../path-containment.js";
 import { processDailyNoteNodes, processDataviewNodes } from "../remark-dataview.js";
 import { failPendingDiagnostics, reportPluginDiagnostic } from "../remark-diagnostics.js";
-import { isPathInsideRoot } from "../utils.js";
 import { mediaContextOf, type RenderContext } from "./context.js";
 import { processMermaidNodes, processPluginFences } from "./fences.js";
 import { renderInlineHtml } from "./html.js";
@@ -135,7 +135,6 @@ export async function transformContent(tree: Root, ctx: RenderContext): Promise<
 	);
 	if (options.enableMarkdownLinks) processMarkdownLinks(tree, ctx);
 
-	let formulas = 0;
 	if (options.enableMath) {
 		// The engine has to be loaded before the first formula is rendered, and
 		// rendering itself is synchronous. A MathJax install that is missing or
@@ -154,7 +153,8 @@ export async function transformContent(tree: Root, ctx: RenderContext): Promise<
 		// Only the page's own tree reaches the MDX compiler as a tree; an embed
 		// or fragment is serialized to an HTML string first, which has no
 		// representation for a JSX element.
-		formulas = processMath(tree, options.mathEngine, { jsx: ctx.mode === "page" });
+		const formulas = processMath(tree, options.mathEngine, { jsx: ctx.mode === "page" });
+		if (formulas > 0) ctx.mathCount.value += formulas;
 	}
 
 	if (ctx.mode !== "fragment") {
@@ -172,7 +172,7 @@ export async function transformContent(tree: Root, ctx: RenderContext): Promise<
 		// Only the top-level pass may fail the file: a broken link must not abort
 		// resolution of the remaining wikilinks, so failure is raised once.
 		failPendingDiagnostics(file);
-		await decorateCompiledPage(tree, ctx, formulas);
+		await decorateCompiledPage(tree, ctx);
 	}
 
 	// Last, and at every depth: values rebuilt from source slices during the pass

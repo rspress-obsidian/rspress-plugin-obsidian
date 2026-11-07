@@ -33,6 +33,7 @@
 // lz-string is CommonJS that Node's ESM loader cannot list named exports for,
 // so `import { decompressFromBase64 }` fails in dist/index.js under plain Node.
 import LZString from "lz-string";
+import { EXCALIDRAW_SECTION_END } from "../../../shared/excalidraw-data.js";
 import { parseFrontmatter } from "../../../shared/frontmatter.js";
 import { normalizeScene, type Scene, SceneError } from "./scene.js";
 
@@ -53,23 +54,8 @@ export interface DrawingNote {
 	embeddedFiles: Map<string, EmbeddedFileRef>;
 }
 
-/**
- * Where the plugin's data begins in a note's markdown (`# Excalidraw Data`,
- * `## Text Elements` or the drawing): everything above it is the back of the
- * note. The note's length when it has none.
- */
-export function backOfNoteEnd(markdown: string): number {
-	const start = markdown.search(DATA_HEADING);
-	return start === -1 ? markdown.length : start;
-}
-
 const COMPRESSED_DRAWING = /(\n##? Drawing\n[^`]*```compressed-json\n)([\s\S]*?)```(?:\n|$)/;
 const JSON_DRAWING = /\n##? Drawing\n[^`]*```json\n([\s\S]*?)```(?:\n|$)/;
-/** Where the plugin's own data begins, in the note as written (CRLF or LF). */
-const DATA_HEADING = /^(?:%%[\r\n]*)?(?:# Excalidraw Data|##? Text Elements|##? Drawing)[ \t\r]*$/m;
-/** Only the plugin's own headings end a section: a text element may hold `# Title`. */
-const SECTION_END =
-	/^(?:##? (?:Excalidraw Data|Text Elements|Element Links|Embedded [Ff]iles|Drawing)[ \t]*$|%%)/m;
 const TEXT_ELEMENTS_HEADING = /^##? Text Elements[ \t]*\n/m;
 const ELEMENT_LINKS_HEADING = /^##? Element Links[ \t]*\n/m;
 const EMBEDDED_FILES_HEADING = /^(?:## Embedded Files|# Embedded files)[ \t]*\n/m;
@@ -85,7 +71,7 @@ function sectionAfter(data: string, heading: RegExp): string | undefined {
 	const match = heading.exec(data);
 	if (!match) return undefined;
 	const body = data.slice(match.index + match[0].length);
-	const end = body.search(SECTION_END);
+	const end = body.search(EXCALIDRAW_SECTION_END);
 	return end === -1 ? body : body.slice(0, end);
 }
 

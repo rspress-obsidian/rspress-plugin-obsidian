@@ -5,8 +5,27 @@
  * peeled off right to left until only the description is left.
  */
 import * as rruleModule from "rrule";
+import { type Day, ISO_DAY_SHAPE } from "../../../shared/day.js";
+import {
+	extractInlineFields,
+	type InlineField,
+	LIST_ITEM,
+	LIST_ITEM_PREFIX,
+	TASK_BOX,
+} from "../../dataview-metadata.js";
+import {
+	PRIORITIES,
+	PRIORITY_INLINE_NAMES,
+	PRIORITY_NONE,
+	type Priority,
+	priorityOfEmoji,
+	priorityOfName,
+	TASK_FIELDS,
+	type TaskDateField,
+	type TaskField,
+} from "../../task-fields.js";
 import type { ContentPage } from "../../types.js";
-import { type Day, parseIsoDay, type TaskDate } from "./dates.js";
+import { parseIsoDay, type TaskDate } from "./dates.js";
 import { STATUS_TYPE_ORDER, statusFor, type TaskStatus } from "./settings.js";
 
 // Node's ESM loader reads rrule's CommonJS `main`, so its exports arrive under
@@ -31,27 +50,6 @@ export function recurrenceText(rule: string): string {
 		return "";
 	}
 }
-
-/** The dates a task carries, by the name queries use for them. */
-export type TaskDateField = "created" | "start" | "scheduled" | "due" | "cancelled" | "done";
-
-/** Priorities as Tasks numbers them: 0 highest … 5 lowest; 3 is "none". */
-export type Priority = 0 | 1 | 2 | 3 | 4 | 5;
-
-const PRIORITY_NONE: Priority = 3;
-
-/** Priority names as group headings and `data-task-priority` show them (3 is "Normal"). */
-export const PRIORITY_NAMES: readonly string[] = [
-	"Highest",
-	"High",
-	"Medium",
-	"Normal",
-	"Low",
-	"Lowest",
-];
-
-/** The emoji each priority is written with. */
-export const PRIORITY_EMOJI: readonly string[] = ["🔺", "⏫", "🔼", "", "🔽", "⏬"];
 
 /** The note a task lives in. */
 export interface TaskFile {
@@ -104,27 +102,19 @@ export interface Task extends ListEntryBase {
 
 export type ListEntry = Task | PlainListItem;
 
-const TASK_LINE = /^([\s\t>]*)([-*+]|[0-9]+[.)]) +\[(.)\] *(.*)/u;
-const LIST_LINE = /^([\s\t>]*)([-*+]|[0-9]+[.)])(?:[ \t]+(.*))?$/u;
+/** The `>`s and indentation before a list marker; the marker itself is `LIST_ITEM`'s. */
+const LIST_PREFIX = /^[\s\t>]*/u;
 const BLOCK_LINK = / \^[a-zA-Z0-9-]+$/u;
 const HASHTAGS = /(^|\s)#[^ !@#$%^&*(),.?":{}|<>]+/g;
-const TRAILING_HASHTAG = /(^|\s)#[^ !@#$%^&*(),.?":{}|<>]+$/;
+/** The tag at the end of the line, without the whitespace in front of it. */
+const TRAILING_HASHTAG = /(?:^|\s)(#[^ !@#$%^&*(),.?":{}|<>]+)$/u;
 
 const TASK_ID = "[a-zA-Z0-9-_]+";
 const TASK_ID_LIST = `${TASK_ID}( *, *${TASK_ID} *)*`;
-const ISO_DATE = "(\\d{4}-\\d{2}-\\d{2})";
 
-/** An emoji signifier at the end of the line. */
+/** An emoji signifier at the end of the line, its value in group 1. */
 function emojiField(symbols: string, value = ""): RegExp {
-	return new RegExp(`${symbols}\uFE0F?${value ? ` *${value}` : ""}$`);
-}
-
-/**
- * A Dataview inline field at the end of the line, in brackets or parentheses
- * (`[due:: 2024-05-01]`), with Tasks' tolerance for a trailing comma.
- */
-function dataviewField(inner: string): RegExp {
-	return new RegExp(`(?:(?=[^\\]]+\\])\\[|(?=[^)]+\\))\\() *${inner} *[)\\]](?: *,)?$`);
+	return new RegExp(`${symbols}\uFE0F?${value ? ` *${value}` : ""}$`, "u");
 }
 
 type Setter = (task: ParsedTaskBody, value: string) => void;
@@ -135,96 +125,83 @@ const dateSetter =
 		task.dates[field] = { text: value, day: parseIsoDay(value) };
 	};
 
-const DATAVIEW_PRIORITY: Record<string, Priority> = {
-	highest: 0,
-	high: 1,
-	medium: 2,
-	low: 4,
-	lowest: 5,
-};
+/**
+ * One fact a task line carries, in both spellings Tasks writes it: an emoji
+ * signifier, a Dataview field, or both. Its value is read from whichever ends
+ * the line.
+ */
+interface Signifier {
+	/** The emoji spelling, ending the line, its value in group 1. */
+	pattern?: RegExp;
+	/** The Dataview spelling: the keys it is written with, and the value it carries. */
+	dataview?: { names: readonly string[]; value: RegExp };
+	set: Setter;
+}
 
-/** Every signifier Tasks reads, emoji then Dataview, in the order it peels them. */
-const SIGNIFIERS: [RegExp, Setter][] = [
-	[
-		emojiField("(🔺|⏫|🔼|🔽|⏬)"),
-		(task, value) => {
-			task.priority = PRIORITY_EMOJI.indexOf(value) as Priority;
+/** A field's two spellings: its emoji signifier, and its Dataview key with the same value. */
+function fieldSignifier(field: TaskField, value: string, set: Setter): Signifier {
+	const spec = TASK_FIELDS[field];
+	return {
+		pattern: spec.emojis && emojiField(`(?:${spec.emojis.join("|")})`, `(${value})`),
+		dataview: { names: spec.names, value: new RegExp(`^(?:${value})$`, "u") },
+		set,
+	};
+}
+
+/** Every signifier Tasks reads, in the order it peels them. */
+const SIGNIFIERS: readonly Signifier[] = [
+	{
+		pattern: emojiField(
+			`(${PRIORITIES.map((spec) => spec.emoji)
+				.filter(Boolean)
+				.join("|")})`,
+		),
+		dataview: {
+			names: TASK_FIELDS.priority.names,
+			value: new RegExp(`^(?:${PRIORITY_INLINE_NAMES.join("|")})$`, "u"),
 		},
-	],
-	[
-		dataviewField("priority:: *(highest|high|medium|low|lowest)"),
-		(task, value) => {
-			task.priority = DATAVIEW_PRIORITY[value] ?? PRIORITY_NONE;
+		set: (task, value) => {
+			task.priority = priorityOfEmoji(value) ?? priorityOfName(value) ?? PRIORITY_NONE;
 		},
-	],
-	[emojiField("✅", ISO_DATE), dateSetter("done")],
-	[dataviewField(`completion:: *${ISO_DATE}`), dateSetter("done")],
-	[emojiField("❌", ISO_DATE), dateSetter("cancelled")],
-	[dataviewField(`cancelled:: *${ISO_DATE}`), dateSetter("cancelled")],
-	[emojiField("(?:📅|📆|🗓)", ISO_DATE), dateSetter("due")],
-	[dataviewField(`due:: *${ISO_DATE}`), dateSetter("due")],
-	[emojiField("(?:⏳|⌛)", ISO_DATE), dateSetter("scheduled")],
-	[dataviewField(`scheduled:: *${ISO_DATE}`), dateSetter("scheduled")],
-	[emojiField("🛫", ISO_DATE), dateSetter("start")],
-	[dataviewField(`start:: *${ISO_DATE}`), dateSetter("start")],
-	[emojiField("➕", ISO_DATE), dateSetter("created")],
-	[dataviewField(`created:: *${ISO_DATE}`), dateSetter("created")],
-	[
-		emojiField("🔁", "([a-zA-Z0-9, !]+)"),
-		(task, value) => {
-			task.recurrence = value.trim();
-		},
-	],
-	[
-		dataviewField("repeat:: *([a-zA-Z0-9, !]+)"),
-		(task, value) => {
-			task.recurrence = value.trim();
-		},
-	],
-	[
-		emojiField("🏁", "([a-zA-Z]+)"),
-		(task, value) => {
+	},
+	fieldSignifier("done", ISO_DAY_SHAPE, dateSetter("done")),
+	fieldSignifier("cancelled", ISO_DAY_SHAPE, dateSetter("cancelled")),
+	fieldSignifier("due", ISO_DAY_SHAPE, dateSetter("due")),
+	fieldSignifier("scheduled", ISO_DAY_SHAPE, dateSetter("scheduled")),
+	fieldSignifier("start", ISO_DAY_SHAPE, dateSetter("start")),
+	fieldSignifier("created", ISO_DAY_SHAPE, dateSetter("created")),
+	fieldSignifier("recurrence", "[a-zA-Z0-9, !]+", (task, value) => {
+		task.recurrence = value.trim();
+	}),
+	// Kanban has no on-completion field, so it is the one signifier outside the shared vocabulary.
+	{
+		pattern: emojiField("🏁", "([a-zA-Z]+)"),
+		dataview: { names: ["onCompletion"], value: /^[a-zA-Z]+$/u },
+		set: (task, value) => {
 			task.onCompletion = value.toLowerCase();
 		},
-	],
-	[
-		dataviewField("onCompletion:: *([a-zA-Z]+)"),
-		(task, value) => {
-			task.onCompletion = value.toLowerCase();
-		},
-	],
-	[
-		TRAILING_HASHTAG,
-		(task, value) => {
+	},
+	{
+		pattern: TRAILING_HASHTAG,
+		set: (task, value) => {
 			const tag = value.trim();
 			task.trailingTags = task.trailingTags ? `${tag} ${task.trailingTags}` : tag;
 		},
-	],
-	[
-		emojiField("🆔", `(${TASK_ID})`),
-		(task, value) => {
-			task.id = value.trim();
-		},
-	],
-	[
-		dataviewField(`id:: *(${TASK_ID})`),
-		(task, value) => {
-			task.id = value.trim();
-		},
-	],
-	[
-		emojiField("⛔", `(${TASK_ID_LIST})`),
-		(task, value) => {
-			task.dependsOn = value.replace(/ /g, "").split(",").filter(Boolean);
-		},
-	],
-	[
-		dataviewField(`dependsOn:: *(${TASK_ID_LIST})`),
-		(task, value) => {
-			task.dependsOn = value.replace(/ /g, "").split(",").filter(Boolean);
-		},
-	],
+	},
+	fieldSignifier("id", TASK_ID, (task, value) => {
+		task.id = value.trim();
+	}),
+	fieldSignifier("dependsOn", TASK_ID_LIST, (task, value) => {
+		task.dependsOn = value.replace(/ /g, "").split(",").filter(Boolean);
+	}),
 ];
+
+/** The Dataview spellings, by each key they are written with. */
+const DATAVIEW_SIGNIFIERS = new Map<string, Signifier>(
+	SIGNIFIERS.flatMap((signifier) =>
+		(signifier.dataview?.names ?? []).map((name) => [name, signifier] as const),
+	),
+);
 
 interface ParsedTaskBody {
 	description: string;
@@ -235,6 +212,42 @@ interface ParsedTaskBody {
 	id: string;
 	dependsOn: string[];
 	trailingTags: string;
+}
+
+/** The Dataview field ending `text`, in brackets or parentheses, its trailing comma allowed. */
+function trailingInlineField(text: string): InlineField | undefined {
+	const fields = extractInlineFields(text);
+	const last = fields[fields.length - 1];
+	if (!last || !/^ *,?$/u.test(text.slice(last.end))) return undefined;
+	return last;
+}
+
+/** Peel the emoji signifiers off the end of the body; whether any was there. */
+function peelEmojiSignifiers(task: ParsedTaskBody): boolean {
+	let peeled = false;
+	for (const signifier of SIGNIFIERS) {
+		if (!signifier.pattern) continue;
+		const match = signifier.pattern.exec(task.description);
+		if (!match) continue;
+		signifier.set(task, match[1] ?? "");
+		task.description = task.description.slice(0, match.index).trim();
+		peeled = true;
+	}
+	return peeled;
+}
+
+/** Peel the Dataview fields off the end of the body, one at a time; whether any was there. */
+function peelDataviewFields(task: ParsedTaskBody): boolean {
+	let peeled = false;
+	for (;;) {
+		const field = trailingInlineField(task.description);
+		const signifier = field && DATAVIEW_SIGNIFIERS.get(field.key);
+		if (!field || !signifier?.dataview?.value.test(field.value)) break;
+		signifier.set(task, field.value);
+		task.description = task.description.slice(0, field.start).trim();
+		peeled = true;
+	}
+	return peeled;
 }
 
 /** Peel the signifiers off a task body, as Tasks' serializer does (at most 20 passes). */
@@ -250,16 +263,8 @@ function parseTaskBody(body: string): ParsedTaskBody {
 		trailingTags: "",
 	};
 	for (let run = 0; run <= 20; run += 1) {
-		let matched = false;
-		for (const [pattern, set] of SIGNIFIERS) {
-			const match = pattern.exec(parsed.description);
-			if (!match) continue;
-			// The trailing-tag pattern captures its leading whitespace in group 1.
-			set(parsed, pattern === TRAILING_HASHTAG ? match[0] : (match[1] ?? ""));
-			parsed.description = parsed.description.slice(0, match.index).trim();
-			matched = true;
-		}
-		if (!matched) break;
+		const emojiPeeled = peelEmojiSignifiers(parsed);
+		if (!peelDataviewFields(parsed) && !emojiPeeled) break;
 	}
 	if (parsed.trailingTags) {
 		parsed.description = parsed.description
@@ -290,10 +295,14 @@ export function parseListLine(text: string, context: TaskLineContext): ListEntry
 		parent: undefined,
 		children: [],
 	};
-	const task = TASK_LINE.exec(text);
-	if (task) {
-		const [, indentation = "", , symbol = " ", rest = ""] = task;
-		let body = rest.trim();
+	const indentation = LIST_PREFIX.exec(text)?.[0] ?? "";
+	const item = LIST_ITEM.exec(text.slice(indentation.length));
+	if (!item) return undefined;
+	const itemText = item[4] ?? "";
+	const box = TASK_BOX.exec(itemText);
+	if (box) {
+		const symbol = box[1] ?? " ";
+		let body = (box[2] ?? "").trim();
 		if (context.globalFilter && !body.includes(context.globalFilter)) {
 			return { ...base, kind: "item", indentation, statusCharacter: symbol, description: body };
 		}
@@ -321,9 +330,13 @@ export function parseListLine(text: string, context: TaskLineContext): ListEntry
 			scheduledInferred: false,
 		};
 	}
-	const item = LIST_LINE.exec(text);
-	if (!item) return undefined;
-	return { ...base, kind: "item", indentation: item[1] ?? "", description: (item[3] ?? "").trim() };
+	return { ...base, kind: "item", indentation, description: itemText.trim() };
+}
+
+/** Whether a line is a list item at all, before reading the whole of it. */
+export function startsListItem(text: string): boolean {
+	const indentation = LIST_PREFIX.exec(text)?.[0] ?? "";
+	return LIST_ITEM_PREFIX.test(text.slice(indentation.length));
 }
 
 /** Done, cancelled and non-task statuses count as done. */

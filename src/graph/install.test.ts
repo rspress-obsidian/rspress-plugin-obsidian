@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+	createForceGraphBuilderConfig,
 	FORCE_GRAPH_INSTALL_HINT,
-	forceGraphBuilderConfig,
 	isForceGraphInstalled,
 } from "./install";
 
@@ -24,23 +24,27 @@ test("reports react-force-graph-2d missing from a directory with no node_modules
 test("contributes nothing to the build when react-force-graph-2d is installed", () => {
 	const warn = spyOn(console, "warn").mockImplementation(() => {});
 	try {
-		expect(forceGraphBuilderConfig({ installed: true })).toEqual({});
+		expect(createForceGraphBuilderConfig()({ installed: true })).toEqual({});
 		expect(warn).not.toHaveBeenCalled();
 	} finally {
 		warn.mockRestore();
 	}
 });
 
-test("aliases a missing react-force-graph-2d to an empty module and warns once", () => {
+test("aliases a missing react-force-graph-2d to an empty module and warns once per site", () => {
 	const warn = spyOn(console, "warn").mockImplementation(() => {});
 	try {
 		const alias = { resolve: { alias: { "react-force-graph-2d": false } } } as const;
-		expect(forceGraphBuilderConfig({ installed: false })).toEqual(alias);
-		expect(forceGraphBuilderConfig({ installed: false })).toEqual(alias);
+		const forOneSite = createForceGraphBuilderConfig();
+		expect(forOneSite({ installed: false })).toEqual(alias);
+		expect(forOneSite({ installed: false })).toEqual(alias);
 		// The markdown, canvas and graph plugins each build one config; the site
 		// is told once.
 		expect(warn).toHaveBeenCalledTimes(1);
 		expect(String(warn.mock.calls[0]?.[0])).toContain(FORCE_GRAPH_INSTALL_HINT);
+		// A second site in the same process still hears about its own graph.
+		expect(createForceGraphBuilderConfig()({ installed: false })).toEqual(alias);
+		expect(warn).toHaveBeenCalledTimes(2);
 	} finally {
 		warn.mockRestore();
 	}

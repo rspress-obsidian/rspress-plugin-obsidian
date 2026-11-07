@@ -109,8 +109,10 @@ describe("frontmatter parsing", () => {
 				expect(page?.title).toBe("YAML Page");
 				expect(page?.aliases).toEqual(["Alt One", "Alt Two"]);
 				expect(page?.tags).toEqual(["alpha"]);
-				// `publish: false` still drops the page from the index entirely.
+				// `publish: false` still drops the page from the index entirely,
+				// and records its path so the route hook can drop the route.
 				expect(index.pages.map((entry) => entry.relativePath)).toEqual(["note.md"]);
+				expect(index.unpublishedPaths).toEqual(new Set([path.join(root, "draft.md")]));
 			},
 		);
 	});
@@ -425,12 +427,15 @@ describe("heading ids", () => {
 	test("keeps commented headings and comment text out of the index", async () => {
 		await withVault(
 			{
-				"other.md": "## Plan\n%% secret salary 120k %%\nPublic text\n\n%%\n## Hidden\n%%\n",
+				"other.md":
+					"## Plan\n%% secret salary 120k %%\nPublic text\n\n%%\n## Hidden\n%%\n\n<!--\n## Private\n\n[[Ghost]] #hidden\n-->\n",
 			},
 			async (root) => {
 				const page = (await buildContentIndex(root)).byFilePathKey.get("other");
 				expect(page?.headings.map((h) => h.rawText)).toEqual(["Plan"]);
 				expect(page?.headings[0]?.preview).toBe("Public text");
+				expect(page?.wikilinkTargets).not.toContain("ghost");
+				expect(page?.tags).not.toContain("hidden");
 			},
 		);
 	});

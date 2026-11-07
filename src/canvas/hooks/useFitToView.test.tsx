@@ -6,8 +6,9 @@ if (!globalThis.document) GlobalRegistrator.register();
 import { afterEach, describe, expect, mock, test, vi } from "bun:test";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { CanvasData, CanvasNode } from "../types";
+import type { Viewport } from "../viewport";
 import { fitViewport, MAX_FIT_ZOOM, useFitToView } from "./useFitToView";
-import { MIN_ZOOM, type Viewport } from "./usePanZoom";
+import { MIN_ZOOM } from "./usePanZoom";
 
 afterEach(() => {
 	cleanup();

@@ -58,8 +58,8 @@ export interface EditorState {
 }
 
 export type EditorMessage =
-	/** Record `action`, whose result the caller already computed as `next`. */
-	| { type: "commit"; action: EditorAction; next: CanvasData }
+	/** Record `action`; the reducer derives the resulting board from the current one. */
+	| { type: "commit"; action: EditorAction }
 	| { type: "undo" }
 	| { type: "redo" }
 	/**
@@ -154,7 +154,7 @@ export function editorReducer(state: EditorState, message: EditorMessage): Edito
 	switch (message.type) {
 		case "commit":
 			return {
-				canvas: message.next,
+				canvas: applyEditorAction(state.canvas, message.action),
 				history: [...state.history, message.action],
 				future: [],
 				contentVersion: bump(state, message.action),
@@ -191,7 +191,7 @@ export interface CanvasEditor {
 	canUndo: boolean;
 	canRedo: boolean;
 	contentVersion: number;
-	commit: (action: EditorAction, next: CanvasData) => void;
+	commit: (action: EditorAction) => void;
 	undo: () => void;
 	redo: () => void;
 	preview: (update: (canvas: CanvasData) => CanvasData) => void;
@@ -199,15 +199,14 @@ export interface CanvasEditor {
 
 /**
  * The editor's board and its undo history, as one reducer: every edit is an
- * {@link EditorAction}, and undo/redo replay it in either direction. The
- * returned callbacks keep one identity for the component's lifetime.
+ * {@link EditorAction}, and undo/redo replay it in either direction. `commit`
+ * derives the board from the current one with {@link applyEditorAction}, so a
+ * caller describes the edit and never builds the result itself. The returned
+ * callbacks keep one identity for the component's lifetime.
  */
 export function useCanvasEditor(data: CanvasData): CanvasEditor {
 	const [state, dispatch] = useReducer(editorReducer, data, initEditorState);
-	const commit = useCallback(
-		(action: EditorAction, next: CanvasData) => dispatch({ type: "commit", action, next }),
-		[],
-	);
+	const commit = useCallback((action: EditorAction) => dispatch({ type: "commit", action }), []);
 	const undo = useCallback(() => dispatch({ type: "undo" }), []);
 	const redo = useCallback(() => dispatch({ type: "redo" }), []);
 	const preview = useCallback(

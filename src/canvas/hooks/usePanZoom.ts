@@ -1,16 +1,13 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-
-export interface Viewport {
-	x: number;
-	y: number;
-	zoom: number;
-}
-
-interface Point {
-	x: number;
-	y: number;
-}
+import {
+	OWN_GESTURE_SELECTOR,
+	type Point,
+	screenToWorld,
+	type Viewport,
+	viewportShowing,
+	viewportTransform,
+} from "../viewport.js";
 
 /**
  * Zoom limits. The floor is low enough to fit a board several screens wide
@@ -32,10 +29,6 @@ const VIEWPORT_KEY_PREFIX = "rspress-canvas-viewport:";
  * the viewport, so every link inside a card would stop navigating.
  */
 const PAN_CAPTURE_THRESHOLD = 3;
-
-/** Elements that own their own drag gesture; a press on them never pans. */
-const OWN_GESTURE_SELECTOR =
-	"input, textarea, select, video, audio, [contenteditable=''], [contenteditable='true']";
 
 function clampZoom(zoom: number): number {
 	return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
@@ -90,12 +83,7 @@ export function viewportStorageKey(boardId: string): string {
  */
 export function zoomAround(viewport: Viewport, factor: number, anchor: Point): Viewport {
 	const zoom = clampZoom(viewport.zoom * factor);
-	const scale = zoom / viewport.zoom;
-	return {
-		x: anchor.x - scale * (anchor.x - viewport.x),
-		y: anchor.y - scale * (anchor.y - viewport.y),
-		zoom,
-	};
+	return viewportShowing(screenToWorld(viewport, anchor), anchor, zoom);
 }
 
 /**
@@ -120,8 +108,7 @@ export function pinchViewport(
 		y: (startPoints[0].y + startPoints[1].y) / 2,
 	};
 	const mid = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
-	const world = { x: (startMid.x - start.x) / start.zoom, y: (startMid.y - start.y) / start.zoom };
-	return { x: mid.x - world.x * zoom, y: mid.y - world.y * zoom, zoom };
+	return viewportShowing(screenToWorld(start, startMid), mid, zoom);
 }
 
 /** Wheel deltas in pixels, whatever unit the device reported them in. */
@@ -461,7 +448,7 @@ export function usePanZoom(options: PanZoomOptions = {}) {
 		setViewport((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
 	}, []);
 
-	const transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`;
+	const transform = viewportTransform(viewport);
 
 	return {
 		viewport,

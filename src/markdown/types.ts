@@ -3,7 +3,7 @@ import type { Plugin } from "unified";
 import type { MathEngine } from "../math.js";
 import type { MermaidSecurityLevel } from "../mermaid/classes.js";
 import type { CanvasBoards } from "../shared/canvas-routes.js";
-import type { PublishedFileRoute } from "../shared/file-routes.js";
+import type { FileRoutes, PublishedFileRoute } from "../shared/file-routes.js";
 import type { BasesOptions } from "./obsidian-plugins/bases/options.js";
 import type { ExcalidrawOptions } from "./obsidian-plugins/excalidraw/options.js";
 import type { KanbanOptions } from "./obsidian-plugins/kanban/options.js";
@@ -340,6 +340,13 @@ export interface ParsedWikiLink {
 	search?: "heading" | "block";
 	/** `true` for `[[#Heading]]` style links that stay on the current page. */
 	isCurrentPageReference: boolean;
+	/**
+	 * The target is known not to exist, so the graph draws it as an unresolved
+	 * node instead of looking for a page with a matching name. A `.canvas` file
+	 * card sets this: the canvas shows such a card as missing, while name
+	 * matching would connect it to some other note with the same basename.
+	 */
+	ghost?: boolean;
 }
 
 /** Raw match metadata produced by the tokenizer before parsing. */
@@ -348,6 +355,22 @@ export interface WikilinkMatch {
 	inner: string;
 	start: number;
 	end: number;
+}
+
+/**
+ * A link as Obsidian's metadata cache records it, for `file.links` in Bases.
+ *
+ * `target` is as written — `Folder/Note#Heading^block` for a wikilink, the
+ * destination for a markdown link decoded the way `decodeURI` decodes it, so
+ * `%26` stays — because `file.hasLink("Note.md")` compares exactly that text.
+ */
+export interface CacheLink {
+	target: string;
+	/** The alias or label when written, else what Obsidian shows for the link. */
+	display: string;
+	isEmbed: boolean;
+	/** Frontmatter property or body text; `file.embeds` lists body embeds only. */
+	origin: "property" | "body";
 }
 
 /** A single heading entry indexed from a page. */
@@ -360,6 +383,12 @@ export interface HeadingEntry {
 	explicitId?: string;
 	/** Heading level, 1–6. Absent on hand-built entries. */
 	depth?: number;
+	/**
+	 * `false` when the heading sits inside a blockquote or callout — a section of
+	 * the note, not its title. Absent means top-level (and is absent on
+	 * hand-built entries).
+	 */
+	topLevel?: boolean;
 	/** The heading's inline markdown as written, for `[[Note#**Bold** text]]`. */
 	sourceText?: string;
 	/** Short plain-text preview of the content following this heading
@@ -449,6 +478,13 @@ export interface ContentPage {
 	 * resolve exactly this list. Absent on hand-built pages.
 	 */
 	outlinks?: ParsedWikiLink[];
+	/**
+	 * The page's links in Obsidian metadata-cache form, for Bases' `file.links`:
+	 * frontmatter properties first, then body links in source order, then the
+	 * body's embeds; repeats kept and targets as written. Absent on hand-built
+	 * pages.
+	 */
+	fileLinks?: CacheLink[];
 	/** Maps slugified heading text → HeadingEntry for O(1) resolution. */
 	headingBySlug: Map<string, HeadingEntry>;
 	/** Maps normalized (lowercased, single-spaced) raw heading text → first heading. */
@@ -456,6 +492,12 @@ export interface ContentPage {
 	blocks: BlockEntry[];
 	/** Frontmatter and inline fields indexed for static Dataview queries. */
 	dataviewFields: Record<string, unknown>;
+	/**
+	 * The page's parsed frontmatter, kept even when `dataview` is off so features
+	 * that read properties (Bases, Kanban, Templater) need no second file read.
+	 * Absent on hand-built pages.
+	 */
+	frontmatter?: Record<string, unknown>;
 	dataviewTasks: DataviewTask[];
 	dataviewLists: DataviewListItem[];
 }
@@ -473,6 +515,12 @@ export interface ContentIndex {
 	routePrefix?: string;
 	pages: ContentPage[];
 	assets: ContentAsset[];
+	/**
+	 * Absolute paths of pages that were indexed and then dropped for
+	 * `publish: false`. The route hook removes their routes from this set
+	 * instead of re-reading every page's frontmatter for the same answer.
+	 */
+	unpublishedPaths: ReadonlySet<string>;
 	byAbsolutePath: Map<string, ContentPage>;
 	/** Legacy route-oriented lookup retained for callers inspecting Rspress routes. */
 	byPathKey: Map<string, ContentPage>;
@@ -484,8 +532,6 @@ export interface ContentIndex {
 	byTag: Map<string, ContentPage[]>;
 	byAssetPath: Map<string, ContentAsset>;
 	byAssetBaseName: Map<string, ContentAsset[]>;
-	/** Case-insensitive pathKey → pages lookup. */
-	byPathKeyCI: Map<string, ContentPage[]>;
 	/** Case-insensitive exact vault path → pages lookup. */
 	byFilePathKeyCI: Map<string, ContentPage[]>;
 	/** Case-insensitive basename → pages lookup. */
@@ -598,6 +644,11 @@ export interface ResolveContext {
 		 * the site has no canvas feature.
 		 */
 		canvasBoards?: CanvasBoards;
+		/**
+		 * Non-Markdown files the site's features publish as pages: a link to one
+		 * opens that page instead of the raw file. Unset outside a build.
+		 */
+		fileRoutes?: FileRoutes;
 	};
 }
 
@@ -641,4 +692,9 @@ export interface RemarkWikiLinkPluginOptions {
 	 * unset, a board link resolves as a plain attachment.
 	 */
 	getCanvasBoards?: () => Promise<CanvasBoards> | undefined;
+	/**
+	 * The files features publish as pages, for links that name them; unset
+	 * outside a build, when such a link resolves as a plain attachment.
+	 */
+	getFileRoutes?: () => FileRoutes;
 }

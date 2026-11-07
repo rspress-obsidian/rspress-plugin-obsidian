@@ -5,8 +5,11 @@
  * nesting, fields and emoji shorthands.
  */
 import { getContentLineFlags } from "../shared/content-flags.js";
+import { escapeRegExp } from "../shared/escape.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../shared/paths.js";
+import { yamlDateAsLocal } from "../shared/yaml-date.js";
 import { DataviewLink, parseDateLiteral, parseDuration } from "./dataview-values.js";
+import { PRIORITIES, TASK_FIELDS, type TaskField } from "./task-fields.js";
 import type { DataviewListItem, DataviewTask } from "./types.js";
 
 /** One `[key:: value]`, `(key:: value)`, emoji shorthand or full-line `key:: value`. */
@@ -68,27 +71,41 @@ function findWrappedField(line: string, start: number): InlineField | undefined 
 	};
 }
 
-/** Tasks-plugin and Dataview emoji shorthands for task dates. */
-const EMOJI_DATE_FIELDS: Array<{ pattern: RegExp; key: string }> = [
-	{ pattern: /\u{2795}\s*(\d{4}-\d{2}-\d{2})/u, key: "created" },
-	{ pattern: /\u{1F6EB}\s*(\d{4}-\d{2}-\d{2})/u, key: "start" },
-	{ pattern: /[\u{23F3}\u{231B}]\s*(\d{4}-\d{2}-\d{2})/u, key: "scheduled" },
-	{ pattern: /(?:\u{1F4C5}|\u{1F4C6}|\u{1F5D3}\u{FE0F}?)\s*(\d{4}-\d{2}-\d{2})/u, key: "due" },
-	{ pattern: /\u{2705}\s*(\d{4}-\d{2}-\d{2})/u, key: "completion" },
+/** Tasks-plugin fields Dataview exposes as `key:: value` when written with an emoji. */
+const EMOJI_DATE_KEYS: ReadonlyArray<readonly [field: TaskField, key: string]> = [
+	["created", "created"],
+	["start", "start"],
+	["scheduled", "scheduled"],
+	["due", "due"],
+	["done", "completion"],
+	["cancelled", "cancelled"],
 ];
+
+/** Tasks-plugin and Dataview emoji shorthands for task dates. */
+const EMOJI_DATE_FIELDS: Array<{ pattern: RegExp; key: string }> = EMOJI_DATE_KEYS.flatMap(
+	([field, key]) =>
+		(TASK_FIELDS[field].emojis ?? []).map((emoji) => ({
+			pattern: new RegExp(`${escapeRegExp(emoji)}\\uFE0F?\\s*(\\d{4}-\\d{2}-\\d{2})`, "u"),
+			key,
+		})),
+);
 
 /** Tasks-plugin priority signifiers, which Dataview itself leaves as text. */
-const PRIORITY_EMOJI: Array<[string, string]> = [
-	["\u{1F53A}", "highest"],
-	["\u{23EB}", "high"],
-	["\u{1F53C}", "medium"],
-	["\u{1F53D}", "low"],
-	["\u{23EC}", "lowest"],
-];
+const PRIORITY_EMOJI: Array<[string, string]> = PRIORITIES.flatMap((spec) =>
+	spec.emoji ? [[spec.emoji, spec.inline ?? spec.query] as [string, string]] : [],
+);
 
 /** Every Tasks-plugin signifier, so a 🔁 rule stops at the next one. */
-const TASK_SIGNIFIER =
-	/[\u{2795}\u{1F6EB}\u{23F3}\u{231B}\u{1F4C5}\u{1F4C6}\u{1F5D3}\u{2705}\u{274C}\u{1F53A}\u{23EB}\u{1F53C}\u{1F53D}\u{23EC}\u{1F194}\u{26D4}\u{1F3C1}\u{1F501}[(]/u;
+const TASK_SIGNIFIER = new RegExp(
+	`(?:${[
+		...Object.values(TASK_FIELDS).flatMap((spec) => spec.emojis ?? []),
+		...PRIORITIES.map((spec) => spec.emoji).filter(Boolean),
+		"\u{1F3C1}",
+	]
+		.map(escapeRegExp)
+		.join("|")}|\\[|\\()`,
+	"u",
+);
 
 function extractTaskShorthands(line: string, isTask: boolean): InlineField[] {
 	const fields: InlineField[] = [];
@@ -273,17 +290,7 @@ function parseInlineValue(value: string): unknown {
  */
 function frontmatterLeaf(value: unknown): unknown {
 	if (value instanceof Date) {
-		const local = new Date(
-			value.getUTCFullYear(),
-			value.getUTCMonth(),
-			value.getUTCDate(),
-			value.getUTCHours(),
-			value.getUTCMinutes(),
-			value.getUTCSeconds(),
-			value.getUTCMilliseconds(),
-		);
-		local.setFullYear(value.getUTCFullYear());
-		return local;
+		return yamlDateAsLocal(value) ?? value;
 	}
 	if (typeof value !== "string") return value;
 	const date = parseDateLiteral(value);
@@ -392,8 +399,25 @@ function finalizeFields(groups: FieldGroups): Record<string, unknown> {
 	return fields;
 }
 
-const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/u;
-const TASK_BOX = /^\[(.)\](?:[ \t]+([\s\S]*))?$/u;
+const LIST_MARKER = "([-*+]|\\d{1,9}[.)])";
+/**
+ * One list item line: indent, marker (`-`, `*`, `+`, `1.`, `1)`) and text.
+ * Exported because Tasks and Kanban read the same lines the inline-field
+ * scanner walks; a second regex is how `-\t[ ] x` became a task in one
+ * plugin and not the other.
+ */
+export const LIST_ITEM = new RegExp(`^([ \\t]*)${LIST_MARKER}(?:([ \\t]+)(.*))?$`, "u");
+/** A task marker (`[x]` …) at the start of a list item's text, with what follows. */
+export const TASK_BOX = /^\[(.)\](?:[ \t]+([\s\S]*))?$/u;
+/**
+ * The same marker at the head of a multi-line item source, ending where the
+ * text begins — Kanban reads a card's source by prefix and needs the lengths.
+ */
+export const LIST_ITEM_PREFIX = new RegExp(
+	`^([ \\t]*)${LIST_MARKER}(?:[ \\t]+|(?=\\r?\\n)|$)`,
+	"u",
+);
+export const TASK_BOX_PREFIX = /^\[(.)\](?:[ \t]+|(?=\r?\n)|$)/u;
 const THEMATIC_BREAK = /^[ \t]{0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const HEADING = /^[ \t]{0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 /** Lines that interrupt a paragraph, so they cannot lazily continue a list item. */

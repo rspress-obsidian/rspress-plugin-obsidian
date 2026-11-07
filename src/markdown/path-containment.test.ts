@@ -3,15 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import fc from "fast-check";
+import { normalizeFilePathKey } from "../shared/paths.js";
 import { normalizeFsPath } from "../shared/route-path.js";
 import { normalizeUnicode } from "../shared/slug.js";
 import {
 	isPathInsideRoot,
 	isRealPathInsideRoot,
-	normalizeFilePathKey,
 	normalizeRealPath,
 	pathUnderRoot,
-} from "./utils.ts";
+} from "./path-containment.js";
 
 /** The remark pass reports forward-slash paths while `vaultRoot` comes from
  *  `path.resolve`; a `path.sep` prefix test silently fails on Windows. */

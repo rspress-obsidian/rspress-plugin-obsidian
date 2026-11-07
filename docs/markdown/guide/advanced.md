@@ -263,9 +263,8 @@ each broken link is reported once.
 - **Private files stay private.** Dotfiles, dot-folders, `publish: false`
   notes and attachments that only those notes use are never published; a
   canvas file card that names one publishes neither its text nor its path.
-  `%%comments%%` are removed from the page, its outline and the search index,
-  and `%%comments%%` and `<!-- comments -->` from canvas text cards and the
-  notes canvas cards show.
+  `%%comments%%` and `<!-- comments -->` are removed from the page, its
+  outline, the search index and canvas text cards.
 
 ## Troubleshooting
 

@@ -42,6 +42,7 @@ function makeIndex(pages: ContentPage[]): ContentIndex {
 	const index = {
 		pages,
 		assets: [],
+		unpublishedPaths: new Set(),
 		byAbsolutePath: new Map(),
 		byPathKey: new Map(),
 		byFilePathKey: new Map(),
@@ -51,7 +52,6 @@ function makeIndex(pages: ContentPage[]): ContentIndex {
 		byTag: new Map(),
 		byAssetPath: new Map(),
 		byAssetBaseName: new Map(),
-		byPathKeyCI: new Map(),
 		byFilePathKeyCI: new Map(),
 		byBaseNameCI: new Map(),
 		byAssetPathCI: new Map(),

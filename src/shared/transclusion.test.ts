@@ -33,6 +33,23 @@ describe("extractHeadingSection", () => {
 			"## Title {#custom}\nBody",
 		);
 	});
+
+	test("ignores a heading line inside a fence", () => {
+		const content = "```\n# Fake\n```\n# Real\ntext\n";
+		expect(extractHeadingSection(content, "Fake")).toBeUndefined();
+		expect(extractHeadingSection(content, "Real")).toBe("# Real\ntext");
+	});
+
+	test("finds a heading inside a blockquote, as the page does", () => {
+		const content = "> ## Setup\n> quoted body\n\n## Other\ntext";
+		expect(extractHeadingSection(content, "Setup")).toBe("> ## Setup\n> quoted body");
+	});
+
+	test("numbers a repeated heading so the slug the page publishes selects it", () => {
+		const content = "## Details\nfirst\n\n## Details\nsecond\n";
+		expect(extractHeadingSection(content, "Details")).toBe("## Details\nfirst");
+		expect(extractHeadingSection(content, "Details-1")).toBe("## Details\nsecond");
+	});
 });
 
 describe("extractBlockSection", () => {
@@ -53,5 +70,14 @@ describe("extractBlockSection", () => {
 describe("extractNoteSection", () => {
 	test("routes a `^` subpath to the block extractor", () => {
 		expect(extractNoteSection("Line ^x", "#^x")).toBe("Line");
+	});
+
+	test("a missing or malformed block id selects nothing", () => {
+		expect(extractNoteSection("Line ^x", "#^missing")).toBeUndefined();
+		expect(extractNoteSection("Line ^x", "#^bad id!")).toBeUndefined();
+	});
+
+	test("an empty subpath is the whole note", () => {
+		expect(extractNoteSection("# A\ntext", "")).toBe("# A\ntext");
 	});
 });

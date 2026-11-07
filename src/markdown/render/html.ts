@@ -7,10 +7,11 @@ import type { Root } from "mdast";
 import rehypeStringify from "rehype-stringify";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
+import { blankComments } from "../comments.js";
 import { parseObsidianMarkdown } from "../syntax.js";
 import type { ContentPage } from "../types.js";
 import { visit } from "../visit.js";
-import { blankComments, contextForPage, type RenderContext } from "./context.js";
+import { contextForPage, type RenderContext } from "./context.js";
 
 /** Add the `#` link Rspress gives every heading, to the headings of an embed. */
 function rehypeHeadingAnchors() {

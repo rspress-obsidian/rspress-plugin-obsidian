@@ -14,54 +14,69 @@
  *
  * Node-free and import-only-types so any bundle can read it.
  */
-import type { DocsRouteLocales } from "./route-path.js";
+import type { FileRoutes } from "./file-routes.js";
+import type { ContentIndexOptions } from "./index-options.js";
+import { attachPluginValue, findPluginValue } from "./plugin-channel.js";
 
-/**
- * The options the plugin indexes a root with — structurally the markdown
- * feature's `ContentIndexOptions`, declared here because `src/shared` must
- * not depend on a feature.
- */
-interface PublishedIndexOptions {
-	routePrefix?: string;
-	locales?: DocsRouteLocales;
-	unlinkedMentions?: boolean;
-	dataview?: boolean;
-	enableCaseInsensitiveLookup?: boolean;
-	enableFuzzyMatching?: boolean;
-	excludeFolders?: string[];
+/** A vault the markdown plugin publishes, with the options it indexes it with. */
+interface PublishedVault {
+	/** Absolute vault root. */
+	root: string;
+	/** Route prefix of vault pages (`"/vault"` by default). */
+	routePrefix: string;
+	/** The options the plugin indexes the vault with. */
+	indexOptions: ContentIndexOptions;
 }
 
-export interface PublishedContentConfig {
-	/** Absolute docs root (`config.root`). */
-	docsRoot: string;
-	/** Absolute vault root, when a vault is published. */
-	vaultRoot?: string;
-	/** Route prefix of vault pages (`"/vault"` by default). */
-	vaultRoutePrefix: string;
-	/**
-	 * The exact options the plugin indexes each root with, so a reader hits the
-	 * same `getCachedContentIndex` entry. The docs options carry the site's
-	 * locales, so docs routes match the ones Rspress publishes.
-	 */
-	docsIndexOptions: PublishedIndexOptions;
-	vaultIndexOptions?: PublishedIndexOptions;
+/** Link-resolution switches with this site's defaults already applied. */
+export interface PublishedResolveOptions {
 	enableCaseInsensitiveLookup: boolean;
 	enableFuzzyMatching: boolean;
 }
 
-// `Symbol.for`, not `Symbol()`: the per-feature entries may be loaded as
-// separate bundle copies (an ESM and a CJS entry side by side), and each copy
-// has to recognise a markdown plugin built by another.
-const PUBLISHED_CONTENT = Symbol.for("rspress-plugin-obsidian:published-content");
+/** The switches a markdown plugin uses when the site configures none. */
+export const DEFAULT_RESOLVE_OPTIONS: PublishedResolveOptions = {
+	enableCaseInsensitiveLookup: true,
+	enableFuzzyMatching: false,
+};
 
-type PublishedContentReader = () => PublishedContentConfig;
+export interface PublishedContentConfig {
+	/** Absolute docs root (`config.root`). */
+	docsRoot: string;
+	/** The published vault, when there is one. */
+	vault?: PublishedVault;
+	/**
+	 * The exact options the plugin indexes each root with, so a reader hits the
+	 * same `getCachedContentIndex` entry. The docs options carry the site's
+	 * locales and resolution rules, so docs routes and link resolution match the
+	 * ones Rspress publishes.
+	 */
+	docsIndexOptions: ContentIndexOptions;
+	/**
+	 * How links resolve on this site, defaults applied. Features resolve with
+	 * this rather than re-deriving the switches from an index's options: the
+	 * note pass, the canvas and the graph must resolve alike, whichever tree
+	 * the target lives in.
+	 */
+	resolveOptions: PublishedResolveOptions;
+	/**
+	 * Pages the build publishes for non-Markdown files (`.base` views, plain
+	 * `.excalidraw` drawings), by absolute path. A reader resolving links outside
+	 * the note pass hands this to the resolver, or `[[View.base]]` resolves to a
+	 * download URL instead of the page that exists.
+	 */
+	fileRoutes: FileRoutes;
+}
+
+/** Name the markdown plugin publishes under; see {@link attachPluginValue}. */
+const PUBLISHED_CONTENT = "published-content";
 
 /** Attach the reader a sibling feature calls to learn what `plugin` publishes. */
 export function attachPublishedContent<Plugin extends object>(
 	plugin: Plugin,
-	read: PublishedContentReader,
+	read: () => PublishedContentConfig,
 ): Plugin {
-	return Object.assign(plugin, { [PUBLISHED_CONTENT]: read });
+	return attachPluginValue(plugin, PUBLISHED_CONTENT, read);
 }
 
 /**
@@ -73,10 +88,5 @@ export function attachPublishedContent<Plugin extends object>(
 export function findPublishedContent(config: {
 	plugins?: readonly unknown[];
 }): PublishedContentConfig | undefined {
-	for (const plugin of config.plugins ?? []) {
-		if (typeof plugin !== "object" || plugin === null || !(PUBLISHED_CONTENT in plugin)) continue;
-		const read = plugin[PUBLISHED_CONTENT];
-		if (typeof read === "function") return read();
-	}
-	return undefined;
+	return findPluginValue<PublishedContentConfig>(config, PUBLISHED_CONTENT);
 }

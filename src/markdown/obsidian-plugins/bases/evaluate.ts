@@ -135,7 +135,6 @@ function budgetOf(env: EvalEnv): WorkBudget {
 	return budget;
 }
 
-/** The value of `ref` for `row`. */
 export function propertyValue(ref: PropertyRef, env: EvalEnv, row: RowScope): Value {
 	if (ref.kind === "formula") return evaluateFormula(ref.name, env, row);
 	const file = row.file;
@@ -589,10 +588,29 @@ function seededRandom(key: string): number {
 	return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-function numbersOf(values: Value[]): number[] {
+/**
+ * The numbers in `values`, flattened, `NaN` dropped: what `sum()`, `mean()` and
+ * the numeric summaries count.
+ */
+export function numbersOf(values: Value[]): number[] {
 	return flatList(values, Number.POSITIVE_INFINITY).filter(
 		(value): value is number => typeof value === "number" && !Number.isNaN(value),
 	);
+}
+
+/** The arithmetic mean of `list`; `null` when there is nothing to average. */
+export function meanOf(list: readonly number[]): number | null {
+	return list.length === 0 ? null : list.reduce((total, value) => total + value, 0) / list.length;
+}
+
+/** The median of the numbers in `values`; `null` when there are none. */
+export function medianOf(values: Value[]): number | null {
+	const list = numbersOf(values).sort((a, b) => a - b);
+	if (list.length === 0) return null;
+	const middle = Math.floor(list.length / 2);
+	return list.length % 2 === 1
+		? (list[middle] ?? null)
+		: ((list[middle - 1] ?? 0) + (list[middle] ?? 0)) / 2;
 }
 
 function extreme(values: Value[], sign: 1 | -1): Value {
@@ -774,18 +792,8 @@ const LIST_METHODS: Record<string, Method<Value[]>> = {
 		});
 	},
 	sum: (receiver) => numbersOf(receiver).reduce((total, value) => total + value, 0),
-	mean: (receiver) => {
-		const numbers = numbersOf(receiver);
-		return numbers.length === 0 ? null : numbers.reduce((a, b) => a + b, 0) / numbers.length;
-	},
-	median: (receiver) => {
-		const numbers = numbersOf(receiver).sort((a, b) => a - b);
-		if (numbers.length === 0) return null;
-		const middle = Math.floor(numbers.length / 2);
-		return numbers.length % 2 === 1
-			? (numbers[middle] ?? null)
-			: ((numbers[middle - 1] ?? 0) + (numbers[middle] ?? 0)) / 2;
-	},
+	mean: (receiver) => meanOf(numbersOf(receiver)),
+	median: (receiver) => medianOf(receiver),
 	min: (receiver) => extreme(receiver, -1),
 	max: (receiver) => extreme(receiver, 1),
 };

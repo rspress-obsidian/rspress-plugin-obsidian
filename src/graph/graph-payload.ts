@@ -1,19 +1,38 @@
 import type { GraphData, GraphNode, GraphNodeKind, GraphPayload } from "./types.js";
 
-const KIND_CODE: Record<GraphNodeKind, readonly [navigable: string, inert: string]> = {
-	page: ["p", "p"],
-	tag: ["t", "T"],
-	attachment: ["a", "a"],
-	unresolved: ["u", "u"],
-};
-
-const NODE_BY_CODE: Record<string, { kind: GraphNodeKind; navigable: boolean }> = {
+/**
+ * The wire alphabet: one character per (kind, navigability) pair, decoded by
+ * reading this table. Some kinds only ever occur one way — a page always
+ * navigates, an unresolved link never does — so their single letter carries
+ * that meaning instead of a second letter that would never be written.
+ */
+const NODE_CODES: Record<string, { readonly kind: GraphNodeKind; readonly navigable: boolean }> = {
 	p: { kind: "page", navigable: true },
-	t: { kind: "tag", navigable: true },
 	T: { kind: "tag", navigable: false },
+	t: { kind: "tag", navigable: true },
 	a: { kind: "attachment", navigable: true },
 	u: { kind: "unresolved", navigable: false },
 };
+
+/** The letter each `(kind, navigable)` pair is written as, for {@link encodeGraphPayload}. */
+const CODE_BY_MEANING = new Map<string, string>(
+	Object.entries(NODE_CODES).map(([code, { kind, navigable }]) => [`${kind}:${navigable}`, code]),
+);
+
+/**
+ * The wire code for one node's pair.
+ *
+ * Every pair the graph builder emits is in `NODE_CODES`, so a missing one is a
+ * builder bug; throwing here names the pair instead of writing a letter that
+ * decodes as some other kind.
+ */
+function wireCode(node: GraphNode): string {
+	const code = CODE_BY_MEANING.get(`${node.kind}:${node.navigable}`);
+	if (code === undefined) {
+		throw new Error(`graph payload has no wire code for ${node.kind}:${node.navigable}`);
+	}
+	return code;
+}
 
 export function encodeGraphPayload(graph: GraphData, base: string): GraphPayload {
 	const indexById = new Map<string, number>();
@@ -31,7 +50,7 @@ export function encodeGraphPayload(graph: GraphData, base: string): GraphPayload
 		indexById.set(node.id, index);
 		payload.ids.push(node.id);
 		payload.labels.push(node.label);
-		kinds += KIND_CODE[node.kind][node.navigable ? 0 : 1];
+		kinds += wireCode(node);
 		payload.paths.push(node.path);
 		payload.ctimes.push(Math.round(node.ctime));
 	});
@@ -52,7 +71,9 @@ export function graphPayloadModuleSource(payload: GraphPayload): string {
 
 export function decodeGraphPayload(payload: GraphPayload): GraphData {
 	const nodes: GraphNode[] = payload.ids.map((id, index) => {
-		const code = NODE_BY_CODE[payload.kinds[index] ?? "p"] ?? NODE_BY_CODE.p;
+		// `kinds` can be shorter than `ids` in a payload an older bundle wrote; a
+		// node with no code decodes as a navigable page.
+		const code = NODE_CODES[payload.kinds[index] ?? ""];
 		return {
 			id,
 			label: payload.labels[index] ?? id,

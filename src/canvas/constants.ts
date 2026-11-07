@@ -5,3 +5,6 @@
  * plugin and the browser components share it.
  */
 export const DEFAULT_IFRAME_SANDBOX = "allow-scripts allow-popups";
+
+/** URL directory (under the site base) the published board JSON is served from. */
+export const CANVAS_JSON_DIR = "__canvases__";

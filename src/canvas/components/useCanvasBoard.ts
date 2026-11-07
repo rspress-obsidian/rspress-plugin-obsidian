@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CANVAS_JSON_DIR } from "../constants.js";
 import { parseCanvas } from "../parser.js";
 import type { CanvasData } from "../types.js";
 import { normalizeSiteBase, siteBase } from "../utils/base.js";
@@ -18,7 +19,7 @@ export function resolveCanvasJsonUrl(src: string, basePath?: string): string {
 		.filter((segment) => segment && segment !== "." && segment !== "..")
 		.map((segment) => encodeURIComponent(segment));
 	const base = basePath === undefined ? siteBase() : normalizeSiteBase(basePath);
-	return `${base}__canvases__/${segments.join("/")}.json`;
+	return `${base}${CANVAS_JSON_DIR}/${segments.join("/")}.json`;
 }
 
 export type CanvasBoardState =

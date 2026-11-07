@@ -2,22 +2,24 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { getCachedContentIndex } from "../../markdown/content-index.js";
 import { extractPageLinks } from "../../markdown/page-links.js";
+import { isPathInsideRoot } from "../../markdown/path-containment.js";
 import type {
 	ContentIndex,
 	ContentPage,
 	ParsedWikiLink,
 	ResolveContext,
 } from "../../markdown/types.js";
-import { isPrivateVaultFile } from "../../markdown/vault-files.js";
+import { findAssetByPath, findPageByPath, isPrivateVaultFile } from "../../markdown/vault-files.js";
 import type { CanvasBoardRoute, CanvasBoards } from "../../shared/canvas-routes.js";
 import { parseFrontmatter } from "../../shared/frontmatter.js";
-import type { PublishedContentConfig } from "../../shared/published-content.js";
+import { TAG_ROUTE_PREFIX } from "../../shared/paths.js";
+import {
+	DEFAULT_RESOLVE_OPTIONS,
+	type PublishedContentConfig,
+} from "../../shared/published-content.js";
 import { normalizeFsPath } from "../../shared/route-path.js";
 import { extractCanvasLinks } from "./canvas-links.js";
 import type { CollectedRoute } from "./types.js";
-
-/** The tag-page routes the markdown plugin generates (`tagRoutePath`). */
-export const TAG_ROUTE_PREFIX = "/tags/";
 
 /** One route of the site as the graph sees it, before any link is resolved. */
 export interface GraphDocument {
@@ -64,8 +66,8 @@ export interface GraphDocumentPlan {
 	untrackedSignature: string;
 	resolveOptions: NonNullable<ResolveContext["options"]>;
 	docsIndex: ContentIndex;
-	vaultIndex?: ContentIndex;
-	vaultRoot?: string;
+	/** The indexed vault, when the site publishes one. */
+	vault?: { root: string; index: ContentIndex };
 }
 
 /**
@@ -82,16 +84,16 @@ export async function planGraphDocuments(
 ): Promise<GraphDocumentPlan> {
 	const docsRoot = published?.docsRoot ?? fallbackDocsRoot;
 	const docsIndex = await getCachedContentIndex(docsRoot, published?.docsIndexOptions ?? {});
-	const vaultRoot = published?.vaultRoot;
-	const vaultIndex = vaultRoot
-		? await getCachedContentIndex(
-				vaultRoot,
-				published?.vaultIndexOptions ?? { routePrefix: published?.vaultRoutePrefix },
-			)
+	const publishedVault = published?.vault;
+	const vault = publishedVault
+		? {
+				root: publishedVault.root,
+				index: await getCachedContentIndex(publishedVault.root, publishedVault.indexOptions),
+			}
 		: undefined;
 
 	const pageByFile = new Map<string, { page: ContentPage; index: ContentIndex }>();
-	for (const index of vaultIndex ? [docsIndex, vaultIndex] : [docsIndex]) {
+	for (const index of vault ? [docsIndex, vault.index] : [docsIndex]) {
 		for (const page of index.pages) {
 			pageByFile.set(normalizeFsPath(page.absolutePath), { page, index });
 		}
@@ -126,17 +128,16 @@ export async function planGraphDocuments(
 	}
 
 	return {
-		indexes: vaultIndex ? [docsIndex, vaultIndex] : [docsIndex],
+		indexes: vault ? [docsIndex, vault.index] : [docsIndex],
 		plans,
 		untrackedSignature: untracked.join("|"),
 		resolveOptions: {
-			enableCaseInsensitiveLookup: published?.enableCaseInsensitiveLookup ?? true,
-			enableFuzzyMatching: published?.enableFuzzyMatching ?? false,
+			...(published?.resolveOptions ?? DEFAULT_RESOLVE_OPTIONS),
+			...(published && { fileRoutes: published.fileRoutes }),
 			canvasBoards,
 		},
 		docsIndex,
-		vaultIndex,
-		vaultRoot,
+		vault,
 	};
 }
 
@@ -146,7 +147,7 @@ export async function loadGraphDocuments(
 ): Promise<{ documents: GraphDocument[]; filesRead: number }> {
 	let filesRead = 0;
 	const contextFor = (page: ContentPage, index: ContentIndex): ResolveContext => {
-		const other = index === plan.docsIndex ? plan.vaultIndex : plan.docsIndex;
+		const other = index === plan.docsIndex ? plan.vault?.index : plan.docsIndex;
 		return {
 			currentPage: page,
 			index,
@@ -155,8 +156,8 @@ export async function loadGraphDocuments(
 		};
 	};
 	const indexFor = (absolutePath: string): { index: ContentIndex; root: string } =>
-		plan.vaultIndex && plan.vaultRoot && isInside(absolutePath, plan.vaultRoot)
-			? { index: plan.vaultIndex, root: plan.vaultRoot }
+		plan.vault && isPathInsideRoot(absolutePath, plan.vault.root)
+			? { index: plan.vault.index, root: plan.vault.root }
 			: { index: plan.docsIndex, root: plan.docsIndex.rootDir };
 
 	const documents = await Promise.all(
@@ -213,16 +214,30 @@ export async function loadGraphDocuments(
 				} catch {
 					// A board removed mid-build keeps its node and loses its links.
 				}
-				// The canvas feature's rule (`isPrivateVaultFile`): a card naming a
-				// file of any kind that is on disk but not published adds no node.
-				const { outlinks, tags } = extractCanvasLinks(json, (file) =>
-					isPrivateVaultFile(
-						owner.index,
-						owner.root,
-						file,
-						(board) => plan.resolveOptions.canvasBoards?.bySource(board, true) !== undefined,
-					),
-				);
+				// The canvas feature's rule (`resolveFileNode`): a card links only a
+				// file the site publishes at exactly that path — a page, an asset, a
+				// board, or a file a feature gives a page. Privacy wins: a file on
+				// disk but unpublished adds no node, not even its name. A card naming
+				// a path nothing on disk has is drawn as an unresolved note, as
+				// Obsidian does, and never name-matched to a different file.
+				const { outlinks, tags } = extractCanvasLinks(json, (file) => {
+					if (
+						isPrivateVaultFile(
+							owner.index,
+							owner.root,
+							file,
+							(board) => plan.resolveOptions.canvasBoards?.bySource(board, true) !== undefined,
+						)
+					) {
+						return "none";
+					}
+					const published =
+						findPageByPath(owner.index, file) !== undefined ||
+						findAssetByPath(owner.index, file) !== undefined ||
+						plan.resolveOptions.canvasBoards?.bySource(file, true) !== undefined ||
+						plan.resolveOptions.fileRoutes?.find(path.join(owner.root, file)) !== undefined;
+					return published ? "link" : "ghost";
+				});
 				const boardPage = syntheticPage(board.absolutePath, relativePath, route.routePath);
 				return {
 					...base,
@@ -290,11 +305,6 @@ async function fileStamp(absolutePath: string): Promise<string> {
 /** Rspress writes `addPages` content to `node_modules/.rspress/runtime/temp-*.mdx`. */
 function isGeneratedPage(absolutePath: string): boolean {
 	return normalizeFsPath(absolutePath).split("/").includes("node_modules");
-}
-
-function isInside(file: string, root: string): boolean {
-	const relative = path.relative(root, file);
-	return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
 export function safeDecode(value: string): string {

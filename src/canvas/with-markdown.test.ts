@@ -98,6 +98,16 @@ const FILES = {
 };
 
 describe("canvas and markdown addPages running at once", () => {
+	test("a canvas without a file prefix uses the published vault's", async () => {
+		const { vault, md, config } = await site(FILES);
+		const board = canvas({ vaultRoot: vault, outDir: path.join(vault, "..", "out-derived") });
+		const pages = await Promise.all([md, board].map((plugin) => plugin.addPages?.(config, false)));
+		const page = pages
+			.flatMap((list) => list ?? [])
+			.find((candidate) => candidate.routePath === "/canvas/board");
+		expect(page?.content).toContain('fileRoutePrefix={"/vault"}');
+	});
+
 	for (const order of ["markdown first", "canvas first"] as const) {
 		test(`${order}: no raw board is staged, and links reach the board page`, async () => {
 			const { vault, md, board, config } = await site(FILES);

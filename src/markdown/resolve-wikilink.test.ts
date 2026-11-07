@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import { createCanvasBoards } from "../shared/canvas-routes.js";
-import { setPublishedFileRoutes } from "../shared/file-routes.js";
-import { normalizeLookupValue } from "../shared/slug.js";
-import { buildContentIndex } from "./content-index.ts";
+import { createFileRoutes } from "../shared/file-routes.js";
+import { buildContentIndex, pushNamedPage } from "./content-index.ts";
 import { parseWikiLink } from "./parse-wikilink.ts";
 import { resolveWikiLink } from "./resolve-wikilink.ts";
 import type {
@@ -87,8 +86,8 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 			push(byBaseName, page.baseName, page);
 			push(byBaseNameCI, page.baseName.toLowerCase(), page);
 		}
-		if (page.title) push(byTitle, normalizeLookupValue(page.title), page);
-		for (const alias of page.aliases) push(byAlias, normalizeLookupValue(alias), page);
+		if (page.title) pushNamedPage(byTitle, page.title, page);
+		for (const alias of page.aliases) pushNamedPage(byAlias, alias, page);
 	}
 
 	const byAssetPath = new Map<string, ContentAsset>();
@@ -106,6 +105,7 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 		rootDir: "/vault",
 		pages,
 		assets,
+		unpublishedPaths: new Set(),
 		byAbsolutePath,
 		byPathKey,
 		byFilePathKey,
@@ -115,7 +115,6 @@ function makeIndex(pages: ContentPage[], assets: ContentAsset[] = []): ContentIn
 		byTag: new Map(),
 		byAssetPath,
 		byAssetBaseName,
-		byPathKeyCI: new Map(),
 		byFilePathKeyCI,
 		byBaseNameCI,
 		byAssetPathCI,
@@ -638,6 +637,13 @@ describe("resolveWikiLink canvas boards", () => {
 });
 
 describe("resolveWikiLink files a feature publishes as pages", () => {
+	// One registry, as a build hands to its resolver.
+	const fileRoutes = createFileRoutes();
+	const resolveWithRoutes = (target: string, context: ResolveContext) =>
+		resolveWikiLink(parseWikiLink(target, `[[${target}]]`), {
+			...context,
+			options: { ...context.options, fileRoutes },
+		});
 	function baseFixture() {
 		const currentPage = makePage({ filePathKey: "index" });
 		const base = makeAsset({ pathKey: "Projects.base", urlPath: "/vault/Projects.base" });
@@ -651,11 +657,11 @@ describe("resolveWikiLink files a feature publishes as pages", () => {
 	};
 
 	test("opens the file's page, keeping a view subpath, instead of downloading it", () => {
-		setPublishedFileRoutes("bases", [route]);
+		fileRoutes.set("bases", [route]);
 		const { currentPage, index } = baseFixture();
 
-		const plain = resolve("Projects.base", { currentPage, index });
-		const view = resolve("Projects.base#Open tasks", { currentPage, index });
+		const plain = resolveWithRoutes("Projects.base", { currentPage, index });
+		const view = resolveWithRoutes("Projects.base#Open tasks", { currentPage, index });
 
 		expect(plain.href).toBe("/bases/Projects");
 		expect(plain.targetAsset).toBeUndefined();
@@ -664,11 +670,11 @@ describe("resolveWikiLink files a feature publishes as pages", () => {
 	});
 
 	test("falls back to the attachment once a rebuild no longer publishes the file", () => {
-		setPublishedFileRoutes("bases", [route]);
-		setPublishedFileRoutes("bases", []);
+		fileRoutes.set("bases", [route]);
+		fileRoutes.set("bases", []);
 		const { currentPage, index } = baseFixture();
 
-		const result = resolve("Projects.base", { currentPage, index });
+		const result = resolveWithRoutes("Projects.base", { currentPage, index });
 
 		expect(result.href).toBe("/vault/Projects.base");
 		expect(result.targetAsset?.pathKey).toBe("Projects.base");
@@ -676,11 +682,11 @@ describe("resolveWikiLink files a feature publishes as pages", () => {
 	});
 
 	test("keeps another feature's routes when one feature re-registers", () => {
-		setPublishedFileRoutes("bases", [route]);
-		setPublishedFileRoutes("excalidraw", []);
+		fileRoutes.set("bases", [route]);
+		fileRoutes.set("excalidraw", []);
 		const { currentPage, index } = baseFixture();
 
-		expect(resolve("Projects.base", { currentPage, index }).href).toBe("/bases/Projects");
+		expect(resolveWithRoutes("Projects.base", { currentPage, index }).href).toBe("/bases/Projects");
 	});
 });
 

@@ -1,11 +1,8 @@
 import type { PointerEvent } from "react";
 import { memo } from "react";
 import type { CanvasData, CanvasNode } from "../types.js";
+import { INTERACTIVE_CONTENT_SELECTOR } from "../viewport.js";
 import { CanvasNodeComponent, cardLabel } from "./CanvasNode.js";
-
-/** Content inside a card that handles its own click (and so does not select the card). */
-const INTERACTIVE_CONTENT =
-	"a[href], button, input, textarea, select, summary, label, iframe, video, audio, [contenteditable]";
 
 export interface NodeFrameProps {
 	node: CanvasNode;
@@ -84,7 +81,9 @@ export const NodeFrame = memo(function NodeFrame({
 				// control or embedded frame inside the card belongs to that element.
 				if (editable) return;
 				const interactive =
-					event.target instanceof Element ? event.target.closest(INTERACTIVE_CONTENT) : null;
+					event.target instanceof Element
+						? event.target.closest(INTERACTIVE_CONTENT_SELECTOR)
+						: null;
 				if (interactive && event.currentTarget.contains(interactive)) return;
 				onSelect(node.id, event.shiftKey);
 			}}

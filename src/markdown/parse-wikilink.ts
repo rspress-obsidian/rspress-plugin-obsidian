@@ -4,14 +4,22 @@ import type { ParsedWikiLink, WikilinkMatch } from "./types.js";
  * Find a complete wikilink token while honoring backslash escapes inside the
  * token. A regex cannot distinguish an escaped `]` from the closing `]]`
  * delimiter, so tokenization is intentionally scanner-based.
+ *
+ * A link never spans lines: Obsidian's own tokenizer stops at the line end, and
+ * the renderer's micromark construct does the same, so `[[a` on one line and
+ * `b]]` on the next is text on both sides of the build.
  */
 function findWikilinkEnd(input: string, start: number): number {
 	for (let index = start; index < input.length - 1; index += 1) {
-		if (input[index] === "\\") {
+		const char = input[index];
+		if (char === "\n" || char === "\r") return -1;
+		if (char === "\\") {
+			const escaped = input[index + 1];
+			if (escaped === "\n" || escaped === "\r") return -1;
 			index += 1;
 			continue;
 		}
-		if (input[index] === "]" && input[index + 1] === "]") {
+		if (char === "]" && input[index + 1] === "]") {
 			return index + 2;
 		}
 	}
@@ -41,9 +49,16 @@ export function findWikilinkMatches(input: string): WikilinkMatch[] {
 		}
 
 		const fullMatch = input.slice(tokenStart, end);
+		const inner = input.slice(innerStart, end - 2);
+		// `[[]]` is not a link anywhere else in the build (the renderer's
+		// construct rejects it), so the scanner does not report one either.
+		if (!inner) {
+			index = end - 1;
+			continue;
+		}
 		matches.push({
 			fullMatch,
-			inner: input.slice(innerStart, end - 2),
+			inner,
 			start: tokenStart,
 			end,
 		});

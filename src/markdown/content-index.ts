@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getContentLineFlags } from "../shared/content-flags.js";
+import { backOfNoteEnd } from "../shared/excalidraw-data.js";
 import { PAGE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
-import { parseFrontmatter } from "../shared/frontmatter.js";
+import { isPublishedProperty, parseFrontmatter } from "../shared/frontmatter.js";
+import type { ContentIndexOptions } from "../shared/index-options.js";
 import { ATTACHMENT_EXTS, extensionOf } from "../shared/media-exts.js";
+import { normalizeFilePathKey } from "../shared/paths.js";
 import {
 	type DocsRouteLocales,
 	deriveDocsRoutePath,
@@ -13,12 +16,12 @@ import {
 	normalizeRoutePrefix,
 } from "../shared/route-path.js";
 import { normalizeLookupValue, normalizeUnicode, stripMarkdownFormatting } from "../shared/slug.js";
+import { INLINE_BLOCK_ID, STANDALONE_BLOCK_ID } from "../shared/transclusion.js";
 import { collectBacklinks } from "./backlinks.js";
-import { blankCommentRanges, COMMENT_DELIMITER, findCommentRanges } from "./comments.js";
-import { extractDataviewMetadata } from "./dataview.js";
+import { blankCommentRanges, findCommentRanges, hasComments } from "./comments.js";
+import { extractDataviewMetadata } from "./dataview-metadata.js";
 import { scanPageHeadings } from "./heading-text.js";
 import { rememberMentionSources, stripMentionText } from "./mentions.js";
-import { backOfNoteEnd } from "./obsidian-plugins/excalidraw/drawing-file.js";
 import { extractPageLinksFrom } from "./page-links.js";
 import type {
 	BacklinkRef,
@@ -28,7 +31,6 @@ import type {
 	ContentPage,
 	HeadingEntry,
 } from "./types.js";
-import { normalizeFilePathKey } from "./utils.js";
 
 export type { ContentIndex } from "./types.js";
 
@@ -75,42 +77,6 @@ const contentIndexCache = new Map<string, CacheEntry>();
  *  canvas plugins ask for the same index at once; without this each would scan
  *  and parse the whole tree and hand back its own index object. */
 const pendingIndexes = new Map<string, Promise<ContentIndex>>();
-/** Options controlling route and asset URLs for an indexed root. */
-export interface ContentIndexOptions {
-	/**
-	 * Route prefix pages publish under (a vault's `vaultRoutePrefix`). Without
-	 * one, the root is the Rspress docs root and routes follow Rspress's own
-	 * rules, including `locales`.
-	 */
-	routePrefix?: string;
-	/**
-	 * The site's `lang`/`locales`/`multiVersion`, for a docs root: Rspress drops
-	 * the default language and version segment from a route (`en/guide.md` is
-	 * served at `/guide` when `lang: "en"`). Ignored when `routePrefix` is set.
-	 */
-	locales?: DocsRouteLocales;
-	/**
-	 * Keep a stripped copy of each page's body so `getMentions` can find pages
-	 * that name another page without linking to it. Off by default: it is the only
-	 * thing here that retains page text.
-	 */
-	unlinkedMentions?: boolean;
-	/**
-	 * Extract Dataview fields, tasks and list items. Default `true`; the plugin
-	 * turns it off with `enableDataview`, which saves roughly a third of the
-	 * indexing time.
-	 */
-	dataview?: boolean;
-	/** Resolution options the backlinks are computed with (as for links). */
-	enableCaseInsensitiveLookup?: boolean;
-	enableFuzzyMatching?: boolean;
-	/**
-	 * Root-relative folders whose files are neither indexed nor published
-	 * (Templater's templates folder), on top of the hidden folders that never
-	 * are. `/`-separated, matched case-sensitively from the root.
-	 */
-	excludeFolders?: string[];
-}
 
 interface NormalizedIndexOptions {
 	routePrefix: string;
@@ -254,10 +220,13 @@ async function buildContentIndexFromFiles(
 		markdownFiles.map((file) => buildContentPage(file, options, priorFiles, parsedFiles)),
 	);
 	const pages: ContentPage[] = [];
+	const unpublishedPaths: string[] = [];
 	for (const result of settled) {
 		if (result.status === "fulfilled") {
 			if (result.value.publish) {
 				pages.push(result.value);
+			} else {
+				unpublishedPaths.push(result.value.absolutePath);
 			}
 		} else {
 			console.warn(
@@ -283,7 +252,6 @@ async function buildContentIndexFromFiles(
 	const byTag = new Map<string, ContentPage[]>();
 	const byAssetPath = new Map<string, ContentAsset>();
 	const byAssetBaseName = new Map<string, ContentAsset[]>();
-	const byPathKeyCI = new Map<string, ContentPage[]>();
 	const byFilePathKeyCI = new Map<string, ContentPage[]>();
 	const byBaseNameCI = new Map<string, ContentPage[]>();
 	const byAssetPathCI = new Map<string, ContentAsset[]>();
@@ -294,7 +262,6 @@ async function buildContentIndexFromFiles(
 		byPathKey.set(page.pathKey, page);
 		byFilePathKey.set(page.filePathKey, page);
 
-		pushNamedPage(byPathKeyCI, page.pathKey.toLowerCase(), page);
 		pushNamedPage(byFilePathKeyCI, page.filePathKey.toLowerCase(), page);
 
 		if (page.baseName.length > 0) {
@@ -347,11 +314,11 @@ async function buildContentIndexFromFiles(
 		byTag,
 		byAssetPath,
 		byAssetBaseName,
-		byPathKeyCI,
 		byFilePathKeyCI,
 		byBaseNameCI,
 		byAssetPathCI,
 		byAssetBaseNameCI,
+		unpublishedPaths: new Set(unpublishedPaths),
 		backlinks: new Map<string, BacklinkRef[]>(),
 	};
 	// Backlinks are the outlinks resolved with the resolver every link uses, so
@@ -478,8 +445,8 @@ async function buildContentPage(
 		: { fields: {}, tasks: [], lists: [] };
 
 	// Comments are blanked (not removed) once, up front: a heading, block id,
-	// link, tag or preview inside `%%…%%` is not on the published page.
-	const visible = markdown.includes(COMMENT_DELIMITER)
+	// link, tag or preview inside one is not on the published page.
+	const visible = hasComments(markdown)
 		? blankCommentRanges(markdown, findCommentRanges(markdown))
 		: markdown;
 	const lines = visible.split(/\r?\n/);
@@ -526,10 +493,12 @@ async function buildContentPage(
 		headings,
 		wikilinkTargets: wikilinkTargetsOf(links.outlinks),
 		outlinks: links.outlinks,
+		fileLinks: links.fileLinks,
 		headingBySlug,
 		headingByText,
 		blocks: extractBlocks(lines, isContent),
 		dataviewFields: dataview.fields,
+		frontmatter: metadata.frontmatter,
 		dataviewTasks: dataview.tasks,
 		dataviewLists: dataview.lists,
 	};
@@ -591,6 +560,7 @@ function extractHeadings(lines: string[], isContent: boolean[]): HeadingEntry[] 
 			sourceText: heading.source,
 		};
 		if (heading.explicitId) entry.explicitId = heading.explicitId;
+		if (!heading.topLevel) entry.topLevel = false;
 		if (previewLines.length > 0) entry.preview = previewLines.join(" ");
 		return entry;
 	});
@@ -607,16 +577,16 @@ function extractBlocks(lines: string[], isContent: boolean[]): BlockEntry[] {
 
 		const line = lines[index] ?? "";
 
-		const standaloneMatch = /^\^([A-Za-z0-9_-]+)\s*$/.exec(line.trim());
+		const standaloneMatch = STANDALONE_BLOCK_ID.exec(line.trim());
 		if (standaloneMatch?.[1]) {
 			pushBlock(blocks, seen, standaloneMatch[1]);
 			continue;
 		}
 
 		// Inline block ID: "Paragraph text ^block-id" appended at end of line
-		const inlineBlockMatch = /\s\^([A-Za-z0-9_-]+)\s*$/.exec(line);
-		if (inlineBlockMatch?.[1]) {
-			pushBlock(blocks, seen, inlineBlockMatch[1]);
+		const inlineBlockMatch = INLINE_BLOCK_ID.exec(line);
+		if (inlineBlockMatch?.[2]) {
+			pushBlock(blocks, seen, inlineBlockMatch[2]);
 		}
 	}
 
@@ -639,20 +609,6 @@ function normalizeStringField(value: unknown): string | undefined {
 		return trimmed.length > 0 ? trimmed : undefined;
 	}
 	return undefined;
-}
-
-function normalizeBooleanField(value: unknown): boolean {
-	if (typeof value === "boolean") {
-		return value;
-	}
-	if (typeof value === "string") {
-		const lowered = value.trim().toLowerCase();
-		return lowered === "true" || lowered === "yes" || lowered === "1";
-	}
-	if (typeof value === "number") {
-		return value !== 0;
-	}
-	return true;
 }
 
 /**
@@ -693,7 +649,7 @@ function extractFrontmatterMetadata(
 					),
 				),
 			],
-			publish: normalizeBooleanField(data.publish),
+			publish: isPublishedProperty(data.publish),
 			frontmatter: data,
 		};
 	} catch (error) {
@@ -711,7 +667,16 @@ function extractFrontmatterMetadata(
 	}
 }
 
-function pushNamedPage(map: Map<string, ContentPage[]>, rawValue: string, page: ContentPage): void {
+/**
+ * Add `page` to a name→pages map under `rawValue`, folded the one way lookup
+ * keys are folded. Exported because a fixture that builds a lookup table by
+ * hand otherwise re-derives the key and stays green while real lookups fail.
+ */
+export function pushNamedPage(
+	map: Map<string, ContentPage[]>,
+	rawValue: string,
+	page: ContentPage,
+): void {
 	// Title/alias/tag/basename keys all funnel through here; fold to NFC so a
 	// decomposed macOS filename matches a composed frontmatter value.
 	const key = normalizeUnicode(normalizeLookupValue(rawValue));

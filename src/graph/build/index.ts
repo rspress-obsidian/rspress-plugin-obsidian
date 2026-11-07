@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { encodeGraphPayload, graphPayloadModuleSource } from "../graph-payload.js";
+import { GRAPH_DATA_MODULE, GRAPH_SEARCH_MODULE } from "../virtual-module-ids.js";
 import { loadGraphDocuments, planGraphDocuments } from "./documents.js";
 import { buildGraphData } from "./graph-builder.js";
 import { collectPageTexts, searchModuleSource } from "./page-content.js";
@@ -17,9 +18,6 @@ export type {
 	GraphBuildResult,
 	GraphBuildState,
 } from "./types.js";
-
-const GRAPH_DATA_MODULE = "virtual-graph-data";
-const GRAPH_SEARCH_MODULE = "virtual-graph-search-data";
 
 /**
  * Build the graph's virtual modules for the routes Rspress publishes.

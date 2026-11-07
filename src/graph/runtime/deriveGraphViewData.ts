@@ -25,7 +25,7 @@ export interface GraphIndex {
 }
 
 /** `"local"` is the neighborhood of the current page, `"global"` the whole site. */
-export type GraphScope = "local" | "global";
+type GraphScope = "local" | "global";
 
 /**
  * Which nodes the panel shows — Obsidian's Filters section plus the local
@@ -54,6 +54,14 @@ export interface GraphViewFilters {
 	/** Local graph: draw links between neighbors, not only along the walk. @default true */
 	neighborLinks?: boolean;
 }
+
+/**
+ * The filters a reader changes and the panel remembers: everything in
+ * {@link GraphViewFilters} except the search box, which is not persisted.
+ * Resolved — the panel merges the persisted values with the defaults before
+ * handing them to a control, so every field is present.
+ */
+export type GraphFilterSettings = Required<Omit<GraphViewFilters, "query">>;
 
 export interface DerivedGraphViewData {
 	nodes: ForceGraphNode[];
@@ -84,42 +92,36 @@ export const MAX_NEIGHBORS = 250;
 export const MAX_DEPTH = 5;
 
 /**
+ * Whole hops in `1..MAX_DEPTH`: the depth control, stored values and every
+ * caller of a filter set pass through it.
+ */
+export function clampDepth(depth: number): number {
+	return Math.min(MAX_DEPTH, Math.max(1, Math.round(depth)));
+}
+
+/**
  * Render ceiling for the global scope. The cap only keeps d3-force usable on a
  * very large site; the panel reports how many nodes it left out.
  */
 export const MAX_GLOBAL_NODES = 1000;
 
-export const DEFAULT_GRAPH_FILTERS = Object.freeze({
-	query: "",
+export const DEFAULT_FILTER_SETTINGS: Readonly<GraphFilterSettings> = Object.freeze({
 	depth: 1,
 	showTags: true,
 	showAttachments: false,
 	existingOnly: true,
 	showOrphans: true,
-	scope: "local" as GraphScope,
+	scope: "local",
 	incoming: true,
 	outgoing: true,
 	neighborLinks: true,
 });
 
-/**
- * A browser pathname (or link href path) as a graph node id: the router hands
- * over the percent-encoded path, node ids are Rspress's decoded routes, and a
- * `.html` suffix, `/index` and trailing slashes are dropped. A malformed escape
- * keeps the raw path.
- */
-export function normalizeClientRoutePath(pathname: string): string {
-	let decoded = pathname;
-	try {
-		decoded = decodeURIComponent(pathname);
-	} catch {
-		// `%E0%A4%A` and friends: match what was typed.
-	}
-	const withoutHtml = decoded.normalize("NFC").replace(/\.html$/, "");
-	const trimmed = withoutHtml.replace(/\/+$/, "");
-	const withoutIndex = trimmed.replace(/\/index$/, "");
-	return withoutIndex || "/";
-}
+/** The settings a graph is drawn with: the persisted ones plus an empty search box. */
+const DEFAULT_GRAPH_FILTERS: Required<GraphViewFilters> = Object.freeze({
+	query: "",
+	...DEFAULT_FILTER_SETTINGS,
+});
 
 /** The tag a tag node stands for, as `tag:` queries compare it: lowercased, no `#`. */
 function tagNameOf(node: GraphNode): string {
@@ -315,7 +317,7 @@ function normalizeFilters(filters?: GraphViewFilters): Required<GraphViewFilters
 		(filters?.[key] ?? DEFAULT_GRAPH_FILTERS[key]) as Required<GraphViewFilters>[K];
 	return {
 		query: pick("query"),
-		depth: Math.min(MAX_DEPTH, Math.max(1, Math.round(pick("depth")))),
+		depth: clampDepth(pick("depth")),
 		showTags: pick("showTags"),
 		showAttachments: pick("showAttachments"),
 		existingOnly: pick("existingOnly"),

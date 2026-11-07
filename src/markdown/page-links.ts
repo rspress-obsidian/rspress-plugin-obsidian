@@ -11,9 +11,9 @@
 import { getContentLineFlags } from "../shared/content-flags.js";
 import { parseFrontmatter } from "../shared/frontmatter.js";
 import { INLINE_TAG_PATTERN, tagNameFromMatch } from "../shared/paths.js";
-import { blankAllComments } from "./comments.js";
+import { blankComments } from "./comments.js";
 import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
-import type { ParsedWikiLink, WikiSubpath } from "./types.js";
+import type { CacheLink, ParsedWikiLink, WikiSubpath } from "./types.js";
 
 export interface PageLinks {
 	/**
@@ -25,6 +25,15 @@ export interface PageLinks {
 	 * neither points at another file.
 	 */
 	outlinks: ParsedWikiLink[];
+	/**
+	 * The same links as Obsidian's metadata cache lists them for `file.links`:
+	 * frontmatter properties first, then body links in source order, then the
+	 * body's embeds. Repeats are kept and every target stays as written — a
+	 * wikilink keeps its `.md`, a markdown destination is decoded the way
+	 * `decodeURI` decodes it (`%26` stays) — because `file.hasLink("Foo.md")`
+	 * must answer exactly like Obsidian's.
+	 */
+	fileLinks: CacheLink[];
 	/** Frontmatter and inline tags, without `#`, first spelling per tag kept. */
 	tags: string[];
 }
@@ -33,7 +42,7 @@ export interface PageLinks {
 // never crosses a blank line.
 const CODE_SPAN = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
 const MARKDOWN_LINK =
-	/(!?)\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(\s*(<[^>\n]+>|[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
+	/(!?)\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(\s*(<[^>\n]+>|(?:[^()\s]|\([^()\s]*\))+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
 // `^`-prefixed labels are footnotes and `~`-prefixed ones citations.
 const DEFINITION = /^\s{0,3}\[([^\]^~][^\]]*)\]:[ \t]*(<[^>\n]+>|\S+)/gm;
 const URL_LIKE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()]+|<[a-z][a-z0-9+.-]*:[^\s<>]*>/gi;
@@ -50,6 +59,73 @@ function subpathFrom(anchor: string): WikiSubpath | undefined {
 	return value.startsWith("^")
 		? { kind: "block", value: value.slice(1).trim() }
 		: { kind: "heading", value };
+}
+
+/** The cache record of a parsed wikilink, target written back with its subpath. */
+function cacheLinkOf(link: ParsedWikiLink, origin: CacheLink["origin"]): CacheLink | undefined {
+	if (link.search || link.isCurrentPageReference || !link.target.trim()) return undefined;
+	const suffix = link.subpath
+		? `#${link.subpath.kind === "block" ? "^" : ""}${link.subpath.value}`
+		: "";
+	const shown = link.target.replace(/\.md$/i, "");
+	const display =
+		link.alias ??
+		(link.subpath
+			? `${shown} > ${link.subpath.kind === "block" ? "^" : ""}${link.subpath.value}`
+			: shown);
+	return { target: `${link.target}${suffix}`, display, isEmbed: link.isEmbed, origin };
+}
+
+/** The cache record of a markdown link, with the label Obsidian shows for it. */
+function markdownCacheLink(
+	destination: string,
+	label: string | undefined,
+	isEmbed: boolean,
+	origin: CacheLink["origin"] = "body",
+): CacheLink | undefined {
+	const target = markdownDestinationAsWritten(destination);
+	if (!target) return undefined;
+	const display = label?.trim() || target;
+	return { target, display, isEmbed, origin };
+}
+
+/**
+ * A markdown destination in the form Obsidian's metadata cache records it:
+ * a relative file reference stays as written except that `decodeURI` runs on
+ * its path (`%26` is reserved, so it survives), the extension included.
+ * `undefined` for the destinations that name no file.
+ */
+function markdownDestinationAsWritten(destination: string): string | undefined {
+	let target = destination.trim();
+	if (target.startsWith("<") && target.endsWith(">")) target = target.slice(1, -1).trim();
+	if (/^obsidian:\/\//i.test(target)) return obsidianUriAsWritten(target);
+	if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || /^[/#]/.test(target)) return undefined;
+	const hash = target.indexOf("#");
+	const query = target.indexOf("?");
+	const end = Math.min(hash < 0 ? target.length : hash, query < 0 ? target.length : query);
+	let pathPart = target.slice(0, end);
+	try {
+		pathPart = decodeURI(pathPart);
+	} catch {
+		// A malformed escape keeps the destination as written.
+	}
+	pathPart = pathPart.trim();
+	return pathPart || undefined;
+}
+
+/** The `file` (or `path`) an `obsidian://open` URI names, as written. */
+function obsidianUriAsWritten(uri: string): string | undefined {
+	let parsed: URL;
+	try {
+		parsed = new URL(uri);
+	} catch {
+		return undefined;
+	}
+	if (parsed.hostname.toLowerCase() !== "open") return undefined;
+	const target = parsed.searchParams.get("file") ?? parsed.searchParams.get("path") ?? "";
+	const hash = target.indexOf("#");
+	const file = (hash >= 0 ? target.slice(0, hash) : target).trim();
+	return file || undefined;
 }
 
 /**
@@ -135,26 +211,44 @@ function frontmatterTagValues(value: unknown): string[] {
 }
 
 /**
- * Wikilinks in frontmatter values, walked once per container: YAML anchors let
- * one list appear under many keys (an alias bomb has exponentially many paths)
- * or inside itself (`&a [*a]`), and a container already visited holds the same
+ * Links in frontmatter values, walked once per container: YAML anchors let one
+ * list appear under many keys (an alias bomb has exponentially many paths) or
+ * inside itself (`&a [*a]`), and a container already visited holds the same
  * links, so skipping it loses nothing.
+ *
+ * Records come out in value order, both kinds: a property holding
+ * `"[Front MD](Other.md)"` is a link Obsidian reports, though only wikilinks
+ * join `outlinks`.
  */
 function collectPropertyLinks(
 	value: unknown,
-	into: ParsedWikiLink[],
+	wikilinks: ParsedWikiLink[],
+	records: CacheLink[],
 	seen = new WeakSet<object>(),
 ): void {
 	if (typeof value === "string") {
+		const found: Array<{ at: number; link?: ParsedWikiLink; record?: CacheLink }> = [];
 		for (const match of findWikilinkMatches(value)) {
-			into.push(parseWikiLink(match.inner, match.fullMatch));
+			const link = parseWikiLink(match.inner, match.fullMatch);
+			found.push({ at: match.start, link, record: cacheLinkOf(link, "property") });
+		}
+		for (const match of value.matchAll(MARKDOWN_LINK)) {
+			found.push({
+				at: match.index ?? 0,
+				record: markdownCacheLink(match[3] ?? "", match[2], match[1] === "!", "property"),
+			});
+		}
+		found.sort((a, b) => a.at - b.at);
+		for (const entry of found) {
+			if (entry.link) wikilinks.push(entry.link);
+			if (entry.record) records.push(entry.record);
 		}
 		return;
 	}
 	if (!value || typeof value !== "object" || value instanceof Date || seen.has(value)) return;
 	seen.add(value);
 	for (const entry of Array.isArray(value) ? value : Object.values(value)) {
-		collectPropertyLinks(entry, into, seen);
+		collectPropertyLinks(entry, wikilinks, records, seen);
 	}
 }
 
@@ -163,13 +257,13 @@ function collectPropertyLinks(
  * Comments are found by `comments.ts`, which already skips code spans (a `%%`
  * inside one is literal text in Obsidian).
  */
-export function proseText(lines: string[], isContent: boolean[]): string {
+function proseText(lines: string[], isContent: boolean[]): string {
 	const content = lines.map((line, index) => (isContent[index] ? line : "")).join("\n");
-	return blank(blankAllComments(content), CODE_SPAN);
+	return blank(blankComments(content), CODE_SPAN);
 }
 
 /** Links and tags of one note; see {@link PageLinks}. */
-export function extractPageLinks(markdown: string): PageLinks {
+export function extractPageLinks(markdown: string, options: PageLinkOptions = {}): PageLinks {
 	let frontmatter: Record<string, unknown> = {};
 	try {
 		frontmatter = parseFrontmatter(markdown).data;
@@ -177,7 +271,22 @@ export function extractPageLinks(markdown: string): PageLinks {
 		// Unreadable frontmatter contributes nothing; the index reports it.
 	}
 	const lines = markdown.split(/\r?\n/);
-	return extractPageLinksFrom(lines, getContentLineFlags(lines), frontmatter);
+	return extractPageLinksFrom(lines, getContentLineFlags(lines), frontmatter, options);
+}
+
+/** How a consumer wants links ordered and repeated; see {@link extractPageLinksFrom}. */
+export interface PageLinkOptions {
+	/**
+	 * Drop a link that repeats an earlier one (same target, embed flag and
+	 * subpath). Default `true`: the site model counts a link once. Obsidian's
+	 * metadata cache keeps repeats, and Bases reports `file.links` from it.
+	 */
+	dedupe?: boolean;
+	/**
+	 * Report frontmatter property links before body links. Default `false` (body
+	 * first, as a reader meets them); Bases wants Obsidian's cache order.
+	 */
+	frontmatterFirst?: boolean;
 }
 
 /** {@link extractPageLinks} over an already split and parsed note. */
@@ -185,16 +294,23 @@ export function extractPageLinksFrom(
 	lines: string[],
 	isContent: boolean[],
 	frontmatter: Record<string, unknown>,
+	options: PageLinkOptions = {},
 ): PageLinks {
 	const prose = proseText(lines, isContent);
-	const outlinks: ParsedWikiLink[] = [];
+	const body: ParsedWikiLink[] = [];
+	const property: ParsedWikiLink[] = [];
+	/** Body records with where their link starts, so `fileLinks` is source order. */
+	const bodyCache: Array<{ at: number; record: CacheLink }> = [];
+	const propertyCache: CacheLink[] = [];
 	const seen = new Set<string>();
-	const add = (link: ParsedWikiLink | undefined): void => {
+	const add = (link: ParsedWikiLink | undefined, into: ParsedWikiLink[]): void => {
 		if (!link || link.search || link.isCurrentPageReference || !link.target.trim()) return;
-		const key = `${link.isEmbed ? "!" : ""}${link.target}#${link.subpath?.kind ?? ""}:${link.subpath?.value ?? ""}`;
-		if (seen.has(key)) return;
-		seen.add(key);
-		outlinks.push(link);
+		if (options.dedupe !== false) {
+			const key = `${link.isEmbed ? "!" : ""}${link.target}#${link.subpath?.kind ?? ""}:${link.subpath?.value ?? ""}`;
+			if (seen.has(key)) return;
+			seen.add(key);
+		}
+		into.push(link);
 	};
 
 	let withoutWikilinks = "";
@@ -206,27 +322,36 @@ export function extractPageLinksFrom(
 			!/(?:^|[^\\])\|/.test(match.inner) && match.inner.includes("\\|")
 				? match.inner.replace("\\|", "|")
 				: match.inner;
-		add(parseWikiLink(inner, match.fullMatch));
+		const parsed = parseWikiLink(inner, match.fullMatch);
+		add(parsed, body);
+		const record = cacheLinkOf(parsed, "body");
+		if (record) bodyCache.push({ at: match.start, record });
 		withoutWikilinks += prose.slice(cursor, match.start) + " ".repeat(match.end - match.start);
 		cursor = match.end;
 	}
 	withoutWikilinks += prose.slice(cursor);
 
-	const scanMarkdownLinks = (text: string): void => {
+	const scanMarkdownLinks = (text: string, offset: number): void => {
 		for (const match of text.matchAll(MARKDOWN_LINK)) {
-			add(markdownDestinationToWikiLink(match[3] ?? "", match[0], match[1] === "!"));
+			const at = offset + (match.index ?? 0);
+			const isEmbed = match[1] === "!";
+			add(markdownDestinationToWikiLink(match[3] ?? "", match[0], isEmbed), body);
+			const record = markdownCacheLink(match[3] ?? "", match[2], isEmbed);
+			if (record) bodyCache.push({ at, record });
 			// A linked image (`[![alt](img.png)](Note.md)`) links both files.
-			if (match[2]?.includes("](")) scanMarkdownLinks(match[2]);
+			if (match[2]?.includes("](")) scanMarkdownLinks(match[2], at);
 		}
 	};
-	scanMarkdownLinks(withoutWikilinks);
+	scanMarkdownLinks(withoutWikilinks, 0);
 	for (const match of withoutWikilinks.matchAll(DEFINITION)) {
-		add(markdownDestinationToWikiLink(match[2] ?? "", match[0], false));
+		add(markdownDestinationToWikiLink(match[2] ?? "", match[0], false), body);
+		const record = markdownCacheLink(match[2] ?? "", match[1], false);
+		if (record) bodyCache.push({ at: match.index ?? 0, record });
 	}
 
 	const propertyLinks: ParsedWikiLink[] = [];
-	collectPropertyLinks(frontmatter, propertyLinks);
-	for (const link of propertyLinks) add(link);
+	collectPropertyLinks(frontmatter, propertyLinks, propertyCache);
+	for (const link of propertyLinks) add(link, property);
 
 	const tags = new Map<string, string>();
 	const addTag = (tag: string | undefined): void => {
@@ -248,5 +373,12 @@ export function extractPageLinksFrom(
 	for (const match of tagText.matchAll(INLINE_TAG_PATTERN))
 		addTag(tagNameFromMatch(match[1] ?? ""));
 
-	return { outlinks, tags: [...tags.values()] };
+	const outlinks = options.frontmatterFirst ? [...property, ...body] : [...body, ...property];
+	const bodyRecords = bodyCache.sort((a, b) => a.at - b.at).map((entry) => entry.record);
+	const fileLinks = [
+		...propertyCache,
+		...bodyRecords.filter((link) => !link.isEmbed),
+		...bodyRecords.filter((link) => link.isEmbed),
+	];
+	return { outlinks, fileLinks, tags: [...tags.values()] };
 }

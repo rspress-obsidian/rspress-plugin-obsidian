@@ -9,14 +9,9 @@ import {
 	createLinkNode,
 	createTextNode,
 } from "../utils/editor.js";
-import {
-	applyEditorAction,
-	type CanvasEditor,
-	type EditorAction,
-	type NodeMove,
-} from "./useCanvasEditor.js";
+import { type Viewport, viewportCentre } from "../viewport.js";
+import type { CanvasEditor, NodeMove } from "./useCanvasEditor.js";
 import type { CanvasSelection } from "./useCanvasSelection.js";
-import type { Viewport } from "./usePanZoom.js";
 
 /** The file name an export downloads as: the board's own name. */
 export function exportFileName(boardId: string | undefined, editorTitle: string): string {
@@ -78,7 +73,7 @@ export function useBoardCommands({
 			const to = current.nodes.find((node) => node.id === toId);
 			if (!from || !to || fromId === toId) return;
 			const edge = createEdge(current.edges, from, to);
-			commit({ type: "add-edge", edge }, { ...current, edges: [...current.edges, edge] });
+			commit({ type: "add-edge", edge });
 		},
 		[canvasRef, commit],
 	);
@@ -89,11 +84,9 @@ export function useBoardCommands({
 			const probe = factory(current.nodes, 0, 0);
 			// World coordinates of the visible centre, where Obsidian drops a new card.
 			const rect = containerRef.current?.getBoundingClientRect();
-			const { x, y, zoom } = viewportRef.current;
-			const centerX = ((rect?.width ?? 0) / 2 - x) / zoom;
-			const centerY = ((rect?.height ?? 0) / 2 - y) / zoom;
-			const node = factory(current.nodes, centerX - probe.width / 2, centerY - probe.height / 2);
-			commit({ type: "add-node", node }, { ...current, nodes: [...current.nodes, node] });
+			const centre = viewportCentre(viewportRef.current, rect?.width ?? 0, rect?.height ?? 0);
+			const node = factory(current.nodes, centre.x - probe.width / 2, centre.y - probe.height / 2);
+			commit({ type: "add-node", node });
 			setSelectedEdgeId(null);
 			setSelectedNodeIds([node.id]);
 			return node;
@@ -115,10 +108,7 @@ export function useBoardCommands({
 		const index = current.edges.findIndex((item) => item.id === selectedEdgeId);
 		const edge = current.edges[index];
 		if (!edge) return;
-		commit(
-			{ type: "delete-edge", edge: { item: edge, index } },
-			{ ...current, edges: current.edges.filter((item) => item.id !== edge.id) },
-		);
+		commit({ type: "delete-edge", edge: { item: edge, index } });
 		setSelectedEdgeId(null);
 		containerRef.current?.focus();
 	}, [canvasRef, commit, containerRef, selectedEdgeId, setSelectedEdgeId]);
@@ -133,14 +123,7 @@ export function useBoardCommands({
 		const edges = current.edges
 			.map((item, index) => ({ item, index }))
 			.filter(({ item }) => ids.has(item.fromNode) || ids.has(item.toNode));
-		commit(
-			{ type: "delete-nodes", nodes, edges },
-			{
-				...current,
-				nodes: current.nodes.filter((node) => !ids.has(node.id)),
-				edges: current.edges.filter((edge) => !ids.has(edge.fromNode) && !ids.has(edge.toNode)),
-			},
-		);
+		commit({ type: "delete-nodes", nodes, edges });
 		setSelectedNodeIds([]);
 		// The focused card is gone; keep the keyboard on the board.
 		containerRef.current?.focus();
@@ -158,8 +141,7 @@ export function useBoardCommands({
 					to: { x: node.x + dx, y: node.y + dy },
 				}));
 			if (moves.length === 0) return;
-			const action: EditorAction = { type: "move", moves };
-			commit(action, applyEditorAction(current, action));
+			commit({ type: "move", moves });
 		},
 		[canvasRef, commit, selectedNodeIds],
 	);
