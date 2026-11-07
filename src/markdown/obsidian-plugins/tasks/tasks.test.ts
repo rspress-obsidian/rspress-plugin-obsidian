@@ -24,9 +24,9 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { buildContentIndex } from "../../content-index.ts";
 import { normalizePluginOptions } from "../../normalize-options.ts";
+import { isPathInsideRoot } from "../../path-containment.ts";
 import { remarkWikilink } from "../../remark-wikilink.ts";
 import type { ContentIndex, RspressPluginMarkdownOptions } from "../../types.ts";
-import { isPathInsideRoot } from "../../utils.ts";
 import type { TasksOptions } from "./options.ts";
 
 const FILES: Record<string, string> = {

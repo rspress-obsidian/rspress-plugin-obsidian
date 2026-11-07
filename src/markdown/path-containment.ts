@@ -3,31 +3,6 @@ import path from "node:path";
 
 import { normalizeFilePathKey } from "../shared/paths.js";
 import { normalizeFsPath } from "../shared/route-path.js";
-import { humanizeBaseName } from "../shared/slug.js";
-import type { ContentPage, ParsedWikiLink } from "./types.js";
-
-export { normalizeFilePathKey } from "../shared/paths.js";
-export { normalizeFsPath } from "../shared/route-path.js";
-
-/**
- * The text Obsidian shows for a wikilink: the alias when there is one, else the
- * target exactly as typed (`[[2024-01-15]]` stays `2024-01-15`, `[[my_note]]`
- * stays `my_note`), with a subpath shown as `Note > Heading` / `Note > ^id`
- * and a same-page `[[#Heading]]` as just `Heading`.
- */
-export function wikiLinkDisplayText(parsed: ParsedWikiLink): string {
-	if (parsed.alias) return parsed.alias;
-	const subpath = parsed.subpath;
-	const parts =
-		subpath?.kind === "block"
-			? [`^${subpath.value}`]
-			: (subpath?.value
-					.split("#")
-					.map((part) => part.trim())
-					.filter(Boolean) ?? []);
-	const target = parsed.target.trim();
-	return (target ? [target, ...parts] : parts).join(" > ");
-}
 
 /**
  * True when `filePath` is inside the already-absolute `rootDir`.
@@ -129,26 +104,6 @@ export function isRealPathInsideRoot(realPath: string, realRoot: string): boolea
 }
 
 /**
- * Human-facing label for a page in the backlinks panel: the frontmatter
- * `title`, else the page's `# heading`, else a humanized filename. A section
- * heading names a part of the note, not the note (a Kanban board's first
- * heading is a lane), so only a top-level one counts. A raw basename
- * ("getting-started") reads like debug output, so it is the last resort.
- */
-export function backlinkLabel(page: ContentPage): string {
-	if (page.title) {
-		return page.title;
-	}
-	const titleHeading = page.headings.find((heading) => (heading.depth ?? 1) === 1)?.rawText;
-	if (titleHeading) {
-		return titleHeading;
-	}
-	return humanizeBaseName(page.baseName) || page.baseName;
-}
-
-export { routeHref } from "../shared/route-path.js";
-
-/**
  * Resolve an explicitly relative wikilink target from the current note.
  *
  * Obsidian-style `./` and `../` targets are note-relative. Targets without
@@ -167,33 +122,4 @@ export function resolveRelativePathKey(
 	return normalizeFilePathKey(
 		path.posix.normalize(path.posix.join(currentDirectory, normalizedTarget)),
 	);
-}
-
-const MAX_LISTED = 12;
-
-/**
- * Format a concise list of available heading names for error messages.
- * Shows slugs as rough indicators in parentheses if they differ from the raw text.
- */
-export function formatAvailableHeadings(page: ContentPage): string {
-	const names = page.headings.slice(0, MAX_LISTED).map((h) => {
-		if (h.explicitId && h.explicitId !== h.slug) {
-			return `${h.rawText} (${h.explicitId})`;
-		}
-		return h.rawText;
-	});
-	if (names.length === 0) return " No headings found on this page.";
-	const remainder = page.headings.length - names.length;
-	const list = names.join(", ");
-	return ` Available headings: ${list}${remainder > 0 ? ` (and ${remainder} more)` : ""}.`;
-}
-
-/**
- * Format a concise list of available block IDs for error messages.
- */
-export function formatAvailableBlocks(page: ContentPage): string {
-	const ids = page.blocks.slice(0, MAX_LISTED).map((b) => `^${b.id}`);
-	if (ids.length === 0) return " No blocks found on this page.";
-	const remainder = page.blocks.length - ids.length;
-	return ` Available block IDs: ${ids.join(", ")}${remainder > 0 ? ` (and ${remainder} more)` : ""}.`;
 }

@@ -6,6 +6,7 @@ import { PAGE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
 import { isPublishedProperty, parseFrontmatter } from "../shared/frontmatter.js";
 import type { ContentIndexOptions } from "../shared/index-options.js";
 import { ATTACHMENT_EXTS, extensionOf } from "../shared/media-exts.js";
+import { normalizeFilePathKey } from "../shared/paths.js";
 import {
 	type DocsRouteLocales,
 	deriveDocsRoutePath,
@@ -29,7 +30,6 @@ import type {
 	ContentPage,
 	HeadingEntry,
 } from "./types.js";
-import { normalizeFilePathKey } from "./utils.js";
 
 export type { ContentIndex } from "./types.js";
 

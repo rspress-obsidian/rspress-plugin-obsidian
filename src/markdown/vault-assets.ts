@@ -4,9 +4,9 @@ import type { CanvasBoards } from "../shared/canvas-routes.js";
 import type { FileRoutes } from "../shared/file-routes.js";
 import type { ContentIndex } from "./content-index.js";
 import { mirrorFiles } from "./mirror-files.js";
+import { isPathInsideRoot } from "./path-containment.js";
 import { resolveWikiLink } from "./resolve-wikilink.js";
 import type { ContentAsset } from "./types.js";
-import { isPathInsideRoot } from "./utils.js";
 
 // Destinations a page links: a markdown link or image (`](url)`, `](<url>)`)
 // and an HTML `src`/`href` attribute.

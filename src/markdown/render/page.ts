@@ -6,11 +6,12 @@ import type { Root, RootContent } from "mdast";
 import { mathEngineStylesheet } from "../../math.js";
 import { escapeHtmlAttribute } from "../../shared/escape.js";
 import { parseFrontmatter } from "../../shared/frontmatter.js";
+import { normalizeFsPath } from "../../shared/route-path.js";
 import { getCachedBacklinksIndex, renderBacklinksHtml } from "../backlinks.js";
 import { getMentions } from "../mentions.js";
+import { isPathInsideRoot } from "../path-containment.js";
 import { plainText } from "../syntax.js";
 import type { ContentPage } from "../types.js";
-import { isPathInsideRoot, normalizeFsPath } from "../utils.js";
 import type { RenderContext } from "./context.js";
 
 /**

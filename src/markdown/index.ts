@@ -34,6 +34,7 @@ import {
 	mergeBuilderConfigs,
 	type PluginBuildContext,
 } from "./obsidian-plugins/index.js";
+import { isPathInsideRoot, pathUnderRoot } from "./path-containment.js";
 import { publicDirectoryPlugin } from "./public-dir.js";
 import { rehypeRawForMdx } from "./rehype-raw-mdx.js";
 import { remarkWikilink } from "./remark-wikilink.js";
@@ -45,7 +46,6 @@ import type {
 	RemarkWikiLinkPluginOptions,
 	RspressPluginMarkdownOptions,
 } from "./types.js";
-import { isPathInsideRoot, pathUnderRoot } from "./utils.js";
 import { syncAssets, vaultFileForSiteUrl } from "./vault-assets.js";
 
 export type { MathEngine } from "../math.js";

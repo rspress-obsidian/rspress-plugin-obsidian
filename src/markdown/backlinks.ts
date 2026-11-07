@@ -1,9 +1,10 @@
 import { escapeHtmlText } from "../shared/escape.js";
+import { routeHref } from "../shared/route-path.js";
+import { backlinkLabel } from "./labels.js";
 import type { MentionRef } from "./mentions.js";
 import { parseWikiLink } from "./parse-wikilink.js";
 import { resolveWikiLink } from "./resolve-wikilink.js";
 import type { BacklinkRef, ContentIndex, ContentPage, NormalizedPluginOptions } from "./types.js";
-import { backlinkLabel, routeHref } from "./utils.js";
 
 export type { BacklinkRef };
 

@@ -21,9 +21,9 @@ import {
 	processTaskStatuses,
 } from "../inline-passes.js";
 import { processMarkdownImages } from "../media.js";
+import { isPathInsideRoot } from "../path-containment.js";
 import { processDailyNoteNodes, processDataviewNodes } from "../remark-dataview.js";
 import { failPendingDiagnostics, reportPluginDiagnostic } from "../remark-diagnostics.js";
-import { isPathInsideRoot } from "../utils.js";
 import { mediaContextOf, type RenderContext } from "./context.js";
 import { processMermaidNodes, processPluginFences } from "./fences.js";
 import { renderInlineHtml } from "./html.js";

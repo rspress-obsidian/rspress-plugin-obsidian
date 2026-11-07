@@ -5,9 +5,9 @@
 import type { Html, Link, PhrasingContent } from "mdast";
 import type { VFile } from "vfile";
 import { escapeHtmlAttribute, escapeHtmlText } from "../../shared/escape.js";
+import { wikiLinkDisplayText } from "../labels.js";
 import { createTextNode, reportPluginDiagnostic } from "../remark-diagnostics.js";
 import type { NormalizedPluginOptions, ParsedWikiLink, WikiLinkCandidate } from "../types.js";
-import { wikiLinkDisplayText } from "../utils.js";
 
 export function reportDiagnostic(
 	file: VFile,

@@ -46,8 +46,8 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { type Processor, unified } from "unified";
 import { isInlineMathContent } from "../shared/inline-syntax.js";
+import { wikiLinkDisplayText } from "./labels.js";
 import { parseWikiLink } from "./parse-wikilink.js";
-import { wikiLinkDisplayText } from "./utils.js";
 
 /** `[[…]]` / `![[…]]`, as written. */
 export interface WikiLinkNode extends Literal {

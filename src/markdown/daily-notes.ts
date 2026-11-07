@@ -1,9 +1,9 @@
 import { momentAdd, momentUnitSpan, normalizeMomentUnit, startOf } from "../shared/date-math.js";
 import { escapeHtmlText, escapeMarkdownDestination } from "../shared/escape.js";
 import { formatMomentDate, parseMomentDate } from "../shared/moment-format.js";
+import { routeHref } from "../shared/route-path.js";
 import type { AdditionalPage } from "./tag-pages.js";
 import type { ContentIndex, ContentPage } from "./types.js";
-import { routeHref } from "./utils.js";
 
 export interface DailyNoteConfig {
 	folder: string;

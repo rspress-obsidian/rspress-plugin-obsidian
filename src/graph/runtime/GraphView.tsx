@@ -17,6 +17,7 @@ import { navigation, useNavigateTo, usePathname } from "../../shared/usePathname
 import { FORCE_GRAPH_PACKAGE } from "../force-graph-package.js";
 import { decodeGraphPayload } from "../graph-payload.js";
 import type { GraphNode, GraphPayload, GraphViewGroup } from "../types.js";
+import { kindColor, labelOpacity, nodeRadius, safeColor } from "./appearance.js";
 import {
 	createGraphIndex,
 	deriveGraphViewData,
@@ -32,13 +33,11 @@ import {
 	DEFAULT_FORCE_SETTINGS,
 	type GraphDisplaySettings,
 	type GraphForceSettings,
-	labelZoomFor,
 	MAX_CENTER_PULL,
 } from "./graph-settings.js";
 import { injectStyles } from "./keyframes.js";
 import { createLinkHitAreaPainter } from "./link-hit-areas.js";
 import {
-	type CanvasColors,
 	DARK_COLORS,
 	FONT_STACK,
 	type GraphViewColors,
@@ -252,47 +251,6 @@ export interface GraphViewHandle {
 	zoomToFit: () => void;
 	centerOnCurrent: () => void;
 	getStats: () => GraphViewStats;
-}
-
-/** Radius of a node with no links, in graph units, before the size setting. */
-const BASE_RADIUS = 5;
-const LARGE_GRAPH_BASE_RADIUS = 4;
-
-/**
- * Visual node radius. Nodes grow with their link count, as in Obsidian; the
- * pointer-area painter and the arrow placement use the same value so the hit
- * region and arrowheads line up with the drawn dot.
- */
-function nodeRadius(degree: number, isLargeGraph: boolean, nodeSize: number): number {
-	const base = isLargeGraph ? LARGE_GRAPH_BASE_RADIUS : BASE_RADIUS;
-	return base * nodeSize * (1 + 0.25 * Math.log2(1 + degree));
-}
-
-/** Label opacity at a zoom level: fades in over the 30% of zoom below the threshold. */
-function labelOpacity(globalScale: number, textFadeThreshold: number): number {
-	const fullAt = labelZoomFor(textFadeThreshold);
-	const startAt = fullAt * 0.7;
-	return Math.min(1, Math.max(0, (globalScale - startAt) / (fullAt - startAt)));
-}
-
-/**
- * Accept a group colour only if the runtime can actually paint it: an
- * invalid `fillStyle` is silently ignored by canvas, which would bleed the
- * previous node's colour into this one.
- */
-function safeColor(value: string): string | undefined {
-	if (typeof value !== "string" || value.trim() === "") return undefined;
-	if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
-		return CSS.supports("color", value) ? value : undefined;
-	}
-	return value;
-}
-
-function kindColor(node: Pick<ForceGraphNode, "kind">, colors: CanvasColors): string {
-	if (node.kind === "tag") return colors.tagNode;
-	if (node.kind === "attachment") return colors.attachmentNode;
-	if (node.kind === "unresolved") return colors.unresolvedNode;
-	return colors.node;
 }
 
 /** Pulls every node toward the origin; d3's own `center` force only recentres the mean. */

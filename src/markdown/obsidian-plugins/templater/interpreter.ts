@@ -464,7 +464,7 @@ async function callExpression(
 		if (expr.optional && readProperty(receiver, name) == null && !hasMethod(receiver, name)) {
 			return undefined;
 		}
-		return built(await callMethod(receiver, name, args), receiver, rt);
+		return built(await callMethod(receiver, name, args, invoke), receiver, rt);
 	}
 	const fn = await evaluate(callee, scope, rt);
 	if (expr.optional && fn == null) return undefined;

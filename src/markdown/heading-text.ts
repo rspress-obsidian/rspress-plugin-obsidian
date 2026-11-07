@@ -16,8 +16,8 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { HIGHLIGHT_PATTERN, MATH_PATTERN } from "../shared/inline-syntax.js";
+import { wikiLinkDisplayText } from "./labels.js";
 import { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
-import { wikiLinkDisplayText } from "./utils.js";
 
 const inlineParser = unified().use(remarkParse).use(remarkGfm).freeze();
 

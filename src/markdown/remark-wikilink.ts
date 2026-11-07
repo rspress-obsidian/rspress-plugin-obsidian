@@ -10,9 +10,11 @@
  */
 import type { Root } from "mdast";
 import type { VFile } from "vfile";
+import { normalizeFsPath } from "../shared/route-path.js";
 import { blankComments } from "./comments.js";
 import { getCachedContentIndex } from "./content-index.js";
 import { enabledPluginFeatures } from "./obsidian-plugins/index.js";
+import { pathUnderRoot } from "./path-containment.js";
 import {
 	failPendingDiagnostics,
 	hasPendingDiagnostics,
@@ -24,7 +26,6 @@ import { generatedPageFor } from "./render/page.js";
 import { transformContent } from "./render/transform.js";
 import { registerObsidianSyntax } from "./syntax.js";
 import type { RemarkPluginFactory, RemarkWikiLinkPluginOptions } from "./types.js";
-import { normalizeFsPath, pathUnderRoot } from "./utils.js";
 
 function isRspressPageMeta(value: unknown): value is RspressPageMeta {
 	return (

@@ -29,9 +29,9 @@ import { stripFrontmatter } from "../../../shared/frontmatter.js";
 import { normalizeFsPath } from "../../../shared/route-path.js";
 import { buildContentIndex } from "../../content-index.js";
 import { normalizePluginOptions } from "../../normalize-options.js";
+import { isPathInsideRoot } from "../../path-containment.js";
 import { remarkWikilink } from "../../remark-wikilink.js";
 import type { ContentIndex, NormalizedPluginOptions } from "../../types.js";
-import { isPathInsideRoot } from "../../utils.js";
 import type { PluginPage } from "../types.js";
 import { basesFeature } from "./index.js";
 

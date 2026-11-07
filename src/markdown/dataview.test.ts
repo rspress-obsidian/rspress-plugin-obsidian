@@ -637,6 +637,16 @@ describe("CALENDAR", () => {
 		expect(run('CALENDAR FROM "daily"').error).toContain("needs a date field");
 		expect(run('CALENDAR file.name FROM "daily"').error).toContain("must be a date");
 	});
+
+	test("puts the newest month first and marks the day the clock is on", () => {
+		const html =
+			renderDataviewQuery('CALENDAR file.day FROM ""', home, vault.index, undefined, {
+				now: new Date(2026, 0, 5, 9, 0),
+			}).html ?? "";
+		expect(html).toContain("<caption>August 2026</caption>");
+		expect(html.indexOf("August 2026")).toBeLessThan(html.indexOf("January 2026"));
+		expect(html).toContain('<td class="dataview-calendar-day is-today">');
+	});
 });
 
 describe("FROM sources", () => {

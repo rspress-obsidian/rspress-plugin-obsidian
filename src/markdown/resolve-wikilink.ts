@@ -1,5 +1,10 @@
 import path from "node:path";
+import { normalizeFilePathKey } from "../shared/paths.js";
+import { routeHref } from "../shared/route-path.js";
 import { headingKey, normalizeLookupValue, slugifyHeading } from "../shared/slug.js";
+import { wikiLinkDisplayText } from "./labels.js";
+import { resolveRelativePathKey } from "./path-containment.js";
+import { formatAvailableBlocks, formatAvailableHeadings } from "./subpath-diagnostics.js";
 import type {
 	ContentAsset,
 	ContentIndex,
@@ -10,14 +15,6 @@ import type {
 	ResolvedWikiLink,
 	WikiSubpath,
 } from "./types.js";
-import {
-	formatAvailableBlocks,
-	formatAvailableHeadings,
-	normalizeFilePathKey,
-	resolveRelativePathKey,
-	routeHref,
-	wikiLinkDisplayText,
-} from "./utils.js";
 
 type Candidate = ContentPage | ContentAsset;
 type Match<T extends Candidate> = { found: T; ambiguity?: string };

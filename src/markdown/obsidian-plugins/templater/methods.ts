@@ -7,7 +7,6 @@ import {
 	repeatText,
 	replaceText,
 } from "../../interpreter-limits.js";
-import { invoke } from "./interpreter.js";
 import {
 	binary,
 	describe,
@@ -20,6 +19,15 @@ import {
 	toNumber,
 	toTemplateString,
 } from "./values.js";
+
+/**
+ * How a method calls back into a template's function value.
+ *
+ * Declared here rather than imported from the interpreter: the method table
+ * must not know who runs templates, or the two modules import each other and
+ * neither is answerable for the other's dependencies.
+ */
+export type InvokeFunction = (fn: unknown, args: unknown[]) => Promise<unknown>;
 
 function callDateMethod(date: Date, name: string): unknown {
 	switch (name) {
@@ -186,7 +194,11 @@ async function callStringMethod(text: string, name: string, args: unknown[]): Pr
 	throw new TemplaterError(`Unsupported method: ${name}() on a string.`);
 }
 
-async function sortList(list: unknown[], compare: unknown): Promise<unknown[]> {
+async function sortList(
+	list: unknown[],
+	compare: unknown,
+	invoke: InvokeFunction,
+): Promise<unknown[]> {
 	if (compare === undefined) {
 		return list.sort((left, right) => {
 			const a = toTemplateString(left);
@@ -220,7 +232,12 @@ async function mergeSort(
 	return merged.concat(left.slice(i), right.slice(j));
 }
 
-async function callArrayMethod(list: unknown[], name: string, args: unknown[]): Promise<unknown> {
+async function callArrayMethod(
+	list: unknown[],
+	name: string,
+	args: unknown[],
+	invoke: InvokeFunction,
+): Promise<unknown> {
 	const fn = args[0];
 	const each = async <T>(
 		visit: (value: unknown, result: unknown, index: number) => T | undefined,
@@ -287,7 +304,7 @@ async function callArrayMethod(list: unknown[], name: string, args: unknown[]): 
 		case "reverse":
 			return list.reverse();
 		case "sort":
-			return await sortList(list, fn);
+			return await sortList(list, fn, invoke);
 		case "flat":
 			return flatList(list, Math.max(0, Math.min(100, Number(args[0] ?? 1))));
 		case "push":
@@ -318,12 +335,13 @@ export async function callMethod(
 	receiver: unknown,
 	name: string,
 	args: unknown[],
+	invoke: InvokeFunction,
 ): Promise<unknown> {
 	if (FORBIDDEN_PROPERTIES.has(name)) {
 		throw new TemplaterError(`\`${name}\` is not available to templates.`);
 	}
 	if (receiver instanceof HostValue) return await receiver.method(name, args);
-	if (Array.isArray(receiver)) return await callArrayMethod(receiver, name, args);
+	if (Array.isArray(receiver)) return await callArrayMethod(receiver, name, args, invoke);
 	if (typeof receiver === "string") return await callStringMethod(receiver, name, args);
 	if (typeof receiver === "number") {
 		if (name === "toFixed") {

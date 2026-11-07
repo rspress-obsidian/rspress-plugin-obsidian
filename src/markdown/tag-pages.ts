@@ -1,8 +1,8 @@
 import { escapeMarkdownDestination } from "../shared/escape.js";
 import { encodeTagPathSegment, tagRoutePath } from "../shared/paths.js";
+import { routeHref } from "../shared/route-path.js";
 import { normalizeUnicode } from "../shared/slug.js";
 import type { ContentIndex, ContentPage } from "./types.js";
-import { routeHref } from "./utils.js";
 
 export { encodeTagPathSegment };
 
