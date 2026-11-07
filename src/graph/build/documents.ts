@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { getCachedContentIndex } from "../../markdown/content-index.js";
 import { extractPageLinks } from "../../markdown/page-links.js";
+import { isPathInsideRoot } from "../../markdown/path-containment.js";
 import type {
 	ContentIndex,
 	ContentPage,
@@ -11,13 +12,14 @@ import type {
 import { isPrivateVaultFile } from "../../markdown/vault-files.js";
 import type { CanvasBoardRoute, CanvasBoards } from "../../shared/canvas-routes.js";
 import { parseFrontmatter } from "../../shared/frontmatter.js";
-import type { PublishedContentConfig } from "../../shared/published-content.js";
+import { TAG_ROUTE_PREFIX } from "../../shared/paths.js";
+import {
+	DEFAULT_RESOLVE_OPTIONS,
+	type PublishedContentConfig,
+} from "../../shared/published-content.js";
 import { normalizeFsPath } from "../../shared/route-path.js";
 import { extractCanvasLinks } from "./canvas-links.js";
 import type { CollectedRoute } from "./types.js";
-
-/** The tag-page routes the markdown plugin generates (`tagRoutePath`). */
-export const TAG_ROUTE_PREFIX = "/tags/";
 
 /** One route of the site as the graph sees it, before any link is resolved. */
 export interface GraphDocument {
@@ -130,8 +132,7 @@ export async function planGraphDocuments(
 		plans,
 		untrackedSignature: untracked.join("|"),
 		resolveOptions: {
-			enableCaseInsensitiveLookup: published?.docsIndexOptions.enableCaseInsensitiveLookup ?? true,
-			enableFuzzyMatching: published?.docsIndexOptions.enableFuzzyMatching ?? false,
+			...(published?.resolveOptions ?? DEFAULT_RESOLVE_OPTIONS),
 			canvasBoards,
 		},
 		docsIndex,
@@ -154,7 +155,7 @@ export async function loadGraphDocuments(
 		};
 	};
 	const indexFor = (absolutePath: string): { index: ContentIndex; root: string } =>
-		plan.vault && isInside(absolutePath, plan.vault.root)
+		plan.vault && isPathInsideRoot(absolutePath, plan.vault.root)
 			? { index: plan.vault.index, root: plan.vault.root }
 			: { index: plan.docsIndex, root: plan.docsIndex.rootDir };
 
@@ -289,11 +290,6 @@ async function fileStamp(absolutePath: string): Promise<string> {
 /** Rspress writes `addPages` content to `node_modules/.rspress/runtime/temp-*.mdx`. */
 function isGeneratedPage(absolutePath: string): boolean {
 	return normalizeFsPath(absolutePath).split("/").includes("node_modules");
-}
-
-function isInside(file: string, root: string): boolean {
-	const relative = path.relative(root, file);
-	return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
 export function safeDecode(value: string): string {

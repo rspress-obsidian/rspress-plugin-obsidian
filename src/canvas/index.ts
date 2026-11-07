@@ -31,7 +31,12 @@ import { NOTE_MARKDOWN_EXTENSIONS } from "../shared/extensions.js";
 import { stripFrontmatter } from "../shared/frontmatter.js";
 import { AUDIO_EXTS, extensionOf, IMAGE_EXTS, PDF_EXT, VIDEO_EXTS } from "../shared/media-exts.js";
 import { normalizeFilePathKey } from "../shared/paths.js";
-import { findPublishedContent, type PublishedContentConfig } from "../shared/published-content.js";
+import { withPluginListed } from "../shared/plugin-channel.js";
+import {
+	DEFAULT_RESOLVE_OPTIONS,
+	findPublishedContent,
+	type PublishedContentConfig,
+} from "../shared/published-content.js";
 import { normalizeFsPath, normalizeRoutePrefix } from "../shared/route-path.js";
 import { extractBlockSection, extractHeadingSection } from "../shared/transclusion.js";
 import { CANVAS_JSON_DIR, DEFAULT_IFRAME_SANDBOX } from "./constants.js";
@@ -536,10 +541,7 @@ async function loadVaultIndex(
 	fileRoutePrefix: string | undefined,
 	published: PublishedContentConfig | undefined,
 ): Promise<{ index: ContentIndex; resolveOptions: ResolveContext["options"] }> {
-	const resolveOptions = {
-		enableCaseInsensitiveLookup: published?.docsIndexOptions.enableCaseInsensitiveLookup ?? true,
-		enableFuzzyMatching: published?.docsIndexOptions.enableFuzzyMatching ?? false,
-	};
+	const resolveOptions = published?.resolveOptions ?? DEFAULT_RESOLVE_OPTIONS;
 	// Sharing the Markdown plugin's indexes (and its options) means a card link
 	// resolves to exactly the route the note page was published at, and — as on
 	// a note page — falls back to the site's other tree.
@@ -641,6 +643,7 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		include: options?.include || ["**/*.canvas"],
 		exclude: [...DEFAULT_EXCLUDES, ...(options?.exclude ?? [])],
 		fileRoutePrefix: options?.fileRoutePrefix,
+		defaultFileRoutePrefix: options?.defaultFileRoutePrefix,
 		linkPreview: options?.linkPreview ?? true,
 		editable: options?.editable || false,
 		editorTitle: options?.editorTitle || "Canvas editor",
@@ -700,13 +703,8 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 		name: "rspress-plugin-obsidian:canvas",
 		...(resolvedOptions.enableDefaultStyles && { globalStyles: stylePath }),
 		builderConfig,
-		// The markdown and graph features find this plugin in `config.plugins`,
-		// the only plugin list a hook sees. A plugin added with `utils.addPlugin`
-		// from another plugin's `config` hook runs without being listed there, so
-		// it lists itself — on a copy, leaving the caller's config untouched.
 		config(config) {
-			const listed = config.plugins ?? [];
-			return listed.includes(plugin) ? config : { ...config, plugins: [...listed, plugin] };
+			return withPluginListed(config, plugin);
 		},
 		async addPages(config, _isProd) {
 			define.__RSPRESS_OBSIDIAN_CANVAS_BASE__ = JSON.stringify(normalizeSiteBase(config.base));
@@ -719,10 +717,14 @@ export function canvas(options?: CanvasPluginOptions): RspressPlugin {
 			const published = findPublishedContent(config);
 			// A canvas scanning the vault the markdown plugin publishes links file
 			// cards through that plugin's prefix: the caller's own prefix only
-			// overrides it.
+			// overrides it. A vault the caller names but no markdown plugin
+			// publishes still has a conventional prefix; a canvas over mere docs
+			// pages has none.
+			const tree = sharedTree(vaultRoot, published);
 			const fileRoutePrefix =
 				resolvedOptions.fileRoutePrefix ??
-				(sharedTree(vaultRoot, published) === "vault" ? published?.vault?.routePrefix : undefined);
+				(tree === "vault" ? published?.vault?.routePrefix : undefined) ??
+				(tree === undefined ? resolvedOptions.defaultFileRoutePrefix : undefined);
 			// Started before this hook's first `await`: Rspress calls every
 			// plugin's `addPages` in one go, so any sibling that asks for the
 			// boards from its own `addPages` already gets this scan's promise.

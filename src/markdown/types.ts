@@ -502,6 +502,12 @@ export interface ContentIndex {
 	routePrefix?: string;
 	pages: ContentPage[];
 	assets: ContentAsset[];
+	/**
+	 * Absolute paths of pages that were indexed and then dropped for
+	 * `publish: false`. The route hook removes their routes from this set
+	 * instead of re-reading every page's frontmatter for the same answer.
+	 */
+	unpublishedPaths: ReadonlySet<string>;
 	byAbsolutePath: Map<string, ContentPage>;
 	/** Legacy route-oriented lookup retained for callers inspecting Rspress routes. */
 	byPathKey: Map<string, ContentPage>;
@@ -513,8 +519,6 @@ export interface ContentIndex {
 	byTag: Map<string, ContentPage[]>;
 	byAssetPath: Map<string, ContentAsset>;
 	byAssetBaseName: Map<string, ContentAsset[]>;
-	/** Case-insensitive pathKey → pages lookup. */
-	byPathKeyCI: Map<string, ContentPage[]>;
 	/** Case-insensitive exact vault path → pages lookup. */
 	byFilePathKeyCI: Map<string, ContentPage[]>;
 	/** Case-insensitive basename → pages lookup. */

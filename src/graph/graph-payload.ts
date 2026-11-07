@@ -19,13 +19,20 @@ const CODE_BY_MEANING = new Map<string, string>(
 	Object.entries(NODE_CODES).map(([code, { kind, navigable }]) => [`${kind}:${navigable}`, code]),
 );
 
-/** The letter a kind falls back to for a navigability it never has in practice. */
-const DEFAULT_CODE: Record<GraphNodeKind, string> = {
-	page: "p",
-	tag: "T",
-	attachment: "a",
-	unresolved: "u",
-};
+/**
+ * The wire code for one node's pair.
+ *
+ * Every pair the graph builder emits is in `NODE_CODES`, so a missing one is a
+ * builder bug; throwing here names the pair instead of writing a letter that
+ * decodes as some other kind.
+ */
+function wireCode(node: GraphNode): string {
+	const code = CODE_BY_MEANING.get(`${node.kind}:${node.navigable}`);
+	if (code === undefined) {
+		throw new Error(`graph payload has no wire code for ${node.kind}:${node.navigable}`);
+	}
+	return code;
+}
 
 export function encodeGraphPayload(graph: GraphData, base: string): GraphPayload {
 	const indexById = new Map<string, number>();
@@ -43,7 +50,7 @@ export function encodeGraphPayload(graph: GraphData, base: string): GraphPayload
 		indexById.set(node.id, index);
 		payload.ids.push(node.id);
 		payload.labels.push(node.label);
-		kinds += CODE_BY_MEANING.get(`${node.kind}:${node.navigable}`) ?? DEFAULT_CODE[node.kind];
+		kinds += wireCode(node);
 		payload.paths.push(node.path);
 		payload.ctimes.push(Math.round(node.ctime));
 	});

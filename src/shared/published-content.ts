@@ -27,6 +27,18 @@ interface PublishedVault {
 	indexOptions: ContentIndexOptions;
 }
 
+/** Link-resolution switches with this site's defaults already applied. */
+export interface PublishedResolveOptions {
+	enableCaseInsensitiveLookup: boolean;
+	enableFuzzyMatching: boolean;
+}
+
+/** The switches a markdown plugin uses when the site configures none. */
+export const DEFAULT_RESOLVE_OPTIONS: PublishedResolveOptions = {
+	enableCaseInsensitiveLookup: true,
+	enableFuzzyMatching: false,
+};
+
 export interface PublishedContentConfig {
 	/** Absolute docs root (`config.root`). */
 	docsRoot: string;
@@ -39,6 +51,13 @@ export interface PublishedContentConfig {
 	 * ones Rspress publishes.
 	 */
 	docsIndexOptions: ContentIndexOptions;
+	/**
+	 * How links resolve on this site, defaults applied. Features resolve with
+	 * this rather than re-deriving the switches from an index's options: the
+	 * note pass, the canvas and the graph must resolve alike, whichever tree
+	 * the target lives in.
+	 */
+	resolveOptions: PublishedResolveOptions;
 }
 
 /** Name the markdown plugin publishes under; see {@link attachPluginValue}. */

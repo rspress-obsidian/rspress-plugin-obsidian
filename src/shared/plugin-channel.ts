@@ -27,6 +27,24 @@ export function attachPluginValue<Plugin extends object, T>(
 }
 
 /**
+ * `config` with `plugin` added to its `plugins` list, or `config` itself when
+ * it is already listed.
+ *
+ * Rspress passes `config.plugins` to every hook, the only plugin list a hook
+ * sees. A plugin added with `utils.addPlugin` from another plugin's `config`
+ * hook runs without being listed there, so it lists itself — on a copy,
+ * leaving the caller's array untouched.
+ */
+export function withPluginListed<
+	Plugin extends object,
+	Config extends { plugins?: readonly unknown[] },
+>(config: Config, plugin: Plugin): Config {
+	const listed = config.plugins ?? [];
+	if (listed.includes(plugin)) return config;
+	return { ...config, plugins: [...listed, plugin] };
+}
+
+/**
  * The value a plugin of this site published under `name`, found among the
  * site's `plugins`; `undefined` when no plugin publishes it. Rspress refuses
  * two plugins with one name, so one is the most a site has.

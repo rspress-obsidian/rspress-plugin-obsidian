@@ -231,6 +231,5 @@ export function buildContext(
 			enableFuzzyMatching: false,
 			fileRoutes: testFileRoutes,
 		},
-		fileRoutes: testFileRoutes,
 	};
 }

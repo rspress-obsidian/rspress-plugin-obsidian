@@ -7,7 +7,7 @@ import { findPublishedContent } from "../shared/published-content.js";
 import { routeKey } from "../shared/route-path.js";
 import { buildGraphModules, type CollectedRoute, type GraphBuildState } from "./build/index.js";
 import { createGraphDevRefresher } from "./dev-refresh.js";
-import { forceGraphBuilderConfig } from "./install.js";
+import { createForceGraphBuilderConfig } from "./install.js";
 import type { GraphViewColors } from "./runtime/GraphView.js";
 import type { GraphViewGroup } from "./types.js";
 
@@ -82,6 +82,7 @@ interface RouteSource {
  */
 export function graphview(options: RspressPluginGraphViewOptions = {}): RspressPlugin {
 	const state: GraphBuildState = {};
+	const forceGraphBuilderConfig = createForceGraphBuilderConfig();
 	const shouldProfileBuild = options.profileBuild ?? process.env.RSPRESS_GRAPH_VIEW_PROFILE === "1";
 	let routeSource: RouteSource | undefined;
 	// Rspress asks for runtime modules once per dev-server start; the refresher

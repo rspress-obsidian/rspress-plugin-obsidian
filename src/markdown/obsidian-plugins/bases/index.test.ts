@@ -132,8 +132,7 @@ beforeEach(async () => {
 			siteBase: "/",
 			docs,
 			vault,
-			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
-			fileRoutes,
+			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false, fileRoutes },
 		})) ?? [];
 });
 
@@ -214,8 +213,7 @@ describe("base pages", () => {
 			siteBase: "/",
 			vaultRoutePrefix: "/vault",
 			docs,
-			resolveOptions: {},
-			fileRoutes,
+			resolveOptions: { fileRoutes },
 		});
 		expect(custom?.map((page) => page.routePath).sort()).toEqual(["/views/Clash", "/views/Guide"]);
 	});

@@ -9,8 +9,8 @@ import { canvas } from "./canvas/index.js";
 import type { CanvasPluginOptions } from "./canvas/types.js";
 import { graphview, type RspressPluginGraphViewOptions } from "./graph/index.js";
 import { markdown } from "./markdown/index.js";
-import { DEFAULT_VAULT_ROUTE_PREFIX } from "./markdown/normalize-options.js";
 import type { RspressPluginMarkdownOptions } from "./markdown/types.js";
+import { DEFAULT_VAULT_ROUTE_PREFIX } from "./shared/paths.js";
 
 export type { GraphViewColors } from "./graph/runtime/GraphView.js";
 export type { GraphViewGroup } from "./graph/types.js";
@@ -121,19 +121,15 @@ export function pluginObsidian(
 				vaultRoot: options?.vaultRoot ?? shared.vaultRoot,
 				vaultRoutePrefix: options?.vaultRoutePrefix ?? shared.vaultRoutePrefix,
 			}),
-		(options) => {
-			const vaultRoot = options?.vaultRoot ?? shared.vaultRoot;
-			// Cards link notes at the route the markdown feature publishes them
-			// under — when the boards come from that same vault.
-			const scansSharedVault = shared.vaultRoot !== undefined && vaultRoot === shared.vaultRoot;
-			return canvas({
+		(options) =>
+			canvas({
 				...options,
-				vaultRoot,
-				fileRoutePrefix:
-					options?.fileRoutePrefix ??
-					(scansSharedVault ? (shared.vaultRoutePrefix ?? DEFAULT_VAULT_ROUTE_PREFIX) : undefined),
-			});
-		},
+				vaultRoot: options?.vaultRoot ?? shared.vaultRoot,
+				defaultFileRoutePrefix:
+					options?.defaultFileRoutePrefix ??
+					shared.vaultRoutePrefix ??
+					(shared.vaultRoot ? DEFAULT_VAULT_ROUTE_PREFIX : undefined),
+			}),
 		graphview,
 	);
 }

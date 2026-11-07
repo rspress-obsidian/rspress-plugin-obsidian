@@ -318,7 +318,7 @@ export const excalidrawFeature: ObsidianPluginFeature = {
 
 	async addPages(ctx) {
 		const routes = plainDrawingRoutes(ctx);
-		ctx.fileRoutes.set(FILE_ROUTE_KIND, routes);
+		ctx.resolveOptions.fileRoutes.set(FILE_ROUTE_KIND, routes);
 		const settings = resolveSettings(ctx.options);
 		await mirrorFiles(
 			stagingDir(ctx.options),

@@ -18,7 +18,7 @@ vault, when you want different routes, or when you want to turn on the editor.
 | [`routePrefix`](#routeprefix) | `string` | `"/canvas"` | URL prefix of the board pages. |
 | [`include`](#include-and-exclude) | `string[]` | `["**/*.canvas"]` | Glob patterns, relative to `vaultRoot`, for the boards to publish. |
 | [`exclude`](#include-and-exclude) | `string[]` | `[]` | Glob patterns to skip, added to the built-in ignores. |
-| [`fileRoutePrefix`](#filerouteprefix) | `string` | none, or the shared `vaultRoutePrefix` of `pluginObsidian` | Route prefix of the vault's note pages. Set it to the markdown plugin's `vaultRoutePrefix`. |
+| [`fileRoutePrefix`](#filerouteprefix) | `string` | the published vault's prefix | Overrides where file cards link. Only needed when the canvas knows a prefix the site does not publish. |
 | [`linkPreview`](#linkpreview-and-iframesandbox) | `boolean` | `true` | Show a link card as a live preview of the website. `false` shows a plain link. |
 | [`iframeSandbox`](#linkpreview-and-iframesandbox) | `string` | `"allow-scripts allow-popups"` | `sandbox` attribute of link-card previews. |
 | [`editable`](#editor) | `boolean` | `false` | Add the in-browser editor to board pages. It never saves to disk. |
@@ -41,16 +41,14 @@ canvas({
 });
 ```
 
-If you set `vaultRoot` without [`fileRoutePrefix`](#filerouteprefix), the build
-logs a warning. File cards would then link to `/Note`-style routes, while the
-markdown plugin publishes the same notes under its own prefix.
+If you set `vaultRoot` without a route prefix, file cards still link through
+the prefix the markdown plugin publishes that vault under. Nothing to repeat.
 
 Under [`pluginObsidian`](/getting-started#canvas-and-the-graph-view), `canvas()` takes the
-shared `vaultRoot` when you give it none, and while it scans that vault its
-`fileRoutePrefix` defaults to the shared `vaultRoutePrefix` (`"/vault"` when
-that is unset), so neither needs repeating. A `vaultRoot` or `fileRoutePrefix`
-passed to `canvas()` wins; with a `vaultRoot` of its own, set
-`fileRoutePrefix` yourself.
+shared `vaultRoot` when you give it none, and the shared `vaultRoutePrefix`
+(`"/vault"` when that is unset) stands in for a markdown plugin that is not
+part of the build. A `fileRoutePrefix` passed to `canvas()` wins over both;
+set one only when you know better than the site does.
 
 A `.canvas` file or folder inside `vaultRoot` that is a symbolic link is
 skipped, so a link cannot publish a board from outside the vault.
@@ -96,10 +94,17 @@ templates folder, are skipped too.
 
 ## fileRoutePrefix
 
-Set `fileRoutePrefix` to the markdown plugin's `vaultRoutePrefix`. For
-`vaultRoutePrefix: "/vault"`, use `fileRoutePrefix: "/vault"`. A file card for
-`Welcome.md` then links to `/vault/Welcome`, the page the markdown plugin
-publishes. Without the prefix, it links to `/Welcome`, which no page serves.
+File cards link notes the way their pages are published, so the prefix is
+already right: the markdown plugin publishes the vault under its
+`vaultRoutePrefix`, and the canvas reads it back from the site. A file card for
+`Welcome.md` then links to `/vault/Welcome` when the vault is published there,
+and to `/Welcome` when the vault has no prefix.
+
+Set `fileRoutePrefix` only to override that — for example when a canvas scans a
+vault this site publishes through something other than the markdown plugin.
+`pluginObsidian` additionally passes its shared `vaultRoutePrefix` as
+`defaultFileRoutePrefix`, which the canvas uses when no markdown plugin is part
+of the build.
 
 Links in text cards and file cards are resolved at build time with the markdown
 plugin's resolver and content index. They land on the same route as the same

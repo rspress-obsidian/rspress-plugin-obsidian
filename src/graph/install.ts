@@ -34,21 +34,29 @@ export function isForceGraphInstalled(fromDir: string = moduleDir): boolean {
 	}
 }
 
-let warned = false;
-
 /**
- * Rsbuild config the graph feature contributes: nothing when the renderer is
- * installed, otherwise an alias that turns `import("react-force-graph-2d")`
- * into an empty module so the site still builds, plus one build-time warning.
+ * The builder config the graph feature contributes, with its own warn-once
+ * latch: nothing when the renderer is installed, otherwise an alias that turns
+ * `import("react-force-graph-2d")` into an empty module so the site still
+ * builds, plus one build-time warning.
+ *
+ * The latch lives in this closure rather than the module, because a process
+ * can build more than one site (a workspace, several configs, a test run): the
+ * second site must still hear why its graph is empty.
  *
  * @param options.installed - Override for tests; defaults to
  *   {@link isForceGraphInstalled}.
  */
-export function forceGraphBuilderConfig(options: { installed?: boolean } = {}): BuilderConfig {
-	if (options.installed ?? isForceGraphInstalled()) return {};
-	if (!warned) {
-		warned = true;
-		console.warn(`[rspress-plugin-obsidian] ${FORCE_GRAPH_INSTALL_HINT}`);
-	}
-	return { resolve: { alias: { [FORCE_GRAPH_PACKAGE]: false } } };
+export function createForceGraphBuilderConfig(): (options?: {
+	installed?: boolean;
+}) => BuilderConfig {
+	let warned = false;
+	return (options = {}) => {
+		if (options.installed ?? isForceGraphInstalled()) return {};
+		if (!warned) {
+			warned = true;
+			console.warn(`[rspress-plugin-obsidian] ${FORCE_GRAPH_INSTALL_HINT}`);
+		}
+		return { resolve: { alias: { [FORCE_GRAPH_PACKAGE]: false } } };
+	};
 }

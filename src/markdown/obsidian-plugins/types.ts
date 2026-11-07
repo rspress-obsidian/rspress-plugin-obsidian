@@ -83,9 +83,12 @@ export interface PluginBuildContext {
 	siteBase: string;
 	docs: ContentIndex;
 	vault?: ContentIndex;
-	resolveOptions: NonNullable<ResolveContext["options"]>;
-	/** Published non-Markdown files and their pages, this build's own. */
-	fileRoutes: FileRoutes;
+	/**
+	 * Link resolution as the page pass runs it, always carrying this build's
+	 * `fileRoutes`: the resolver reads them from here, so a feature sets and
+	 * looks up routes on the one object it also resolves with.
+	 */
+	resolveOptions: NonNullable<ResolveContext["options"]> & { fileRoutes: FileRoutes };
 }
 
 /** A page a feature publishes through Rspress's `addPages`. */

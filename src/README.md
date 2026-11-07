@@ -26,6 +26,13 @@ that `shared/` does not reach into a feature, and that only build-time code
 crosses between features — into markdown's content index and resolver, never
 from or into browser code.
 
+`test/architecture.test.ts` enforces what that file cannot see across the whole
+tree: no cycles through value imports (a cycle through `import type` erases
+before the modules run, so it is allowed), every browser file reaches no node
+builtin however deep the graph goes — the historical `link-extractor` regression
+imported one pure function through `content-index.ts` and dragged `node:fs` into
+the client bundle — and `src/markdown` never imports `canvas` or `graph`.
+
 ## Why it is a directory and not a `utils.ts`
 
 The three features were merged into one package, and the utilities that all

@@ -10,8 +10,8 @@ import { moduleDir, resolveRuntimeFile } from "../runtime-paths.js";
 import { findCanvasBoards } from "../shared/canvas-routes.js";
 import { getContentLineFlags } from "../shared/content-flags.js";
 import { createFileRoutes } from "../shared/file-routes.js";
-import { isPublishedProperty, parseFrontmatter } from "../shared/frontmatter.js";
 import type { ContentIndexOptions } from "../shared/index-options.js";
+import { withPluginListed } from "../shared/plugin-channel.js";
 import {
 	attachPublishedContent,
 	type PublishedContentConfig,
@@ -34,7 +34,7 @@ import {
 	mergeBuilderConfigs,
 	type PluginBuildContext,
 } from "./obsidian-plugins/index.js";
-import { isPathInsideRoot, pathUnderRoot } from "./path-containment.js";
+import { pathUnderRoot } from "./path-containment.js";
 import { publicDirectoryPlugin } from "./public-dir.js";
 import { rehypeRawForMdx } from "./rehype-raw-mdx.js";
 import { remarkWikilink } from "./remark-wikilink.js";
@@ -50,6 +50,8 @@ import { syncAssets, vaultFileForSiteUrl } from "./vault-assets.js";
 
 export type { MathEngine } from "../math.js";
 export type { MermaidSecurityLevel } from "../mermaid/classes.js";
+export type { CanvasBoards } from "../shared/canvas-routes.js";
+export type { PublishedFileRoute } from "../shared/file-routes.js";
 export type { ContentIndexOptions } from "../shared/index-options.js";
 export { formatMomentDate as formatDailyNoteDate } from "../shared/moment-format.js";
 export type { BacklinkRef } from "./backlinks.js";
@@ -100,7 +102,7 @@ export type {
 	TemplaterFolderTemplate,
 	TemplaterOptions,
 } from "./obsidian-plugins/templater/options.js";
-export { extractPageLinks, type PageLinks } from "./page-links.js";
+export { extractPageLinks, type PageLinkOptions, type PageLinks } from "./page-links.js";
 export { findWikilinkMatches, parseWikiLink } from "./parse-wikilink.js";
 export { remarkWikilink } from "./remark-wikilink.js";
 export { resolveWikiLink } from "./resolve-wikilink.js";
@@ -111,6 +113,7 @@ export {
 } from "./tag-pages.js";
 export type {
 	BlockEntry,
+	CacheLink,
 	ContentAsset,
 	ContentIndex,
 	ContentPage,
@@ -127,29 +130,10 @@ export type {
 	ResolvedWikiLink,
 	ResolveStatus,
 	RspressPluginMarkdownOptions,
+	WikiLinkCandidate,
 	WikilinkMatch,
 	WikiSubpath,
 } from "./types.js";
-
-/**
- * Whether a page's own frontmatter marks it as not-for-publication.
- *
- * Obsidian reads `publish: false` as "keep this in the vault, don't put it on
- * the site". The vault side of that is handled by the content index; this covers
- * the docs tree, where Rspress would otherwise route the file like any other.
- */
-async function isUnpublishedFile(absolutePath: string): Promise<boolean> {
-	if (!/\.mdx?$/i.test(absolutePath)) return false;
-	try {
-		const markdown = await fs.readFile(absolutePath, "utf8");
-		const { data } = parseFrontmatter(markdown);
-		return !isPublishedProperty(data.publish);
-	} catch {
-		// Unreadable or malformed frontmatter: the page keeps its route, and the
-		// frontmatter pass reports the problem where it always has.
-		return false;
-	}
-}
 
 // Resolved at module load time. Candidates cover the published bundle
 // (`dist/markdown.css`) and the source layout (`src/markdown/styles.css`).
@@ -342,6 +326,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 			? { root: vaultRoot, routePrefix: vaultRoutePrefix, indexOptions: vaultIndexOptions }
 			: undefined,
 		docsIndexOptions: docsIndexOptions(),
+		resolveOptions,
 	});
 
 	// Attachments are staged outside the docs tree and served as an extra
@@ -551,14 +536,7 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		},
 
 		config(siteConfig) {
-			// The graph and canvas find this plugin in `config.plugins`, the only
-			// plugin list a hook sees. A plugin added with `utils.addPlugin` from
-			// another plugin's `config` hook runs without being listed there, so it
-			// lists itself — on a copy, leaving the caller's config untouched.
-			const listed = siteConfig.plugins ?? [];
-			const config = listed.includes(plugin)
-				? siteConfig
-				: { ...siteConfig, plugins: [...listed, plugin] };
+			const config = withPluginListed(siteConfig, plugin);
 			docsRoot = path.resolve(process.cwd(), config.root ?? "docs");
 			sitePlugins = config.plugins;
 			siteBase = `/${(config.base ?? "/").replace(/^\/+|\/+$/g, "")}/`.replace(/\/{2,}/g, "/");
@@ -643,10 +621,12 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 		async routeServiceGenerated(routeService: {
 			routeData: Map<string, { routeMeta?: { absolutePath?: string } }>;
 		}) {
+			const { docs } = await getIndexes().both;
 			for (const [routePath, page] of [...routeService.routeData]) {
 				const absolutePath = page.routeMeta?.absolutePath;
-				if (!absolutePath || !isPathInsideRoot(absolutePath, docsRoot)) continue;
-				if (await isUnpublishedFile(absolutePath)) routeService.routeData.delete(routePath);
+				if (absolutePath && docs.unpublishedPaths.has(absolutePath)) {
+					routeService.routeData.delete(routePath);
+				}
 			}
 		},
 
@@ -671,7 +651,6 @@ export function markdown(options: RspressPluginMarkdownOptions = {}): RspressPlu
 				docs,
 				vault,
 				resolveOptions: { ...resolveOptions, canvasBoards: await canvasBoards(), fileRoutes },
-				fileRoutes,
 			};
 			for (const feature of features) {
 				pages.push(...((await feature.addPages?.(featureContext)) ?? []));

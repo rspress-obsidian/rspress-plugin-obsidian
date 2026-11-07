@@ -109,8 +109,10 @@ describe("frontmatter parsing", () => {
 				expect(page?.title).toBe("YAML Page");
 				expect(page?.aliases).toEqual(["Alt One", "Alt Two"]);
 				expect(page?.tags).toEqual(["alpha"]);
-				// `publish: false` still drops the page from the index entirely.
+				// `publish: false` still drops the page from the index entirely,
+				// and records its path so the route hook can drop the route.
 				expect(index.pages.map((entry) => entry.relativePath)).toEqual(["note.md"]);
+				expect(index.unpublishedPaths).toEqual(new Set([path.join(root, "draft.md")]));
 			},
 		);
 	});

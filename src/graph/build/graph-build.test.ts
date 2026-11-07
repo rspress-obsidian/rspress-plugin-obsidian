@@ -201,6 +201,7 @@ describe("vault publishing", () => {
 			docsRoot,
 			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
 			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
 		};
 		const routes = [
 			...routesFor(docsRoot, docsFiles),
@@ -595,6 +596,7 @@ describe("routes no content index holds", () => {
 			docsRoot,
 			vault: { root: vaultRoot, routePrefix: "/vault", indexOptions: { routePrefix: "/vault" } },
 			docsIndexOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
+			resolveOptions: { enableCaseInsensitiveLookup: true, enableFuzzyMatching: false },
 		};
 		const canvasBoards = createCanvasBoards([
 			{

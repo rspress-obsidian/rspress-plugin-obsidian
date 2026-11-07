@@ -113,7 +113,7 @@ export const basesFeature: ObsidianPluginFeature = {
 	async addPages(ctx) {
 		const prefix = normalizeRoutePrefix(ctx.options.bases.routePrefix, "/bases");
 		const routes = baseRoutes(ctx.vault ? [ctx.vault, ctx.docs] : [ctx.docs], prefix);
-		ctx.fileRoutes.set(KIND, routes);
+		ctx.resolveOptions.fileRoutes.set(KIND, routes);
 		return routes.map((route) => {
 			const title =
 				route.source

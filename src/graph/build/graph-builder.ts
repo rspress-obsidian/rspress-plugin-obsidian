@@ -1,9 +1,9 @@
 import { resolveWikiLink } from "../../markdown/resolve-wikilink.js";
-import { tagRoutePath } from "../../shared/paths.js";
+import { TAG_ROUTE_PREFIX, tagRoutePath } from "../../shared/paths.js";
 import { routeKey } from "../../shared/route-path.js";
 import { normalizeLookupValue } from "../../shared/slug.js";
 import type { GraphData, GraphLink, GraphNode } from "../types.js";
-import { type GraphDocument, safeDecode, TAG_ROUTE_PREFIX } from "./documents.js";
+import { type GraphDocument, safeDecode } from "./documents.js";
 
 export interface GraphBuildOutput {
 	graph: GraphData;

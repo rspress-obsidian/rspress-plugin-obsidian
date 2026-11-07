@@ -219,10 +219,13 @@ async function buildContentIndexFromFiles(
 		markdownFiles.map((file) => buildContentPage(file, options, priorFiles, parsedFiles)),
 	);
 	const pages: ContentPage[] = [];
+	const unpublishedPaths: string[] = [];
 	for (const result of settled) {
 		if (result.status === "fulfilled") {
 			if (result.value.publish) {
 				pages.push(result.value);
+			} else {
+				unpublishedPaths.push(result.value.absolutePath);
 			}
 		} else {
 			console.warn(
@@ -248,7 +251,6 @@ async function buildContentIndexFromFiles(
 	const byTag = new Map<string, ContentPage[]>();
 	const byAssetPath = new Map<string, ContentAsset>();
 	const byAssetBaseName = new Map<string, ContentAsset[]>();
-	const byPathKeyCI = new Map<string, ContentPage[]>();
 	const byFilePathKeyCI = new Map<string, ContentPage[]>();
 	const byBaseNameCI = new Map<string, ContentPage[]>();
 	const byAssetPathCI = new Map<string, ContentAsset[]>();
@@ -259,7 +261,6 @@ async function buildContentIndexFromFiles(
 		byPathKey.set(page.pathKey, page);
 		byFilePathKey.set(page.filePathKey, page);
 
-		pushNamedPage(byPathKeyCI, page.pathKey.toLowerCase(), page);
 		pushNamedPage(byFilePathKeyCI, page.filePathKey.toLowerCase(), page);
 
 		if (page.baseName.length > 0) {
@@ -312,11 +313,11 @@ async function buildContentIndexFromFiles(
 		byTag,
 		byAssetPath,
 		byAssetBaseName,
-		byPathKeyCI,
 		byFilePathKeyCI,
 		byBaseNameCI,
 		byAssetPathCI,
 		byAssetBaseNameCI,
+		unpublishedPaths: new Set(unpublishedPaths),
 		backlinks: new Map<string, BacklinkRef[]>(),
 	};
 	// Backlinks are the outlinks resolved with the resolver every link uses, so

@@ -28,6 +28,12 @@ export function encodeTagPathSegment(tag: string): string {
 	return encoded;
 }
 
+/** The route prefix a published vault is served at when the site picks none. */
+export const DEFAULT_VAULT_ROUTE_PREFIX = "/vault";
+
+/** The path prefix every tag page route starts with. */
+export const TAG_ROUTE_PREFIX = "/tags/";
+
 /**
  * The one route a tag is published at. Obsidian treats `#Project` and
  * `#project` as one tag, so the route is the lowercased, NFC-normalised tag:
@@ -36,7 +42,7 @@ export function encodeTagPathSegment(tag: string): string {
  * no leading `#`.
  */
 export function tagRoutePath(tag: string): string {
-	return `/tags/${encodeTagPathSegment(normalizeUnicode(tag).toLowerCase())}`;
+	return `${TAG_ROUTE_PREFIX}${encodeTagPathSegment(normalizeUnicode(tag).toLowerCase())}`;
 }
 
 /**

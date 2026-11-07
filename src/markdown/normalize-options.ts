@@ -1,10 +1,8 @@
 import path from "node:path";
+import { DEFAULT_VAULT_ROUTE_PREFIX } from "../shared/paths.js";
 import { normalizeRoutePrefix } from "../shared/route-path.js";
 import { normalizeDailyNoteConfig } from "./daily-notes.js";
 import type { NormalizedPluginOptions, RspressPluginMarkdownOptions } from "./types.js";
-
-/** Where vault pages are published when `vaultRoutePrefix` is unset. */
-export const DEFAULT_VAULT_ROUTE_PREFIX = "/vault";
 
 /** Every option with its default applied — the one object each stage reads. */
 export function normalizePluginOptions(
